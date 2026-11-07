@@ -130,36 +130,37 @@ jobs:
         run: |
           ninja -C build/
           
-          # Nombre del paquete e instalación
-          PKG_DIR="Mesa-PanVK-26.3.0-devel-795ca7ff"
-          mkdir -p "$PKG_DIR"
+          # Nombre base unificado para los metadatos y la estructura que espera Winlator
+          PKG_NAME="PanVK-Mali-G52"
+          mkdir -p package_temp
           
-          # Copiar la librería compilada
-          cp build/src/panfrost/vulkan/libvulkan_panfrost.so "$PKG_DIR/"
+          # Copiar la librería compilada a la carpeta temporal
+          cp build/src/panfrost/vulkan/libvulkan_panfrost.so package_temp/
           
           # Calcular SHA256 del binario .so
-          SO_HASH=$(sha256sum "$PKG_DIR/libvulkan_panfrost.so" | awk '{print $1}')
+          SO_HASH=$(sha256sum package_temp/libvulkan_panfrost.so | awk '{print $1}')
           
           # 1. Generar SHA256SUMS.txt
-          echo "$SO_HASH  libvulkan_panfrost.so" > "$PKG_DIR/SHA256SUMS.txt"
+          echo "$SO_HASH  libvulkan_panfrost.so" > package_temp/SHA256SUMS.txt
           
-          # 2. Generar Meta.json
-          cat << EOF > "$PKG_DIR/Meta.json"
+          # 2. Generar Meta.json con los campos normalizados
+          cat << EOF > package_temp/Meta.json
           {
             "schemaVersion": 1,
-            "name": "$PKG_DIR",
-            "description": "Mesa PanVK 26.3.0-devel (git-795ca7ff3e): Vulkan driver for Mali GPUs on the mali_kbase kernel driver, package 26.3.1. Package for bannerlator (com.winlator.banner); see README-bannerlator.txt for the direct-ICD (no wrapper) setting.",
-            "author": "panvk-kbase-android",
-            "packageVersion": "26.3.1",
+            "name": "$PKG_NAME",
+            "description": "PanVK Vulkan driver for Mali-G52 / Unisoc T618 (Bifrost architecture) for Winlator and AdrenoTools.",
+            "author": "Winlator Community / Mesa",
+            "packageVersion": "1.0.0",
             "vendor": "Mesa",
-            "driverVersion": "Mesa 26.3.0-devel (git-795ca7ff3e, p0175, 2026-10-31)",
-            "minApi": 28,
-            "libraryName": "libvulkan_panfrost.so"
+            "driverVersion": "Mesa 26.3.0-devel / PanVK Mali-G52",
+            "minApi": 30,
+            "libraryName": "libvulkan_panfrost.so",
+            "sanitizedArtifactSha256": "$SO_HASH"
           }
           EOF
 
           # 3. Generar Panvk_icd.aarch64.json (Ruta relativa)
-          cat << EOF > "$PKG_DIR/Panvk_icd.aarch64.json"
+          cat << EOF > package_temp/Panvk_icd.aarch64.json
           {
             "file_format_version": "1.0.0",
             "ICD": {
@@ -169,37 +170,32 @@ jobs:
           }
           EOF
 
-          # 4. Generar panvk_icd_abs.aarch64.json (Ruta absoluta de Winlator / bannerlator)
-          cat << EOF > "$PKG_DIR/panvk_icd_abs.aarch64.json"
+          # 4. Generar panvk_icd_abs.aarch64.json (Ruta absoluta compatible con Bannerlator/Winlator)
+          cat << EOF > package_temp/panvk_icd_abs.aarch64.json
           {
             "file_format_version": "1.0.0",
             "ICD": {
-              "library_path": "/data/data/com.winlator.banner/files/contents/adrenotools/$PKG_DIR/libvulkan_panfrost.so",
+              "library_path": "/data/data/com.winlator/files/contents/adrenotools/$PKG_NAME/libvulkan_panfrost.so",
               "api_version": "1.4.363"
             }
           }
           EOF
 
-          # 5. Generar README-bannerlator.txt
-          cat << EOF > "$PKG_DIR/README-bannerlator.txt"
-          Mesa PanVK 26.3.0-devel (git-795ca7ff3e) for bannerlator (com.winlator.banner)
-          Install: Adrenotools GPU Drivers > Install > pick this zip. It installs to
-            /data/data/com.winlator.banner/files/contents/adrenotools/$PKG_DIR/
-          Direct load (no wrapper ICD): container > Environment, add
-            VK_ICD_FILENAMES=/data/data/com.winlator.banner/files/contents/adrenotools/$PKG_DIR/panvk_icd_abs.aarch64.json
-          (container env vars are applied after the app sets the wrapper ICD, so this replaces it).
-          If the X11 present path fails, also add MESA_VK_WSI_DEBUG=sw.
-          Fallback (wrapper in path): leave VK_ICD_FILENAMES unset and pick "$PKG_DIR" as Graphics Driver Version.
-          Check: wine log / logcat shows driverInfo "Mesa 26.3.0-devel (git-795ca7ff3e, p0175, 2026-10-31)"; .so sha256 $SO_HASH
+          # 5. Generar README de referencia
+          cat << EOF > package_temp/README-winlator.txt
+          PanVK Driver for Mali-G52 / Winlator
+          - Install via Adrenotools GPU Drivers.
+          - If direct ICD is required, point VK_ICD_FILENAMES to the absolute JSON path.
+          - SHA256: $SO_HASH
           EOF
 
-          # Empaquetar directamente el contenido en la raíz del ZIP (sin incluir la carpeta contenedora)
-          cd "$PKG_DIR"
-          zip -r "../${PKG_DIR}.zip" .
+          # Comprimir directamente los archivos en la raíz del ZIP (sin carpeta contenedora intermedia)
+          cd package_temp
+          zip -r "../panvk-mali-g52-winlator.zip" .
           cd ..
 
       - name: Upload Winlator Driver Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Mesa-PanVK-26.3.0-devel-795ca7ff
-          path: Mesa-PanVK-26.3.0-devel-795ca7ff.zip
+          name: panvk-mali-g52-winlator
+          path: panvk-mali-g52-winlator.zip
