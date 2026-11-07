@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo add-apt-repository -y universe
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools llvm-20-dev libclang-20-dev libclc-20-dev libllvmspirvlib-20-dev libelf-dev spirv-tools libspirv-tools-dev
+          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools llvm-20-dev libclang-20-dev libclc-20-dev libllvmspirvlib-20-dev libelf-dev spirv-tools
           pip3 install meson mako pyyaml packaging
           
           # Descargar e instalar Android NDK r25c
