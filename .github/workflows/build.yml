@@ -61,7 +61,10 @@ jobs:
 
       - name: Create Cross-File for Bionic/Winlator
         run: |
-          mkdir -p scripts
+          mkdir -p scripts android-drm-headers
+          cp -r /usr/include/libdrm/* android-drm-headers/ 2>/dev/null || true
+          cp /usr/include/xf86drm*.h android-drm-headers/ 2>/dev/null || true
+          
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           cat << EOF > ./scripts/android-aarch64.meson
           [binaries]
@@ -70,6 +73,10 @@ jobs:
           ar = '$NDK_BIN/llvm-ar'
           strip = '$NDK_BIN/llvm-strip'
           pkg-config = 'pkg-config'
+
+          [built-in options]
+          c_args = ['-I$PWD/android-drm-headers']
+          cpp_args = ['-I$PWD/android-drm-headers']
 
           [host_machine]
           system = 'android'
