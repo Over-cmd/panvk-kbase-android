@@ -126,34 +126,32 @@ jobs:
             -Dbuildtype=release \
             -Dwrap_mode=forcefallback
 
-      - name: Compile PanVK Driver & Package Minimal (Only Essential Files)
+      - name: Compile PanVK Driver & Package for Winlator
         run: |
           ninja -C build/
           
-          # Nombre del paquete estándar original compatible con Adrenotools
-          PKG_NAME="Mesa-PanVK-26.3.0-devel-795ca7ff"
-          mkdir -p "$PKG_NAME"
+          # Crear estructura del paquete para Winlator
+          mkdir -p winlator-driver
+          cp build/src/panfrost/vulkan/libvulkan_panfrost.so winlator-driver/
           
-          # 1. Copiar la librería compilada
-          cp build/src/panfrost/vulkan/libvulkan_panfrost.so "$PKG_NAME/"
-          
-          # 2. Generar Meta.json con la estructura original limpia (sin campos extraños)
-          cat << EOF > "$PKG_NAME/Meta.json"
+          # Generar meta.json adaptado para Mali-G52 (Bifrost / Unisoc T618)
+          cat << 'EOF' > winlator-driver/meta.json
           {
             "schemaVersion": 1,
-            "name": "$PKG_NAME",
-            "description": "PanVK Vulkan driver for Mali-G52 / Unisoc T618",
-            "author": "panvk-kbase-android",
-            "packageVersion": "26.3.1",
+            "name": "PanVK Mali-G52",
+            "description": "PanVK Vulkan driver for Mali-G52 / Unisoc T618 (Bifrost architecture) for Winlator and AdrenoTools.",
+            "author": "Winlator Community / Mesa",
+            "packageVersion": "1.0.0",
             "vendor": "Mesa",
-            "driverVersion": "Mesa 26.3.0-devel",
-            "minApi": 28,
-            "libraryName": "libvulkan_panfrost.so"
+            "driverVersion": "Mesa 26.3.0-devel / PanVK Mali-G52",
+            "minApi": 30,
+            "libraryName": "libvulkan_panfrost.so",
+            "sanitizedArtifactSha256": ""
           }
           EOF
-
-          # 3. Generar Panvk_icd.aarch64.json con la ruta relativa exacta
-          cat << EOF > "$PKG_NAME/Panvk_icd.aarch64.json"
+          
+          # Generar Panvk_icd.aarch64.json requerido para el reconocimiento del driver
+          cat << 'EOF' > winlator-driver/Panvk_icd.aarch64.json
           {
             "file_format_version": "1.0.0",
             "ICD": {
@@ -162,10 +160,10 @@ jobs:
             }
           }
           EOF
-
-          # Empaquetar solo estos tres archivos esenciales directamente en la raíz del ZIP
-          cd "$PKG_NAME"
-          zip -r "../panvk-mali-g52-winlator.zip" .
+          
+          # Comprimir en formato zip listo para importar en Winlator
+          cd winlator-driver
+          zip -r ../panvk-mali-g52-winlator.zip *
           cd ..
 
       - name: Upload Winlator Driver Artifact
