@@ -1,4 +1,4 @@
-name: Build PanVK Bifrost (Mali-G52)
+name: Build PanVK for Winlator Bionic
 
 on:
   workflow_dispatch:
@@ -33,19 +33,17 @@ jobs:
         run: |
           ./scripts/apply-patches.sh || true
 
-      - name: Create Correct Android Cross-File
+      - name: Create Cross-File for Bionic/Winlator
         run: |
           mkdir -p scripts
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          CMAKE_BIN="$(which cmake)"
           cat << EOF > ./scripts/android-aarch64.meson
           [binaries]
           c = '$NDK_BIN/aarch64-linux-android30-clang'
           cpp = '$NDK_BIN/aarch64-linux-android30-clang++'
           ar = '$NDK_BIN/llvm-ar'
           strip = '$NDK_BIN/llvm-strip'
-          pkgconfig = 'pkg-config'
-          cmake = '$CMAKE_BIN'
+          pkg-config = 'pkg-config'
 
           [host_machine]
           system = 'android'
@@ -53,15 +51,16 @@ jobs:
           cpu = 'armv8-a'
           endian = 'little'
           EOF
-          echo "Archivo android-aarch64.meson creado correctamente con soporte CMake."
+          echo "Cross-file creado."
 
-      - name: Configure Mesa with Meson (Bifrost / Panfrost)
+      - name: Configure Mesa (Bionic Compatible)
         run: |
           mkdir -p build
           meson setup build/ work/mesa \
             --cross-file ./scripts/android-aarch64.meson \
             -Dplatforms=android \
-            -Dplatform-sdk-version=30 \
+            -Dplatform-sdk-version=28 \
+            -Dandroid-stub=true \
             -Dgallium-drivers=panfrost \
             -Dvulkan-drivers=panfrost \
             -Dbuildtype=release \
@@ -74,7 +73,7 @@ jobs:
       - name: Upload Driver Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: panvk-bifrost-g52-driver
+          name: panvk-winlator-bionic-driver
           path: |
             build/src/panfrost/vulkan/libvulkan_panfrost.so
             build/src/vulkan/libvulkan_panfrost.so
