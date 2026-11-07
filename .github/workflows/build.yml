@@ -193,8 +193,10 @@ jobs:
           Check: wine log / logcat shows driverInfo "Mesa 26.3.0-devel (git-795ca7ff3e, p0175, 2026-10-31)"; .so sha256 $SO_HASH
           EOF
 
-          # Empaquetar todo en un ZIP
-          zip -r "${PKG_DIR}.zip" "$PKG_DIR"
+          # Empaquetar directamente el contenido en la raíz del ZIP (sin incluir la carpeta contenedora)
+          cd "$PKG_DIR"
+          zip -r "../${PKG_DIR}.zip" .
+          cd ..
 
       - name: Upload Winlator Driver Artifact
         uses: actions/upload-artifact@v4
