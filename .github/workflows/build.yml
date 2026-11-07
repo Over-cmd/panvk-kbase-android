@@ -96,6 +96,7 @@ jobs:
             -Dllvm=disabled \
             -Dmesa-clc=system \
             -Dprecomp-compiler=system \
+            -Dzstd=disabled \
             -Dbuildtype=release \
             -Dwrap_mode=forcefallback
 
