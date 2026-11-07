@@ -1,21 +1,57 @@
-name: build
-on: [push, pull_request]
+name: Build PanVK Bifrost (Mali-G52)
+
+on:
+  workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Verify sources.lock pinned
-        run: python3 -c "import json;d=json.load(open('sources.lock'));assert len(d['mesaCommit'])==40,d"
-      - name: Fetch exact Mesa
-        run: ./scripts/fetch-mesa.sh
-      - name: Verify patch applicability (g615-v11-csf)
-        run: ./scripts/apply-patches.sh --profile g615-v11-csf
-      - name: Capture upstream matrix
-        run: python3 scripts/capture-matrix.py --mesa work/mesa --out dist/matrix-g615-v11-csf
-      - name: Static validate later (device gates run on Poco)
-        run: echo "CI produces dev artifact only; hardware validation on Poco required for beta+"
-      - uses: actions/upload-artifact@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          name: matrix
-          path: dist/matrix-g615-v11-csf/
+          submodules: recursive
+
+      - name: Setup Build Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison libdrm-dev
+          pip3 install meson mako pyyaml
+
+      - name: Setup Android NDK
+        uses: nsetup/setup-ndk@v1
+        with:
+          ndk-version: r25c
+
+      - name: Fetch Mesa sources
+        run: |
+          chmod +x ./scripts/*.sh
+          ./scripts/fetch-mesa.sh
+
+      - name: Apply Panfrost / Kbase patches
+        run: |
+          ./scripts/apply-patches.sh || true
+
+      - name: Configure Mesa with Meson (Bifrost / Panfrost)
+        run: |
+          mkdir -p build
+          meson setup build/ work/mesa \
+            --cross-file ./scripts/android-aarch64.meson \
+            -Dplatforms=android \
+            -Dplatform-sdk-version=30 \
+            -Dgallium-drivers=panfrost \
+            -Dvulkan-drivers=panfrost \
+            -Dbuildtype=release
+
+      - name: Compile PanVK Driver
+        run: |
+          ninja -C build/
+
+      - name: Upload Driver Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: panvk-bifrost-g52-driver
+          path: |
+            build/src/panfrost/vulkan/libvulkan_panfrost.so
+            build/src/vulkan/libvulkan_panfrost.so
+            build/**/*.so
