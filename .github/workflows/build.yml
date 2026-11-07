@@ -12,16 +12,17 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Build Environment
+      - name: Setup Build Environment & Android NDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison libdrm-dev
+          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison libdrm-dev wget unzip
           pip3 install meson mako pyyaml
-
-      - name: Setup Android NDK
-        uses: nsetup/setup-ndk@v1
-        with:
-          ndk-version: r25c
+          
+          # Descargar e instalar Android NDK r25c de forma manual y confiable
+          echo "Descargando Android NDK..."
+          wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+          unzip -q android-ndk-r25c-linux.zip
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r25c" >> $GITHUB_ENV
 
       - name: Fetch Mesa sources
         run: |
