@@ -31,7 +31,6 @@ jobs:
 
       - name: Apply Bifrost / PanVK Patches
         run: |
-          # Si tu repositorio usa un script de perfiles o parches específicos para Bifrost, colócalo aquí.
           ./scripts/apply-patches.sh || true
 
       - name: Generate Host Tools (Mesa Clc & Panfrost Compiler)
@@ -55,7 +54,7 @@ jobs:
           ln -sf "$PWD/build-host/src/compiler/clc/mesa_clc" host-bins/mesa_clc
           ln -sf "$PWD/build-host/src/compiler/spirv/vtn_bindgen2" host-bins/vtn_bindgen2
           ln -sf "$PWD/build-host/src/compiler/clc/mesa_clc" host-bins/mesa-clc
-          ln -sf "$PWD/build-host/src/compiler/spirv/vtn_bindgen2" host-bins/vtn_bindgen2
+          ln -sf "$PWD/build-host/src/compiler/spirv/vtn_bindgen2" host-bins/vtn-bindgen2
           ln -sf "$PWD/build-host/src/panfrost/clc/panfrost_compile" host-bins/panfrost_compile
           
           echo "$PWD/host-bins" >> $GITHUB_PATH
@@ -87,8 +86,14 @@ jobs:
             -Dplatforms=android \
             -Dplatform-sdk-version=28 \
             -Dandroid-stub=true \
-            -Dgallium-drivers=panfrost \
+            -Dgallium-drivers= \
             -Dvulkan-drivers=panfrost \
+            -Dpanfrost-kmds=kbase \
+            -Degl=disabled \
+            -Dopengl=false \
+            -Dgles1=disabled \
+            -Dgles2=disabled \
+            -Dglvnd=disabled \
             -Dllvm=disabled \
             -Dmesa-clc=system \
             -Dprecomp-compiler=system \
