@@ -88,7 +88,6 @@ jobs:
             -Dandroid-stub=true \
             -Dgallium-drivers= \
             -Dvulkan-drivers=panfrost \
-            -Dpanfrost-kmds=kbase \
             -Degl=disabled \
             -Dopengl=false \
             -Dgles1=disabled \
