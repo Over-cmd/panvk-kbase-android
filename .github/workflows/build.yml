@@ -90,7 +90,6 @@ jobs:
             --cross-file ./scripts/android-aarch64.meson \
             --prefix=$PWD/android-drm-installed \
             -Dintel=disabled \
-            -Deventing=false \
             -Dradeon=disabled \
             -Damdgpu=disabled \
             -Dnouveau=disabled \
