@@ -15,7 +15,7 @@ jobs:
       - name: Setup Build Environment & Android NDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools llvm-20-dev libclang-20-dev libclc-20-dev libllvmspirvlib-20-dev libelf-dev spirv-tools
+          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools llvm-20-dev libclang-20-dev libclc-20-dev libllvmspirvlib-20-dev libelf-dev spirv-tools libspirv-tools-dev
           pip3 install meson mako pyyaml packaging
           
           # Descargar e instalar Android NDK r25c
@@ -61,9 +61,10 @@ jobs:
 
       - name: Create Cross-File for Bionic/Winlator
         run: |
-          mkdir -p scripts android-drm-headers
+          mkdir -p scripts android-drm-headers android-spirv-headers/spirv-tools
           cp -r /usr/include/libdrm/* android-drm-headers/ 2>/dev/null || true
           cp /usr/include/xf86drm*.h android-drm-headers/ 2>/dev/null || true
+          cp -r /usr/include/spirv-tools/* android-spirv-headers/spirv-tools/ 2>/dev/null || true
           
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           cat << EOF > ./scripts/android-aarch64.meson
@@ -75,8 +76,8 @@ jobs:
           pkg-config = 'pkg-config'
 
           [built-in options]
-          c_args = ['-I$PWD/android-drm-headers']
-          cpp_args = ['-I$PWD/android-drm-headers']
+          c_args = ['-I$PWD/android-drm-headers', '-I$PWD/android-spirv-headers']
+          cpp_args = ['-I$PWD/android-drm-headers', '-I$PWD/android-spirv-headers']
 
           [host_machine]
           system = 'android'
