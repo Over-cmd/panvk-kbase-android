@@ -15,7 +15,7 @@ jobs:
       - name: Setup Build Environment & Android NDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools
+          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools llvm-dev clang libclang-dev libclc-dev
           pip3 install meson mako pyyaml
           
           # Descargar e instalar Android NDK r25c
@@ -63,8 +63,8 @@ jobs:
             -Dandroid-stub=true \
             -Dgallium-drivers=panfrost \
             -Dvulkan-drivers=panfrost \
-            -Dllvm=disabled \
-            -Dmicrosoft-clc=disabled \
+            -Dllvm=enabled \
+            -Dgallium-va=disabled \
             -Dbuildtype=release \
             -Dwrap_mode=forcefallback
 
