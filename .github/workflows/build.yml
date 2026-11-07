@@ -65,7 +65,7 @@ jobs:
             -Dvulkan-drivers=panfrost \
             -Dllvm=disabled \
             -Dmicrosoft-clc=disabled \
-            -Dgallium-va=disabled \
+            -Drusticl=false \
             -Dbuildtype=release \
             -Dwrap_mode=forcefallback
 
