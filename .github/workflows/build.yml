@@ -96,7 +96,7 @@ jobs:
             -Dvmwgfx=disabled \
             -Domap=disabled \
             -Dexynos=disabled \
-            -Dtegra=false \
+            -Dtegra=disabled \
             -Detnaviv=disabled \
             -Dinstall-test-programs=false \
             -Dbuildtype=release
