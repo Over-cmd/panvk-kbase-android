@@ -126,15 +126,37 @@ jobs:
             -Dbuildtype=release \
             -Dwrap_mode=forcefallback
 
-      - name: Compile PanVK Driver
+      - name: Compile PanVK Driver & Package for Winlator
         run: |
           ninja -C build/
+          
+          # Crear estructura del paquete para Winlator
+          mkdir -p winlator-driver
+          cp build/src/panfrost/vulkan/libvulkan_panfrost.so winlator-driver/
+          
+          # Generar meta.json adaptado para Mali-G52 (Bifrost / Unisoc T618)
+          cat << 'EOF' > winlator-driver/meta.json
+          {
+            "schemaVersion": 1,
+            "name": "PanVK Mali-G52",
+            "description": "PanVK Vulkan driver for Mali-G52 / Unisoc T618 (Bifrost architecture) for Winlator and AdrenoTools.",
+            "author": "Winlator Community / Mesa",
+            "packageVersion": "1.0.0",
+            "vendor": "Mesa",
+            "driverVersion": "Mesa 26.3.0-devel / PanVK Mali-G52",
+            "minApi": 30,
+            "libraryName": "libvulkan_panfrost.so",
+            "sanitizedArtifactSha256": ""
+          }
+          EOF
+          
+          # Comprimir en formato zip listo para importar en Winlator
+          cd winlator-driver
+          zip -r ../panvk-mali-g52-winlator.zip *
+          cd ..
 
-      - name: Upload Driver Artifacts
+      - name: Upload Winlator Driver Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: panvk-mali-g52-bionic-driver
-          path: |
-            build/src/panfrost/vulkan/libvulkan_panfrost.so
-            build/src/vulkan/libvulkan_panfrost.so
-            build/**/*.so
+          name: panvk-mali-g52-winlator
+          path: panvk-mali-g52-winlator.zip
