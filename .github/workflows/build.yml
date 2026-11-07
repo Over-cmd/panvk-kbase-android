@@ -68,12 +68,10 @@ jobs:
           cp /usr/include/xf86drm*.h android-drm-headers/ 2>/dev/null || true
           cp -r /usr/include/spirv-tools/* android-spirv-headers/spirv-tools/ 2>/dev/null || true
           
-          # Crear un archivo pc simulado para libdrm en shims
           cat << EOF > shims/libdrm.pc
-          prefix=$PWD/android-drm-headers
-          exec_prefix=\${prefix}
-          libdir=\${prefix}
-          includedir=\${prefix}
+          prefix=/usr
+          libdir=/usr/lib
+          includedir=$PWD/android-drm-headers
 
           Name: libdrm
           Description: Userspace interface to kernel DRM services
