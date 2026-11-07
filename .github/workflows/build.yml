@@ -68,6 +68,20 @@ jobs:
           cp /usr/include/xf86drm*.h android-drm-headers/ 2>/dev/null || true
           cp -r /usr/include/spirv-tools/* android-spirv-headers/spirv-tools/ 2>/dev/null || true
           
+          # Crear un archivo pc simulado para libdrm en shims
+          cat << EOF > shims/libdrm.pc
+          prefix=$PWD/android-drm-headers
+          exec_prefix=\${prefix}
+          libdir=\${prefix}
+          includedir=\${prefix}
+
+          Name: libdrm
+          Description: Userspace interface to kernel DRM services
+          Version: 2.4.120
+          Cflags: -I\${includedir}
+          Libs:
+          EOF
+
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           cat << EOF > ./scripts/android-aarch64.meson
           [binaries]
