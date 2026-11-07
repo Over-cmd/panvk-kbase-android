@@ -25,10 +25,11 @@ jobs:
           unzip -q android-ndk-r25c-linux.zip
           echo "ANDROID_NDK_HOME=$PWD/android-ndk-r25c" >> $GITHUB_ENV
 
-      - name: Fetch Mesa sources
+      - name: Fetch Mesa sources & libdrm
         run: |
           chmod +x ./scripts/*.sh
           ./scripts/fetch-mesa.sh
+          git clone --depth 1 https://gitlab.freedesktop.org/mesa/drm.git work/libdrm
 
       - name: Apply Bifrost / PanVK Patches & Fix Format Specifier
         run: |
@@ -61,25 +62,11 @@ jobs:
           
           echo "$PWD/host-bins" >> $GITHUB_PATH
 
-      - name: Create Cross-File and Shims for Bionic/Winlator
+      - name: Create Cross-File for Bionic/Winlator
         run: |
-          mkdir -p scripts shims android-drm-headers android-spirv-headers/spirv-tools
-          cp -r /usr/include/libdrm/* android-drm-headers/ 2>/dev/null || true
-          cp /usr/include/xf86drm*.h android-drm-headers/ 2>/dev/null || true
+          mkdir -p scripts android-spirv-headers/spirv-tools
           cp -r /usr/include/spirv-tools/* android-spirv-headers/spirv-tools/ 2>/dev/null || true
           
-          cat << EOF > shims/libdrm.pc
-          prefix=/usr
-          libdir=/usr/lib
-          includedir=$PWD/android-drm-headers
-
-          Name: libdrm
-          Description: Userspace interface to kernel DRM services
-          Version: 2.4.120
-          Cflags: -I\${includedir}
-          Libs:
-          EOF
-
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           cat << EOF > ./scripts/android-aarch64.meson
           [binaries]
@@ -89,10 +76,6 @@ jobs:
           strip = '$NDK_BIN/llvm-strip'
           pkg-config = 'pkg-config'
 
-          [built-in options]
-          c_args = ['-I$PWD/android-drm-headers', '-I$PWD/android-spirv-headers']
-          cpp_args = ['-I$PWD/android-drm-headers', '-I$PWD/android-spirv-headers']
-
           [host_machine]
           system = 'android'
           cpu_family = 'aarch64'
@@ -100,9 +83,32 @@ jobs:
           endian = 'little'
           EOF
 
+      - name: Build libdrm for Android
+        run: |
+          mkdir -p build-libdrm android-drm-installed
+          meson setup build-libdrm work/libdrm \
+            --cross-file ./scripts/android-aarch64.meson \
+            --prefix=$PWD/android-drm-installed \
+            -Dlibkms=disabled \
+            -Dintel=disabled \
+            -Deventing=false \
+            -Dradeon=disabled \
+            -Damdgpu=disabled \
+            -Dnouveau=disabled \
+            -Dvmwgfx=disabled \
+            -Daoe=disabled \
+            -Domap=disabled \
+            -Dexynos=disabled \
+            -Dfreedreno=disabled \
+            -Dtegra=false \
+            -Detnaviv=disabled \
+            -Dinstall-test-programs=false \
+            -Dbuildtype=release
+          ninja -C build-libdrm install
+
       - name: Configure Mesa for Android Cross-Compile
         env:
-          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/shims
+          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/android-drm-installed/lib/pkgconfig:${{ github.workspace }}/android-drm-installed/share/pkgconfig
         run: |
           mkdir -p build
           meson setup build/ work/mesa \
