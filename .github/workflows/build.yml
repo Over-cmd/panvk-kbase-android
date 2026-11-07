@@ -30,9 +30,11 @@ jobs:
           chmod +x ./scripts/*.sh
           ./scripts/fetch-mesa.sh
 
-      - name: Apply Bifrost / PanVK Patches
+      - name: Apply Bifrost / PanVK Patches & Fix Format Specifier
         run: |
           ./scripts/apply-patches.sh || true
+          # Reemplazar el especificador %b no soportado por %#x en vk_android.c
+          sed -i 's/%#b/%#x/g' work/mesa/src/vulkan/runtime/vk_android.c
 
       - name: Generate Host Tools (Mesa Clc & Panfrost Compiler)
         run: |
