@@ -15,7 +15,7 @@ jobs:
       - name: Setup Build Environment & Android NDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config libdrm-dev libglvnd-dev glslang-tools
+          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools
           pip3 install meson mako pyyaml
           
           # Descargar e instalar Android NDK r25c
@@ -37,6 +37,7 @@ jobs:
         run: |
           mkdir -p scripts
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          CMAKE_BIN="$(which cmake)"
           cat << EOF > ./scripts/android-aarch64.meson
           [binaries]
           c = '$NDK_BIN/aarch64-linux-android30-clang'
@@ -44,6 +45,7 @@ jobs:
           ar = '$NDK_BIN/llvm-ar'
           strip = '$NDK_BIN/llvm-strip'
           pkgconfig = 'pkg-config'
+          cmake = '$CMAKE_BIN'
 
           [host_machine]
           system = 'android'
@@ -51,7 +53,7 @@ jobs:
           cpu = 'armv8-a'
           endian = 'little'
           EOF
-          echo "Archivo android-aarch64.meson creado correctamente."
+          echo "Archivo android-aarch64.meson creado correctamente con soporte CMake."
 
       - name: Configure Mesa with Meson (Bifrost / Panfrost)
         run: |
