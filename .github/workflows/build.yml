@@ -15,7 +15,7 @@ jobs:
       - name: Setup Build Environment & Android NDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison libdrm-dev wget unzip
+          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git
           pip3 install meson mako pyyaml
           
           # Descargar e instalar Android NDK r25c
@@ -33,7 +33,7 @@ jobs:
         run: |
           ./scripts/apply-patches.sh || true
 
-      - name: Create Missing Android Cross-File
+      - name: Create Correct Android Cross-File
         run: |
           mkdir -p scripts
           NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -43,7 +43,7 @@ jobs:
           cpp = '$NDK_BIN/aarch64-linux-android30-clang++'
           ar = '$NDK_BIN/llvm-ar'
           strip = '$NDK_BIN/llvm-strip'
-          pkgconfig = ''
+          pkgconfig = 'pkg-config'
 
           [host_machine]
           system = 'android'
@@ -62,7 +62,8 @@ jobs:
             -Dplatform-sdk-version=30 \
             -Dgallium-drivers=panfrost \
             -Dvulkan-drivers=panfrost \
-            -Dbuildtype=release
+            -Dbuildtype=release \
+            -Dwrap_mode=forcefallback
 
       - name: Compile PanVK Driver
         run: |
