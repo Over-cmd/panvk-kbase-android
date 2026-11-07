@@ -94,7 +94,6 @@ jobs:
             -Damdgpu=disabled \
             -Dnouveau=disabled \
             -Dvmwgfx=disabled \
-            -Daoe=disabled \
             -Domap=disabled \
             -Dexynos=disabled \
             -Dfreedreno=disabled \
