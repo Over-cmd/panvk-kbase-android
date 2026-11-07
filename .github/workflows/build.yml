@@ -89,7 +89,6 @@ jobs:
           meson setup build-libdrm work/libdrm \
             --cross-file ./scripts/android-aarch64.meson \
             --prefix=$PWD/android-drm-installed \
-            -Dlibkms=disabled \
             -Dintel=disabled \
             -Deventing=false \
             -Dradeon=disabled \
