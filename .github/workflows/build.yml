@@ -15,7 +15,7 @@ jobs:
       - name: Setup Build Environment & Android NDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git
+          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config libdrm-dev libglvnd-dev glslang-tools
           pip3 install meson mako pyyaml
           
           # Descargar e instalar Android NDK r25c
