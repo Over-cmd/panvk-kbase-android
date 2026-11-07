@@ -33,7 +33,6 @@ jobs:
       - name: Apply Bifrost / PanVK Patches & Fix Format Specifier
         run: |
           ./scripts/apply-patches.sh || true
-          # Reemplazar el especificador %b no soportado por %#x en vk_android.c
           sed -i 's/%#b/%#x/g' work/mesa/src/vulkan/runtime/vk_android.c
 
       - name: Generate Host Tools (Mesa Clc & Panfrost Compiler)
@@ -62,9 +61,9 @@ jobs:
           
           echo "$PWD/host-bins" >> $GITHUB_PATH
 
-      - name: Create Cross-File for Bionic/Winlator
+      - name: Create Cross-File and Shims for Bionic/Winlator
         run: |
-          mkdir -p scripts android-drm-headers android-spirv-headers/spirv-tools
+          mkdir -p scripts shims android-drm-headers android-spirv-headers/spirv-tools
           cp -r /usr/include/libdrm/* android-drm-headers/ 2>/dev/null || true
           cp /usr/include/xf86drm*.h android-drm-headers/ 2>/dev/null || true
           cp -r /usr/include/spirv-tools/* android-spirv-headers/spirv-tools/ 2>/dev/null || true
@@ -90,6 +89,8 @@ jobs:
           EOF
 
       - name: Configure Mesa for Android Cross-Compile
+        env:
+          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/shims
         run: |
           mkdir -p build
           meson setup build/ work/mesa \
