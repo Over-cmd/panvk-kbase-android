@@ -1,4 +1,4 @@
-name: Build PanVK for Winlator Bionic
+name: Build PanVK Mali-G52 for Winlator Bionic
 
 on:
   workflow_dispatch:
@@ -15,8 +15,8 @@ jobs:
       - name: Setup Build Environment & Android NDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools llvm-dev clang libclang-dev libclc-dev
-          pip3 install meson mako pyyaml
+          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools llvm-20-dev libclang-20-dev libclc-20-dev libllvmspirvlib-20-dev libelf-dev spirv-tools
+          pip3 install meson mako pyyaml packaging
           
           # Descargar e instalar Android NDK r25c
           echo "Descargando Android NDK..."
@@ -29,9 +29,36 @@ jobs:
           chmod +x ./scripts/*.sh
           ./scripts/fetch-mesa.sh
 
-      - name: Apply Panfrost / Kbase patches
+      - name: Apply Bifrost / PanVK Patches
         run: |
+          # Si tu repositorio usa un script de perfiles o parches específicos para Bifrost, colócalo aquí.
           ./scripts/apply-patches.sh || true
+
+      - name: Generate Host Tools (Mesa Clc & Panfrost Compiler)
+        run: |
+          meson setup build-host work/mesa \
+            -Dbuildtype=release \
+            -Db_ndebug=true \
+            -Dplatforms=[] \
+            -Dgallium-drivers=[] \
+            -Dvulkan-drivers=[] \
+            -Dtools=panfrost \
+            -Dprecomp-compiler=enabled \
+            -Dinstall-precomp-compiler=true \
+            -Dllvm=enabled \
+            -Dmesa-clc=enabled \
+            -Dinstall-mesa-clc=true
+          
+          ninja -C build-host src/compiler/clc/mesa_clc src/compiler/spirv/vtn_bindgen2 src/panfrost/clc/panfrost_compile
+          
+          mkdir -p host-bins
+          ln -sf "$PWD/build-host/src/compiler/clc/mesa_clc" host-bins/mesa_clc
+          ln -sf "$PWD/build-host/src/compiler/spirv/vtn_bindgen2" host-bins/vtn_bindgen2
+          ln -sf "$PWD/build-host/src/compiler/clc/mesa_clc" host-bins/mesa-clc
+          ln -sf "$PWD/build-host/src/compiler/spirv/vtn_bindgen2" host-bins/vtn_bindgen2
+          ln -sf "$PWD/build-host/src/panfrost/clc/panfrost_compile" host-bins/panfrost_compile
+          
+          echo "$PWD/host-bins" >> $GITHUB_PATH
 
       - name: Create Cross-File for Bionic/Winlator
         run: |
@@ -51,9 +78,8 @@ jobs:
           cpu = 'armv8-a'
           endian = 'little'
           EOF
-          echo "Cross-file creado."
 
-      - name: Configure Mesa (Bionic Compatible)
+      - name: Configure Mesa for Android Cross-Compile
         run: |
           mkdir -p build
           meson setup build/ work/mesa \
@@ -63,8 +89,9 @@ jobs:
             -Dandroid-stub=true \
             -Dgallium-drivers=panfrost \
             -Dvulkan-drivers=panfrost \
-            -Dllvm=enabled \
-            -Dgallium-va=disabled \
+            -Dllvm=disabled \
+            -Dmesa-clc=system \
+            -Dprecomp-compiler=system \
             -Dbuildtype=release \
             -Dwrap_mode=forcefallback
 
@@ -75,7 +102,7 @@ jobs:
       - name: Upload Driver Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: panvk-winlator-bionic-driver
+          name: panvk-mali-g52-bionic-driver
           path: |
             build/src/panfrost/vulkan/libvulkan_panfrost.so
             build/src/vulkan/libvulkan_panfrost.so
