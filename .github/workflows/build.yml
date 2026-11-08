@@ -130,7 +130,7 @@ jobs:
         run: |
           ninja -C build/
           
-          # Crear estructura del paquete para Winlator
+          # Crear estructura temporal del paquete
           mkdir -p winlator-driver
           cp build/src/panfrost/vulkan/libvulkan_panfrost.so winlator-driver/
           
@@ -161,9 +161,9 @@ jobs:
           }
           EOF
           
-          # Comprimir en formato zip listo para importar en Winlator
+          # Comprimir el contenido directamente en la raíz del ZIP (sin carpeta contenedora intermedia)
           cd winlator-driver
-          zip -r ../panvk-mali-g52-winlator.zip *
+          zip -r ../panvk-mali-g52-winlator.zip .
           cd ..
 
       - name: Upload Winlator Driver Artifact
