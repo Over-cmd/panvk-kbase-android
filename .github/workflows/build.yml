@@ -33,6 +33,15 @@ jobs:
 
       - name: Apply Bifrost / PanVK Patches & Fix Format Specifier
         run: |
+          # Aplicar parches locales si existen en el repositorio
+          if [ -d "./patches" ]; then
+            for p in ./patches/*.patch; do
+              if [ -f "$p" ]; then
+                echo "Aplicando parche: $p"
+                git -C work/mesa apply --whitespace=fix "$p" || git -C work/mesa am "$p" || true
+              fi
+            done
+          fi
           ./scripts/apply-patches.sh || true
           sed -i 's/%#b/%#x/g' work/mesa/src/vulkan/runtime/vk_android.c
 
