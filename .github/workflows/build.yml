@@ -1,51 +1,76 @@
-name: Build PanVK Mali-G52 for Winlator Bionic
+name: Build PanVK Mali-G52
 
 on:
-  workflow_dispatch:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+env:
+  # Versión del paquete; también se muestra como el nombre del controlador en DXVK HUD / MangoHud.
+  PANVK_RELEASE: "0.0.2-alpha-G52"
 
 jobs:
-  build:
+  build-panvk-android:
+    name: Build PanVK G52 (${{ matrix.flavor }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        flavor: [adrenotools, x11]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          submodules: recursive
+          python-version: "3.11"
 
-      - name: Setup Build Environment & Android NDK
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
         run: |
-          sudo add-apt-repository -y universe
-          sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools ninja-build flex bison wget unzip git pkg-config cmake libdrm-dev libglvnd-dev glslang-tools llvm-20-dev libclang-20-dev libclc-20-dev libllvmspirvlib-20-dev libelf-dev spirv-tools zip
-          pip3 install meson mako pyyaml packaging
-          
-          # Descargar e instalar Android NDK r25c
-          echo "Descargando Android NDK..."
-          wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
-          unzip -q android-ndk-r25c-linux.zip
-          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r25c" >> $GITHUB_ENV
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold" \
+            build-essential \
+            llvm-20-dev \
+            libclang-20-dev \
+            libclc-20-dev \
+            libllvmspirvlib-20-dev \
+            libelf-dev \
+            spirv-tools \
+            bison \
+            flex \
+            libdrm-dev \
+            pkg-config \
+            gettext
+          python -m pip install --upgrade pip
+          pip install mako PyYAML meson ninja packaging
 
-      - name: Fetch Mesa sources & libdrm
+      - name: Verify sources.lock
         run: |
-          chmod +x ./scripts/*.sh
-          ./scripts/fetch-mesa.sh
-          git clone --depth 1 https://gitlab.freedesktop.org/mesa/drm.git work/libdrm
+          python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
 
-      - name: Apply Bifrost / PanVK Patches & Fix Format Specifier
+      - name: Fetch pinned Mesa
+        run: ./scripts/fetch-mesa.sh
+
+      - name: Apply PanVK G52 patches
+        # Ajusta el argumento --profile según los perfiles que defina tu script apply-patches.sh
+        run: ./scripts/apply-patches.sh --profile g52-bifrost-jm
+
+      - name: Stamp driver version
+        # driverInfo (DXVK HUD, MangoHud, vulkaninfo) muestra esta versión.
         run: |
-          # Aplicar parches locales si existen en el repositorio
-          if [ -d "./patches" ]; then
-            for p in ./patches/*.patch; do
-              if [ -f "$p" ]; then
-                echo "Aplicando parche: $p"
-                git -C work/mesa apply --whitespace=fix "$p" || git -C work/mesa am "$p" || true
-              fi
-            done
-          fi
-          ./scripts/apply-patches.sh || true
-          sed -i 's/%#b/%#x/g' work/mesa/src/vulkan/runtime/vk_android.c
+          f="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
+          sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$f"
+          grep -q "^#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"" "$f"
+          sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$f"
+          grep -q '"PanVK G52 " PANVK_KBASE_RELEASE' "$f"
 
-      - name: Generate Host Tools (Mesa Clc & Panfrost Compiler)
+      - name: Build host tools
         run: |
           meson setup build-host work/mesa \
             -Dbuildtype=release \
@@ -59,151 +84,82 @@ jobs:
             -Dllvm=enabled \
             -Dmesa-clc=enabled \
             -Dinstall-mesa-clc=true
-          
-          ninja -C build-host src/compiler/clc/mesa_clc src/compiler/spirv/vtn_bindgen2 src/panfrost/clc/panfrost_compile
-          
-          mkdir -p host-bins
-          ln -sf "$PWD/build-host/src/compiler/clc/mesa_clc" host-bins/mesa_clc
-          ln -sf "$PWD/build-host/src/compiler/spirv/vtn_bindgen2" host-bins/vtn_bindgen2
-          ln -sf "$PWD/build-host/src/compiler/clc/mesa_clc" host-bins/mesa-clc
-          ln -sf "$PWD/build-host/src/compiler/spirv/vtn_bindgen2" host-bins/vtn-bindgen2
-          ln -sf "$PWD/build-host/src/panfrost/clc/panfrost_compile" host-bins/panfrost_compile
-          
-          echo "$PWD/host-bins" >> $GITHUB_PATH
+          ninja -C build-host \
+            src/compiler/clc/mesa_clc \
+            src/compiler/spirv/vtn_bindgen2 \
+            src/panfrost/clc/panfrost_compile
+          ln -sf "$GITHUB_WORKSPACE/build-host/src/compiler/clc/mesa_clc" "$GITHUB_WORKSPACE/build-host/src/compiler/clc/mesa-clc"
+          ln -sf "$GITHUB_WORKSPACE/build-host/src/compiler/spirv/vtn_bindgen2" "$GITHUB_WORKSPACE/build-host/src/compiler/spirv/vtn-bindgen2"
+          echo "$GITHUB_WORKSPACE/build-host/src/compiler/clc" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/build-host/src/compiler/spirv" >> $GITHUB_PATH
+          echo "$GITHUB_WORKSPACE/build-host/src/panfrost/clc" >> $GITHUB_PATH
 
-      - name: Create Cross-File for Bionic/Winlator
-        run: |
-          mkdir -p scripts android-spirv-headers/spirv-tools
-          cp -r /usr/include/spirv-tools/* android-spirv-headers/spirv-tools/ 2>/dev/null || true
-          
-          NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          cat << EOF > ./scripts/android-aarch64.meson
-          [binaries]
-          c = '$NDK_BIN/aarch64-linux-android30-clang'
-          cpp = '$NDK_BIN/aarch64-linux-android30-clang++'
-          ar = '$NDK_BIN/llvm-ar'
-          strip = '$NDK_BIN/llvm-strip'
-          pkg-config = 'pkg-config'
-
-          [host_machine]
-          system = 'android'
-          cpu_family = 'aarch64'
-          cpu = 'armv8-a'
-          endian = 'little'
-          EOF
-
-      - name: Build libdrm for Android
-        run: |
-          mkdir -p build-libdrm android-drm-installed
-          meson setup build-libdrm work/libdrm \
-            --cross-file ./scripts/android-aarch64.meson \
-            --prefix=$PWD/android-drm-installed \
-            -Dintel=disabled \
-            -Dradeon=disabled \
-            -Damdgpu=disabled \
-            -Dnouveau=disabled \
-            -Dvmwgfx=disabled \
-            -Domap=disabled \
-            -Dexynos=disabled \
-            -Dtegra=disabled \
-            -Detnaviv=disabled \
-            -Dinstall-test-programs=false \
-            -Dbuildtype=release
-          ninja -C build-libdrm install
-
-      - name: Configure Mesa for Android Cross-Compile
+      - name: Configure Meson for PanVK G52
         env:
-          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/android-drm-installed/lib/pkgconfig:${{ github.workspace }}/android-drm-installed/share/pkgconfig
+          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/shims
         run: |
-          mkdir -p build
-          meson setup build/ work/mesa \
-            --cross-file ./scripts/android-aarch64.meson \
-            -Dplatforms=android \
-            -Dplatform-sdk-version=28 \
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          export MESON_WORKING_DIR="$GITHUB_WORKSPACE"
+          CLANG_DIR="$(ls -d $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
+          if [ -z "$CLANG_DIR" ]; then
+            CLANG_DIR="$(ls -d $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
+          fi
+          export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
+          echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
+          envsubst < android.toml > android-cross.txt
+          cat android-cross.txt
+
+          PLATFORMS="android"
+          if [ "${{ matrix.flavor }}" = "x11" ]; then
+            PLATFORMS="android,x11"
+          fi
+
+          meson setup build work/mesa \
+            --cross-file android-cross.txt \
+            -Dbuildtype=release \
+            -Dplatforms=$PLATFORMS \
             -Dandroid-stub=true \
-            -Dgallium-drivers= \
-            -Dvulkan-drivers=panfrost \
+            -Dandroid-strict=false \
+            -Dandroid-libbacktrace=disabled \
+            -Dplatform-sdk-version=30 \
+            -Dglx=disabled \
+            -Dgbm=disabled \
             -Degl=disabled \
             -Dopengl=false \
             -Dgles1=disabled \
             -Dgles2=disabled \
             -Dglvnd=disabled \
-            -Dllvm=disabled \
+            -Dvalgrind=disabled \
+            -Dgallium-drivers= \
+            -Dshared-glapi=disabled \
+            -Dzstd=disabled \
             -Dmesa-clc=system \
             -Dprecomp-compiler=system \
-            -Dzstd=disabled \
-            -Dbuildtype=release \
-            -Dwrap_mode=forcefallback
+            -Dvulkan-drivers=panfrost \
+            -Dllvm=disabled \
+            -Dpanfrost-kmds=kbase
 
-      - name: Compile PanVK Driver & Package for Winlator
+      - name: Build PanVK driver
         run: |
-          ninja -C build/
-          
-          # Crear estructura del paquete para Winlator
-          PKG_NAME="panvk-mali-g52-winlator"
-          mkdir -p winlator-driver
-          cp build/src/panfrost/vulkan/libvulkan_panfrost.so winlator-driver/
-          
-          # Calcular SHA256 del binario .so
-          SO_HASH=$(sha256sum winlator-driver/libvulkan_panfrost.so | awk '{print $1}')
-          
-          # Generar SHA256SUMS.txt
-          echo "$SO_HASH  libvulkan_panfrost.so" > winlator-driver/SHA256SUMS.txt
-          
-          # Generar meta.json adaptado para Mali-G52 (Bifrost / Unisoc T618)
-          cat << EOF > winlator-driver/meta.json
-          {
-            "schemaVersion": 1,
-            "name": "PanVK Mali-G52",
-            "description": "PanVK Vulkan driver for Mali-G52 / Unisoc T618 (Bifrost architecture) for Winlator and AdrenoTools.",
-            "author": "Winlator Community / Mesa",
-            "packageVersion": "1.0.0",
-            "vendor": "Mesa",
-            "driverVersion": "Mesa 26.3.0-devel / PanVK Mali-G52",
-            "minApi": 30,
-            "libraryName": "libvulkan_panfrost.so",
-            "sanitizedArtifactSha256": "$SO_HASH"
-          }
-          EOF
-          
-          # Generar Panvk_icd.aarch64.json requerido para el reconocimiento del driver (Relativo)
-          cat << 'EOF' > winlator-driver/Panvk_icd.aarch64.json
-          {
-            "file_format_version": "1.0.0",
-            "ICD": {
-              "library_path": "./libvulkan_panfrost.so",
-              "api_version": "1.4.363"
-            }
-          }
-          EOF
+          meson compile -C build
 
-          # Generar panvk_icd_abs.aarch64.json (Ruta absoluta para Winlator/Bannerlator)
-          cat << EOF > winlator-driver/panvk_icd_abs.aarch64.json
-          {
-            "file_format_version": "1.0.0",
-            "ICD": {
-              "library_path": "/data/data/com.winlator.banner/files/contents/adrenotools/$PKG_NAME/libvulkan_panfrost.so",
-              "api_version": "1.4.363"
-            }
-          }
-          EOF
+      - name: Package driver
+        run: |
+          ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
 
-          # Generar README-bannerlator.txt
-          cat << EOF > winlator-driver/README-bannerlator.txt
-          PanVK Driver for Mali-G52 / Winlator Bionic
-          - Install via Adrenotools GPU Drivers.
-          - Direct load (no wrapper ICD): container > Environment, add
-            VK_ICD_FILENAMES=/data/data/com.winlator.banner/files/contents/adrenotools/$PKG_NAME/panvk_icd_abs.aarch64.json
-          - SHA256: $SO_HASH
-          EOF
-          
-          # Comprimir en formato zip listo para importar en Winlator (directo en la raíz)
-          cd winlator-driver
-          zip -r "../panvk-mali-g52-winlator.zip" .
-          cd ..
-
-      - name: Upload Winlator Driver Artifact
+      - name: Upload packaged ZIP driver
         uses: actions/upload-artifact@v4
         with:
-          name: panvk-mali-g52-winlator
-          path: panvk-mali-g52-winlator.zip
+          name: PanVK-G52-${{ matrix.flavor }}-release
+          path: |
+            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}.zip
+            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}-MANIFEST.txt
+            SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Upload raw driver binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvulkan_panfrost-g52-aarch64-${{ matrix.flavor }}
+          path: build/src/panfrost/vulkan/libvulkan_panfrost.so
+          if-no-files-found: error
