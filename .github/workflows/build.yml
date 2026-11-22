@@ -58,8 +58,7 @@ jobs:
         run: ./scripts/fetch-mesa.sh
 
       - name: Apply PanVK G52 patches
-        # Ajusta el argumento --profile según los perfiles que defina tu script apply-patches.sh
-        run: ./scripts/apply-patches.sh --profile g52-bifrost-jm
+        run: ./scripts/apply-patches.sh --profile g52-v7-jm
 
       - name: Stamp driver version
         # driverInfo (DXVK HUD, MangoHud, vulkaninfo) muestra esta versión.
