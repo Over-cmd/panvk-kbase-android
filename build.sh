@@ -359,6 +359,7 @@ EOF
   cat <<'EOF' > shims/include/xshmfence.h
 #ifndef __SHIM_XSHMFENCE_H__
 #define __SHIM_XSHMFENCE_H__
+#include <errno.h>
 struct xshmfence;
 static inline int xshmfence_trigger(struct xshmfence *f) { (void)f; return -1; }
 static inline int xshmfence_await(struct xshmfence *f) { (void)f; return -1; }
@@ -429,6 +430,7 @@ EOF
   cat <<'EOF' > shims/include/xcb/xcb.h
 #ifndef __SHIM_XCB_H__
 #define __SHIM_XCB_H__
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -553,10 +555,10 @@ typedef struct { uint8_t response_type, nfd; uint16_t sequence; uint32_t length;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_dri3_query_version_reply_t;
 typedef struct { uint8_t response_type, nfd; uint16_t sequence; uint32_t length, pixmap_size; int32_t fd; } xcb_dri3_buffer_from_pixmap_reply_t;
 static inline xcb_dri3_open_cookie_t xcb_dri3_open(xcb_connection_t *c, xcb_drawable_t d, uint32_t p) { (void)c; (void)d; (void)p; xcb_dri3_open_cookie_t ck = {0}; return ck; }
-static inline xcb_dri3_open_reply_t *xcb_dri3_open_reply(xcb_connection_t *c, xcb_dri3_open_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_open_reply_t *)0; }
+static inline xcb_dri3_open_reply_t *xcb_dri3_open_reply(xcb_connection_t *c, xcb_dri3_open_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_open_reply_t *)0; }
 static inline int *xcb_dri3_open_reply_fds(xcb_connection_t *c, xcb_dri3_open_reply_t *r) { (void)c; (void)r; static int fds[1] = {-1}; return fds; }
 static inline xcb_dri3_query_version_cookie_t xcb_dri3_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_dri3_query_version_cookie_t ck = {0}; return ck; }
-static inline xcb_dri3_query_version_reply_t *xcb_dri3_query_version_reply(xcb_connection_t *c, xcb_dri3_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_query_version_reply_t *)0; }
+static inline xcb_dri3_query_version_reply_t *xcb_dri3_query_version_reply(xcb_connection_t *c, xcb_dri3_query_version_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_query_version_reply_t *)0; }
 #endif
 EOF
 
@@ -570,7 +572,7 @@ typedef uint32_t xcb_present_event_t;
 typedef struct { uint32_t sequence; } xcb_present_query_version_cookie_t;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_present_query_version_reply_t;
 static inline xcb_present_query_version_cookie_t xcb_present_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_present_query_version_cookie_t ck = {0}; return ck; }
-static inline xcb_present_query_version_reply_t *xcb_present_query_version_reply(xcb_connection_t *c, xcb_present_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_present_query_version_reply_t *)0; }
+static inline xcb_present_query_version_reply_t *xcb_present_query_version_reply(xcb_connection_t *c, xcb_present_query_version_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_present_query_version_reply_t *)0; }
 #endif
 EOF
 
@@ -586,6 +588,7 @@ EOF
   cat <<'EOF' > shims/include/xcb/shm.h
 #ifndef __SHIM_XCB_SHM_H__
 #define __SHIM_XCB_SHM_H__
+#include <errno.h>
 #include <stdint.h>
 #include <xcb/xcb.h>
 typedef uint32_t xcb_shm_seg_t;
@@ -606,7 +609,7 @@ typedef uint32_t xcb_xfixes_region_t;
 typedef struct { uint32_t sequence; } xcb_xfixes_query_version_cookie_t;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_xfixes_query_version_reply_t;
 static inline xcb_xfixes_query_version_cookie_t xcb_xfixes_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_xfixes_query_version_cookie_t ck = {0}; return ck; }
-static inline xcb_xfixes_query_version_reply_t *xcb_xfixes_query_version_reply(xcb_connection_t *c, xcb_xfixes_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_xfixes_query_version_reply_t *)0; }
+static inline xcb_xfixes_query_version_reply_t *xcb_xfixes_query_version_reply(xcb_connection_t *c, xcb_xfixes_query_version_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_xfixes_query_version_reply_t *)0; }
 #endif
 EOF
 
