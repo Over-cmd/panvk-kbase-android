@@ -292,9 +292,9 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
           export MESON_WORKING_DIR="$GITHUB_WORKSPACE"
-          CLANG_DIR="$(ls -d $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
+          CLANG_DIR="$(ls -d$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
           if [ -z "$CLANG_DIR" ]; then
-            CLANG_DIR="$(ls -d $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
+            CLANG_DIR="$(ls -d$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
           fi
           export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
           echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
@@ -378,6 +378,10 @@ jobs:
           }
           static inline void drmFreeVersion(drmVersionPtr version) {
             free(version);
+          }
+          static inline char *drmGetDeviceNameFromFd2(int fd) {
+            (void)fd;
+            return (char *)0;
           }
           static inline int drmIoctl(int fd, unsigned long request, void *arg) { return ioctl(fd, request, arg); }
           static inline int drmGetDeviceFromDevId(dev_t dev_id, uint32_t flags, drmDevicePtr *device) {
@@ -588,208 +592,4 @@ jobs:
             xcb_present_query_version_cookie_t ck = {0};
             return ck;
           }
-          static inline xcb_present_query_version_reply_t *xcb_present_query_version_reply(xcb_connection_t *c, xcb_present_query_version_cookie_t cookie, xcb_generic_error_t **e) {
-            (void)c; (void)cookie; if (e) *e = (xcb_generic_error_t *)0;
-            return (xcb_present_query_version_reply_t *)0;
-          }
-          #endif
-          EOF
-            cat <<'EOF' > shims/include/xcb/sync.h
-          #ifndef __SHIM_XCB_SYNC_H__
-          #define __SHIM_XCB_SYNC_H__
-          #include <stdint.h>
-          #include <xcb/xcb.h>
-          typedef uint32_t xcb_sync_fence_t;
-          typedef uint32_t xcb_sync_counter_t;
-          #endif
-          EOF
-            cat <<'EOF' > shims/include/xcb/shm.h
-          #ifndef __SHIM_XCB_SHM_H__
-          #define __SHIM_XCB_SHM_H__
-          #include <stdint.h>
-          #include <xcb/xcb.h>
-          typedef uint32_t xcb_shm_seg_t;
-          static inline xcb_void_cookie_t xcb_shm_attach_checked(xcb_connection_t *c, xcb_shm_seg_t shmseg, uint32_t shmid, uint8_t read_only) {
-            (void)c; (void)shmseg; (void)shmid; (void)read_only;
-            xcb_void_cookie_t ck = {0};
-            return ck;
-          }
-          static inline xcb_void_cookie_t xcb_shm_detach_checked(xcb_connection_t *c, xcb_shm_seg_t shmseg) {
-            (void)c; (void)shmseg;
-            xcb_void_cookie_t ck = {0};
-            return ck;
-          }
-          static inline xcb_void_cookie_t xcb_shm_detach(xcb_connection_t *c, xcb_shm_seg_t shmseg) {
-            (void)c; (void)shmseg;
-            xcb_void_cookie_t ck = {0};
-            return ck;
-          }
-          #endif
-          EOF
-            cat <<'EOF' > shims/include/xcb/xfixes.h
-          #ifndef __SHIM_XCB_XFIXES_H__
-          #define __SHIM_XCB_XFIXES_H__
-          #include <stdint.h>
-          #include <xcb/xcb.h>
-          #define XCB_XFIXES_MAJOR_VERSION 4
-          #define XCB_XFIXES_MINOR_VERSION 0
-          typedef uint32_t xcb_xfixes_region_t;
-          typedef struct { uint32_t sequence; } xcb_xfixes_query_version_cookie_t;
-          typedef struct {
-            uint8_t response_type;
-            uint8_t pad0;
-            uint16_t sequence;
-            uint32_t length;
-            uint32_t major_version;
-            uint32_t minor_version;
-          } xcb_xfixes_query_version_reply_t;
-          static inline xcb_xfixes_query_version_cookie_t xcb_xfixes_query_version(xcb_connection_t *c, uint32_t client_major_version, uint32_t client_minor_version) {
-            (void)c; (void)client_major_version; (void)client_minor_version;
-            xcb_xfixes_query_version_cookie_t ck = {0};
-            return ck;
-          }
-          static inline xcb_xfixes_query_version_reply_t *xcb_xfixes_query_version_reply(xcb_connection_t *c, xcb_xfixes_query_version_cookie_t cookie, xcb_generic_error_t **e) {
-            (void)c; (void)cookie; if (e) *e = (xcb_generic_error_t *)0;
-            return (xcb_xfixes_query_version_reply_t *)0;
-          }
-          #endif
-          EOF
-            cat <<'EOF' > shims/include/X11/Xlib.h
-          #ifndef __SHIM_XLIB_H__
-          #define __SHIM_XLIB_H__
-          #include <stdint.h>
-          typedef struct _XDisplay Display;
-          typedef unsigned long XID;
-          typedef XID Window;
-          typedef XID Drawable;
-          typedef int Status;
-          typedef int Bool;
-          #define True 1
-          #define False 0
-          #define BadRequest 1
-          #endif
-          EOF
-            cat <<'EOF' > shims/include/X11/Xlibint.h
-          #ifndef __SHIM_XLIBINT_H__
-          #define __SHIM_XLIBINT_H__
-          #include <X11/Xlib.h>
-          typedef struct _XExtData {
-            int number;
-            struct _XExtData *next;
-            int (*free_private)(struct _XExtData *extension);
-            char *private_data;
-          } _XExtData, XExtData;
-          typedef struct _XLockPtrs {
-            void (*lock_display)(Display *dpy);
-            void (*unlock_display)(Display *dpy);
-          } *_XLockPtrs;
-          struct _XDisplay {
-            XExtData *ext_data;
-            int fd;
-            _XLockPtrs lock_fns;
-          };
-          #endif
-          EOF
-            cat <<'EOF' > shims/include/X11/extensions/Xrandr.h
-          #ifndef __SHIM_XRANDR_H__
-          #define __SHIM_XRANDR_H__
-          #include <X11/Xlib.h>
-          typedef XID RROutput;
-          typedef XID RRCrtc;
-          typedef XID RRMode;
-          #endif
-          EOF
-            cat <<'EOF' > shims/include/X11/Xlib-xcb.h
-          #ifndef __SHIM_XLIB_XCB_H__
-          #define __SHIM_XLIB_XCB_H__
-          #include <xcb/xcb.h>
-          #include <X11/Xlib.h>
-          static inline xcb_connection_t *XGetXCBConnection(Display *dpy) { (void)dpy; return (xcb_connection_t *)0; }
-          #endif
-          EOF
-          fi
-
-          TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          if [ -f android.toml ]; then
-            envsubst < android.toml > android-cross.txt
-          else
-            cat <<EOF > android-cross.txt
-          [binaries]
-          c = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang'
-          cpp = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang++'
-          ar = '$TOOLCHAIN_BIN/llvm-ar'
-          strip = '$TOOLCHAIN_BIN/llvm-strip'
-          pkg-config = 'pkg-config'
-
-          [built-in options]
-          c_args = ['-L$CLANG_LIB_DIR']
-          cpp_args = ['-L$CLANG_LIB_DIR']
-          c_link_args = ['-L$CLANG_LIB_DIR']
-          cpp_link_args = ['-L$CLANG_LIB_DIR']
-
-          [properties]
-          needs_exe_wrapper = true
-
-          [host_machine]
-          system = 'android'
-          cpu_family = 'aarch64'
-          cpu = 'armv8-a'
-          endian = 'little'
-          EOF
-          fi
-          cat android-cross.txt
-
-          PLATFORMS="android"
-          if [ "${{ matrix.flavor }}" = "x11" ]; then
-            PLATFORMS="android,x11"
-          fi
-
-          meson setup build work/mesa \
-            --cross-file android-cross.txt \
-            -Dbuildtype=release \
-            -Dplatforms=$PLATFORMS \
-            -Dandroid-stub=true \
-            -Dandroid-strict=false \
-            -Dandroid-libbacktrace=disabled \
-            -Dplatform-sdk-version=30 \
-            -Dglx=disabled \
-            -Dgbm=disabled \
-            -Degl=disabled \
-            -Dopengl=false \
-            -Dgles1=disabled \
-            -Dgles2=disabled \
-            -Dglvnd=disabled \
-            -Dvalgrind=disabled \
-            -Dgallium-drivers= \
-            -Dshared-glapi=disabled \
-            -Dzstd=disabled \
-            -Dmesa-clc=system \
-            -Dprecomp-compiler=system \
-            -Dvulkan-drivers=panfrost \
-            -Dllvm=disabled \
-            -Dpanfrost-kmds=kbase
-
-      - name: Build PanVK driver
-        run: |
-          meson compile -C build
-
-      - name: Package driver
-        run: |
-          ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
-
-      - name: Upload packaged ZIP driver
-        uses: actions/upload-artifact@v4
-        with:
-          name: PanVK-G52-${{ matrix.flavor }}-release
-          path: |
-            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}.zip
-            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}-MANIFEST.txt
-            SHA256SUMS.txt
-          if-no-files-found: error
-
-      - name: Upload raw driver binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: libvulkan_panfrost-g52-aarch64-${{ matrix.flavor }}
-          path: build/src/panfrost/vulkan/libvulkan_panfrost.so
-          if-no-files-found: error
+          static inline xcb_present_query_version_reply_t *xcb_present_query_version_reply(xcb_connection_t *c, xcb_present_query_version
