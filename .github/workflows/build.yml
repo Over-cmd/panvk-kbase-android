@@ -85,45 +85,27 @@ jobs:
               return " ".join(s.strip().split())
 
           def adapt_vk_android_h_hunk(h, src_lines):
+              if not src_lines:
+                  return None
+
               added_lines = [l[1:] for l in h["body"] if l.startswith("+")]
               approx_start = max(0, min(len(src_lines) - 1, h["old_start"] - 1))
               anchor_idx = None
 
-              priority_symbols = [
-                  "vk_android_rp_attachment_has_external_format",
-                  "local_color_format",
-                  "ANDROID_API_LEVEL",
-                  "vk_android",
-              ]
-              body_str = "".join(h["body"])
-              for sym in priority_symbols:
-                  if sym in body_str:
-                      best_dist = None
-                      for i, line in enumerate(src_lines):
-                          if sym in line:
-                              dist = abs(i - approx_start)
-                              if best_dist is None or dist < best_dist:
-                                  best_dist = dist
-                                  anchor_idx = i
+              # Buscar el cierre del bloque #if de ANDROID_API_LEVEL >= 26 en vk_android.h
+              for i, line in enumerate(src_lines):
+                  if "ANDROID_API_LEVEL" in line and i >= 80:
+                      for j in range(i + 1, min(len(src_lines), i + 40)):
+                          if src_lines[j].lstrip().startswith(("#else", "#endif")):
+                              anchor_idx = j
+                              break
                       if anchor_idx is not None:
                           break
 
               if anchor_idx is None:
-                  tokens = []
-                  for l in h["body"]:
-                      if l.startswith((" ", "-", "+")):
-                          for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]{4,}", l[1:]):
-                              if tok not in tokens:
-                                  tokens.append(tok)
-                  best_dist = None
-                  for tok in tokens:
-                      for i, line in enumerate(src_lines):
-                          if tok in line:
-                              dist = abs(i - approx_start)
-                              if best_dist is None or dist < best_dist:
-                                  best_dist = dist
-                                  anchor_idx = i
-                      if anchor_idx is not None:
+                  for i, line in enumerate(src_lines):
+                      if "vk_android_rp_attachment_has_external_format" in line:
+                          anchor_idx = min(len(src_lines) - 1, i + 2)
                           break
 
               if anchor_idx is None:
