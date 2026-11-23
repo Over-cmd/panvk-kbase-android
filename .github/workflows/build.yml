@@ -75,8 +75,23 @@ jobs:
 
           for p in patches/*/*.patch; do
             [ -f "$p" ] || continue
-            if ! git -C work/mesa apply --check "../$p" 2>/dev/null; then
+            # Refresca parches que no apliquen exactamente en su línea original (incluye offset o fuzz)
+            if ! patch -d work/mesa -p1 --dry-run --force < "$p" >/dev/null 2>&1 || \
+               ! git -C work/mesa apply --check --ignore-whitespace "../$p" 2>/dev/null; then
               patch -d work/mesa -p1 --fuzz=3 -N < "$p" || true
+              modified_files=$(git -C work/mesa diff --name-only)
+              if [ -n "$modified_files" ]; then
+                git -C work/mesa diff -- $modified_files > "$p"
+              fi
+              git -C work/mesa reset --hard HEAD
+              git -C work/mesa clean -fd
+            fi
+          done
+
+          # Refresco adicional para parches con offset puro que git apply acepta pero apply-patches.sh marca como PATCH-DRIFT
+          for p in patches/*/*.patch; do
+            [ -f "$p" ] || continue
+            if patch -d work/mesa -p1 --fuzz=3 -N < "$p" >/dev/null 2>&1; then
               modified_files=$(git -C work/mesa diff --name-only)
               if [ -n "$modified_files" ]; then
                 git -C work/mesa diff -- $modified_files > "$p"
