@@ -37,12 +37,12 @@ jobs:
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
             build-essential \
+            cmake \
+            ninja-build \
             llvm-21-dev \
             libclang-21-dev \
             libclc-21-dev \
             libllvmspirvlib-21-dev \
-            libspirv-tools-dev \
-            spirv-headers-dev \
             libelf-dev \
             spirv-tools \
             bison \
@@ -50,6 +50,13 @@ jobs:
             libdrm-dev \
             pkg-config \
             gettext
+
+          SPIRV_PKGS=$(apt-cache search --names-only '^(lib)?spirv-(tools|headers)(-dev)?$' | awk '{print $1}' | tr '\n' ' ')
+          echo "Paquetes SPIRV encontrados en apt: ${SPIRV_PKGS:-ninguno}"
+          if [ -n "$SPIRV_PKGS" ]; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $SPIRV_PKGS || true
+          fi
+
           python -m pip install --upgrade pip
           pip install mako PyYAML meson ninja packaging
 
@@ -190,6 +197,23 @@ jobs:
             export LLVM_CONFIG=/usr/bin/llvm-config-21
           fi
           echo "Using LLVM_CONFIG=${LLVM_CONFIG:-default}"
+          if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
+            echo "SPIRV-Tools no encontrado via pkg-config; compilando SPIRV-Headers + SPIRV-Tools en /usr/local..."
+            mkdir -p work/spirv-build && cd work/spirv-build
+            git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git
+            cmake -S SPIRV-Headers -B build-headers -G Ninja -DCMAKE_INSTALL_PREFIX=/usr/local
+            ninja -C build-headers install
+
+            git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git
+            cmake -S SPIRV-Tools -B build-tools -G Ninja \
+              -DCMAKE_INSTALL_PREFIX=/usr/local \
+              -DSPIRV-Headers_SOURCE_DIR="$PWD/SPIRV-Headers" \
+              -DSPIRV_SKIP_TESTS=ON
+            ninja -C build-tools install
+            cd "$GITHUB_WORKSPACE"
+            export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
+          fi
+
           meson setup build-host work/mesa \
             -Dbuildtype=release \
             -Db_ndebug=true \
