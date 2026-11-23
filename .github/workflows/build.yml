@@ -306,6 +306,7 @@ jobs:
           #define __SHIM_DRM_H__
           #include <stdint.h>
           typedef uint32_t drm_handle_t;
+          #define DRM_CAP_SYNCOBJ_TIMELINE 0x13
           #define DRM_SYNCOBJ_CREATE 0
           #define DRM_SYNCOBJ_DESTROY 0
           #define DRM_SYNCOBJ_HANDLE_TO_FD 0
@@ -323,12 +324,20 @@ jobs:
           #define __SHIM_XF86DRM_H__
           #include <stdint.h>
           #include <drm.h>
+          static inline int drmGetCap(int fd, uint64_t capability, uint64_t *value) { (void)fd; (void)capability; if (value) *value = 0; return -1; }
           static inline int drmSyncobjCreate(int fd, uint32_t flags, uint32_t *handle) { (void)fd; (void)flags; if (handle) *handle = 0; return -1; }
           static inline int drmSyncobjDestroy(int fd, uint32_t handle) { (void)fd; (void)handle; return -1; }
           static inline int drmSyncobjHandleToFD(int fd, uint32_t handle, int *obj_fd) { (void)fd; (void)handle; if (obj_fd) *obj_fd = -1; return -1; }
           static inline int drmSyncobjFDToHandle(int fd, int obj_fd, uint32_t *handle) { (void)fd; (void)obj_fd; if (handle) *handle = 0; return -1; }
           static inline int drmSyncobjWait(int fd, uint32_t *handles, uint32_t num_handles, int64_t timeout_nsec, uint32_t flags, uint32_t *first_signaled) { (void)fd; (void)handles; (void)num_handles; (void)timeout_nsec; (void)flags; (void)first_signaled; return -1; }
           static inline int drmSyncobjSignal(int fd, const uint32_t *handles, uint32_t num_handles) { (void)fd; (void)handles; (void)num_handles; return -1; }
+          static inline int drmSyncobjReset(int fd, const uint32_t *handles, uint32_t handle_count) { (void)fd; (void)handles; (void)handle_count; return -1; }
+          static inline int drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd) { (void)fd; (void)handle; (void)sync_file_fd; return -1; }
+          static inline int drmSyncobjExportSyncFile(int fd, uint32_t handle, int *out_sync_file_fd) { (void)fd; (void)handle; if (out_sync_file_fd) *out_sync_file_fd = -1; return -1; }
+          static inline int drmSyncobjTimelineSignal(int fd, const uint32_t *handles, uint64_t *points, uint32_t handle_count) { (void)fd; (void)handles; (void)points; (void)handle_count; return -1; }
+          static inline int drmSyncobjTimelineWait(int fd, uint32_t *handles, uint64_t *points, unsigned num_handles, int64_t timeout_nsec, unsigned flags, uint32_t *first_signaled) { (void)fd; (void)handles; (void)points; (void)num_handles; (void)timeout_nsec; (void)flags; (void)first_signaled; return -1; }
+          static inline int drmSyncobjQuery2(int fd, uint32_t *handles, uint64_t *points, uint32_t handle_count, uint32_t flags) { (void)fd; (void)handles; (void)points; (void)handle_count; (void)flags; return -1; }
+          static inline int drmSyncobjTransfer(int fd, uint32_t dst_handle, uint64_t dst_point, uint32_t src_handle, uint64_t src_point, uint32_t flags) { (void)fd; (void)dst_handle; (void)dst_point; (void)src_handle; (void)src_point; (void)flags; return -1; }
           #endif
           EOF
 
