@@ -136,6 +136,7 @@ jobs:
 
           python3 - <<'PY'
           import os
+          import re
 
           vk_hdr = "work/mesa/src/vulkan/runtime/vk_android.h"
           if os.path.exists(vk_hdr):
@@ -163,23 +164,28 @@ jobs:
 
           kmod_meson = "work/mesa/src/panfrost/lib/kmod/meson.build"
           kbase_block = (
-              "if panfrost_kmds.contains('kbase')\n"
+              "if get_option('panfrost-kmds').contains('kbase')\n"
               "  libpankmod_lib_files += files('kbase_kmod.c')\n"
               "endif\n\n"
           )
           if os.path.exists(kmod_meson):
               with open(kmod_meson, "r", encoding="utf-8", errors="replace") as mf:
                   mcontent = mf.read()
-              if "panfrost_kmds.contains('kbase')" not in mcontent:
+              mcontent = re.sub(
+                  r"if\s+panfrost_kmds\.contains\('kbase'\)\s*\n\s*libpankmod_lib_files\s*\+=\s*files\('kbase_kmod\.c'\)\s*\nendif\s*\n*",
+                  "",
+                  mcontent,
+              )
+              if "get_option('panfrost-kmds').contains('kbase')" not in mcontent:
                   marker = "libpankmod_lib = static_library("
                   idx = mcontent.find(marker)
                   if idx != -1:
                       mcontent = mcontent[:idx] + kbase_block + mcontent[idx:]
                   else:
                       mcontent = mcontent + "\n" + kbase_block
-                  with open(kmod_meson, "w", encoding="utf-8") as mf:
-                      mf.write(mcontent)
-                  print("Aplicado bloque kbase en src/panfrost/lib/kmod/meson.build antes de libpankmod_lib")
+              with open(kmod_meson, "w", encoding="utf-8") as mf:
+                  mf.write(mcontent)
+              print("Aplicado bloque kbase con get_option('panfrost-kmds') en src/panfrost/lib/kmod/meson.build")
           PY
 
       - name: Stamp driver version
