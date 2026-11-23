@@ -237,14 +237,12 @@ jobs:
               with open(kbase_src, "r", encoding="utf-8", errors="replace") as ks:
                   kbase_c = ks.read()
 
-              # 1) pan_kmod_dev_init: 7 args (drv_info, allocator, ops, sync_ops)
               kbase_c = re.sub(
                   r"pan_kmod_dev_init\s*\(\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,\)]+)\s*\)",
                   r"pan_kmod_dev_init(\1, \2, \3, \4, \6, \5, NULL)",
                   kbase_c,
               )
 
-              # 2) Wrappers compatibles con pan_kmod_ops de Mesa 26.3.0
               wrappers = (
                   "\nstatic struct pan_kmod_dev *\n"
                   "kbase_kmod_dev_create_pan(int fd, uint32_t flags,\n"
@@ -259,7 +257,6 @@ jobs:
                   "}\n\n"
               )
 
-              # Eliminar campos inexistentes o incompatibles en kbase_kmod_ops
               kbase_c = re.sub(r"^\s*\.(?:bo_import_fd|bo_export_fd|bo_get_mmap_offset|bo_munmap)\s*=\s*[^,\n]+,?\s*\n", "", kbase_c, flags=re.MULTILINE)
               kbase_c = re.sub(r"^\s*\.dev_create\s*=\s*[^,\n]+,", "   .dev_create = kbase_kmod_dev_create_pan,", kbase_c, flags=re.MULTILINE)
               kbase_c = re.sub(r"^\s*\.bo_import\s*=\s*[^,\n]+,", "   .bo_import = kbase_kmod_bo_import_pan,", kbase_c, flags=re.MULTILINE)
@@ -674,6 +671,8 @@ jobs:
           static inline void xshmfence_unmap_shm(struct xshmfence *f) { (void)f; }
           #endif
           EOF
+
+            cp shims/include/xshmfence.h shims/include/X11/xshmfence.h
 
             cat <<'EOF' > shims/include/xcb/xcb.h
           #ifndef __SHIM_XCB_H__
