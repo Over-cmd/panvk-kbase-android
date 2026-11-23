@@ -85,9 +85,6 @@ jobs:
               return " ".join(s.strip().split())
 
           def adapt_vk_android_h_hunk(h, src_lines):
-              if not src_lines:
-                  return None
-
               added_lines = [l[1:] for l in h["body"] if l.startswith("+")]
               approx_start = max(0, min(len(src_lines) - 1, h["old_start"] - 1))
               anchor_idx = None
@@ -266,7 +263,7 @@ jobs:
                               changed = True
                           rebuilt_lines.append(f"@@ -{new_pos},{old_cnt} +{new_pos},{new_cnt} @@{h['suffix']}\n")
                           rebuilt_lines.extend(h["body"])
-                      elif target_file == "src/vulkan/runtime/vk_android.h":
+                      elif target_file == "src/vulkan/runtime/vk_android.h" and src_lines:
                           adapted = adapt_vk_android_h_hunk(h, src_lines)
                           if adapted is not None:
                               changed = True
