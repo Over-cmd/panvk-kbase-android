@@ -83,17 +83,6 @@ jobs:
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
 
           for patch_path in sorted(glob.glob("patches/*/*.patch")):
-              subprocess.run(["git", "-C", mesa_dir, "reset", "--hard", "HEAD"], check=True, stdout=subprocess.DEVNULL)
-              subprocess.run(["git", "-C", mesa_dir, "clean", "-fd"], check=True, stdout=subprocess.DEVNULL)
-
-              chk = subprocess.run(
-                  ["git", "-C", mesa_dir, "apply", "--check", "--whitespace=nowarn", os.path.abspath(patch_path)],
-                  capture_output=True,
-                  text=True,
-              )
-              if chk.returncode == 0:
-                  continue
-
               with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
                   lines = f.readlines()
 
