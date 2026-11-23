@@ -76,7 +76,7 @@ jobs:
           for p in patches/*/*.patch; do
             [ -f "$p" ] || continue
             if ! git -C work/mesa apply --check "../$p" 2>/dev/null; then
-              patch -d work/mesa -p1 --fuzz=3 -N < "$p"
+              patch -d work/mesa -p1 --fuzz=3 -N < "$p" || true
               modified_files=$(git -C work/mesa diff --name-only)
               if [ -n "$modified_files" ]; then
                 git -C work/mesa diff -- $modified_files > "$p"
@@ -87,6 +87,16 @@ jobs:
           done
 
           ./scripts/apply-patches.sh --profile g52-v7-jm
+
+      - name: Debug rejected hunks in Mesa 26.3.0
+        if: failure()
+        run: |
+          echo "=== Parches que tocan u_gralloc_fallback.c ==="
+          grep -rn "u_gralloc_fallback.c" patches/ || true
+          echo "=== u_gralloc_fallback.c.rej ==="
+          cat work/mesa/src/util/u_gralloc/u_gralloc_fallback.c.rej || true
+          echo "=== vk_android.c.rej ==="
+          cat work/mesa/src/vulkan/runtime/vk_android.c.rej || true
 
       - name: Stamp driver version
         # driverInfo (DXVK HUD, MangoHud, vulkaninfo) muestra esta versión.
