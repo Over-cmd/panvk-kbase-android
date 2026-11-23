@@ -250,12 +250,16 @@ jobs:
                   kbase_c,
               )
 
+              m_drv = re.search(r"\bpan_kmod_driver\b[^\n;]*?\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\[[^\]]*\])?\s*=", kbase_c)
+              drv_expr = f"&{m_drv.group(1)}" if m_drv else "(const struct pan_kmod_driver *)0"
+              print(f"Usando drv_expr={drv_expr} para kbase_kmod_dev_create_pan")
+
               wrappers = (
                   "\nstatic struct pan_kmod_dev *\n"
                   "kbase_kmod_dev_create_pan(int fd, uint32_t flags,\n"
                   "                          const struct pan_kmod_allocator *allocator)\n"
                   "{\n"
-                  "   return kbase_kmod_dev_create(fd, flags, &kbase_drv, allocator);\n"
+                  f"   return kbase_kmod_dev_create(fd, flags, {drv_expr}, allocator);\n"
                   "}\n\n"
                   "static struct pan_kmod_bo *\n"
                   "kbase_kmod_bo_import_pan(struct pan_kmod_dev *dev, int fd)\n"
