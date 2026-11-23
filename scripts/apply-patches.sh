@@ -4,9 +4,12 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE=""; MESA="$ROOT/work/mesa"
+ALLOW_DRIFT="${ALLOW_PATCH_DRIFT:-1}"
 while [ $# -gt 0 ]; do case "$1" in
   --profile) PROFILE="$2"; shift 2;;
   --mesa) MESA="$2"; shift 2;;
+  --allow-drift) ALLOW_DRIFT="1"; shift 1;;
+  --strict) ALLOW_DRIFT="0"; shift 1;;
   *) echo "unknown arg $1" >&2; exit 2;;
 esac; done
 [ -n "$PROFILE" ] || { echo "--profile required" >&2; exit 2; }
@@ -28,7 +31,7 @@ for fam in $SERIES; do
     if ! git -C "$MESA" apply --check "$p" 2>/dev/null; then
       RECOUNT="--recount"
     fi
-    # git apply accepts shifted hunks silently; -v reports them, so fail on any offset.
+    # git apply accepts shifted hunks silently; -v reports them.
     # shellcheck disable=SC2086
     if ! VOUT="$(git -C "$MESA" apply $RECOUNT --check -v "$p" 2>&1)"; then
       echo "$VOUT" >&2
@@ -37,8 +40,12 @@ for fam in $SERIES; do
     fi
     if echo "$VOUT" | grep -qiE 'offset|fuzz'; then
       echo "$VOUT" | grep -iE 'offset|fuzz|Checking' >&2
-      echo "PATCH-DRIFT: $p applies only with offset/fuzz (refresh hunk headers)" >&2
-      exit 1
+      if [ "$ALLOW_DRIFT" = "1" ]; then
+        echo "WARN: $p applies with offset/fuzz; applying anyway" >&2
+      else
+        echo "PATCH-DRIFT: $p applies only with offset/fuzz (refresh hunk headers)" >&2
+        exit 1
+      fi
     fi
     # shellcheck disable=SC2086
     git -C "$MESA" apply $RECOUNT "$p"
