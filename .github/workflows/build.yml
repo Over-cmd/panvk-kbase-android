@@ -1,37 +1,37 @@
-nombre : Compilación PanVK Mali-G52
+name: Build PanVK Mali-G52
 
-en :
-  empujar :
-    sucursales : ["**"]
-  solicitud_de_extracción :
-    sucursales : ["**"]
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
 
-entorno :
-  # Versión del paquete; También se muestra como el nombre del controlador en DXVK HUD / MangoHud.
-  PANVK_RELEASE : " 0.0.2-alpha-G52 "
-  MESA_REF : " mesa-26.3.0 "
+env:
+  # Versión del paquete; también se muestra como el nombre del controlador en DXVK HUD / MangoHud.
+  PANVK_RELEASE: "0.0.2-alpha-G52"
+  MESA_REF: "mesa-26.3.0"
 
-empleos :
-  compilar-panvk-android :
-    nombre : Build PanVK G52 (${{ matrix.flavor }})
-    se ejecuta en : ubuntu-latest
-    estrategia :
-      matriz :
-        Sabor : [adrenotools, x11]
-    pasos :
-      - nombre : Repositorio de Checkout
-        usos : actions/checkout@v4
+jobs:
+  build-panvk-android:
+    name: Build PanVK G52 (${{ matrix.flavor }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        flavor: [adrenotools, x11]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - nombre : Configurar Python
-        usos : actions/setup-python@v5
-        con :
-          python-version : " 3.11 "
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - nombre : Instalar dependencias de compilación
-        entorno :
-          DEBIAN_FRONTEND : no interactivo
-          NEEDRESTART_MODE : a
-        correr : |
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
+        run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             -o Dpkg::Options::="--force-confdef" \
@@ -43,8 +43,8 @@ empleos :
           [ -n "$SPIRV_PKGS" ] && sudo apt-get install -y --no-install-recommends $SPIRV_PKGS || true
           python -m pip install --upgrade pip
           pip install mako PyYAML meson ninja packaging
-      - nombre : Fetch Mesa 26.3.0
-        correr : |
+      - name: Fetch Mesa 26.3.0
+        run: |
           mkdir -p work/mesa
           curl -fSL --retry 5 --retry-delay 5 \
             "https://gitlab.freedesktop.org/mesa/mesa/-/archive/${MESA_REF}/mesa-${MESA_REF}.tar.gz" \
@@ -54,28 +54,28 @@ empleos :
           git -C work/mesa config user.name "CI"
           git -C work/mesa add -A
           git -C work/mesa commit -q -m "Mesa ${MESA_REF}"
-      - nombre : Build PanVK G52
-        entorno :
-          SABOR : ${{ matrix.flavor }}
-        correr : |
+      - name: Build PanVK G52
+        env:
+          FLAVOR: ${{ matrix.flavor }}
+        run: |
           chmod +x build.sh
           ./build.sh "$FLAVOR"
-      - nombre : Controlador de paquete
-        correr : |
+      - name: Package driver
+        run: |
           ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
-      - nombre : Cargar controlador ZIP empaquetado
-        usos : actions/upload-artifact@v4
-        con :
-          nombre : PanVK-G52-${{ matrix.flavor }}-release
-          ruta : |
+      - name: Upload packaged ZIP driver
+        uses: actions/upload-artifact@v4
+        with:
+          name: PanVK-G52-${{ matrix.flavor }}-release
+          path: |
             PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}.zip
             PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}-MANIFEST.txt
             SHA256SUMS.txt
-          if-no-files-found : error
+          if-no-files-found: error
 
-      - nombre : Cargar binario del controlador sin procesar
-        usos : actions/upload-artifact@v4
-        con :
-          nombre : libvulkan_panfrost-g52-aarch64-${{ matrix.flavor }}
-          ruta : build/src/panfrost/vulkan/libvulkan_panfrost.so
-          if-no-files-found : error
+      - name: Upload raw driver binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvulkan_panfrost-g52-aarch64-${{ matrix.flavor }}
+          path: build/src/panfrost/vulkan/libvulkan_panfrost.so
+          if-no-files-found: error
