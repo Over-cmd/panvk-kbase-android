@@ -118,7 +118,6 @@ jobs:
                       print(f"OK    [{fam}] {name}")
                       ok_count += 1
                   else:
-                      # Reintentar con --reject para aplicar los hunks compatibles
                       res_rej = subprocess.run(
                           ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
                           capture_output=True,
@@ -217,7 +216,6 @@ jobs:
           PY
 
       - name: Stamp driver version
-        # driverInfo (DXVK HUD, MangoHud, vulkaninfo) muestra esta versión.
         run: |
           f="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
           if [ -f "$f" ]; then
@@ -288,28 +286,28 @@ jobs:
             envsubst < android.toml > android-cross.txt
           else
             cat <<EOF > android-cross.txt
-[binaries]
-c = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang'
-cpp = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang++'
-ar = '$TOOLCHAIN_BIN/llvm-ar'
-strip = '$TOOLCHAIN_BIN/llvm-strip'
-pkgconfig = 'pkg-config'
+          [binaries]
+          c = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang'
+          cpp = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang++'
+          ar = '$TOOLCHAIN_BIN/llvm-ar'
+          strip = '$TOOLCHAIN_BIN/llvm-strip'
+          pkgconfig = 'pkg-config'
 
-[built-in options]
-c_args = ['-L$CLANG_LIB_DIR']
-cpp_args = ['-L$CLANG_LIB_DIR']
-c_link_args = ['-L$CLANG_LIB_DIR']
-cpp_link_args = ['-L$CLANG_LIB_DIR']
+          [built-in options]
+          c_args = ['-L$CLANG_LIB_DIR']
+          cpp_args = ['-L$CLANG_LIB_DIR']
+          c_link_args = ['-L$CLANG_LIB_DIR']
+          cpp_link_args = ['-L$CLANG_LIB_DIR']
 
-[properties]
-needs_exe_wrapper = true
+          [properties]
+          needs_exe_wrapper = true
 
-[host_machine]
-system = 'android'
-cpu_family = 'aarch64'
-cpu = 'armv8-a'
-endian = 'little'
-EOF
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'armv8-a'
+          endian = 'little'
+          EOF
           fi
           cat android-cross.txt
 
