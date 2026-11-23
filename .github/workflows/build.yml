@@ -238,6 +238,13 @@ jobs:
                   kbase_c = ks.read()
 
               kbase_c = re.sub(
+                  r"\n?static struct pan_kmod_dev \*\nkbase_kmod_dev_create_pan\(.*?\n\}\n\nstatic struct pan_kmod_bo \*\nkbase_kmod_bo_import_pan\(.*?\n\}\n\n?",
+                  "\n",
+                  kbase_c,
+                  flags=re.DOTALL,
+              )
+
+              kbase_c = re.sub(
                   r"pan_kmod_dev_init\s*\(\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,\)]+)\s*\)",
                   r"pan_kmod_dev_init(\1, \2, \3, \4, \6, \5, NULL)",
                   kbase_c,
@@ -261,16 +268,15 @@ jobs:
               kbase_c = re.sub(r"^\s*\.dev_create\s*=\s*[^,\n]+,", "   .dev_create = kbase_kmod_dev_create_pan,", kbase_c, flags=re.MULTILINE)
               kbase_c = re.sub(r"^\s*\.bo_import\s*=\s*[^,\n]+,", "   .bo_import = kbase_kmod_bo_import_pan,", kbase_c, flags=re.MULTILINE)
 
-              if "static struct pan_kmod_dev *\nkbase_kmod_dev_create_pan(" not in kbase_c:
-                  m_ops = re.search(r"\bkbase_kmod_ops\b", kbase_c)
-                  if m_ops:
-                      line_start = kbase_c.rfind("\n", 0, m_ops.start())
-                      idx_ops = line_start + 1 if line_start != -1 else m_ops.start()
-                      kbase_c = kbase_c[:idx_ops] + wrappers + kbase_c[idx_ops:]
-                      print("Insertados wrappers antes de kbase_kmod_ops")
-                  else:
-                      kbase_c = kbase_c + "\n" + wrappers
-                      print("Insertados wrappers al final de kbase_kmod.c")
+              m_ops = re.search(r"\bkbase_kmod_ops\s*=", kbase_c)
+              if m_ops:
+                  line_start = kbase_c.rfind("\n", 0, m_ops.start())
+                  idx_ops = line_start + 1 if line_start != -1 else m_ops.start()
+                  kbase_c = kbase_c[:idx_ops] + wrappers + kbase_c[idx_ops:]
+                  print("Insertados wrappers antes de la definición de kbase_kmod_ops")
+              else:
+                  kbase_c = kbase_c + "\n" + wrappers
+                  print("Insertados wrappers al final de kbase_kmod.c")
 
               with open(kbase_src, "w", encoding="utf-8") as ks:
                   ks.write(kbase_c)
