@@ -162,9 +162,15 @@ if os.path.exists(kbase_src):
         kbase_c,
     )
 
+    drv_match = re.search(
+        r"(?:static\s+)?(?:const\s+)?struct\s+pan_kmod_driver\s+([A-Za-z0-9_]+)\s*=",
+        kbase_c,
+    )
+    drv_ident = drv_match.group(1) if drv_match else None
+
     fwd_decls = (
         "struct pan_kmod_driver;\n"
-        "static const struct pan_kmod_driver kbase_drv __attribute__((unused));\n"
+        "extern const struct pan_kmod_driver kbase_drv;\n"
         "static struct pan_kmod_dev *\n"
         "kbase_kmod_dev_create(int fd, uint32_t flags,\n"
         "                      const struct pan_kmod_driver *driver,\n"
@@ -177,12 +183,13 @@ if os.path.exists(kbase_src):
     if idx_pan != -1 and "kbase_kmod_bo_import_fd(struct pan_kmod_dev *dev, int fd, uint64_t size);" not in kbase_c[:idx_pan]:
         kbase_c = kbase_c[:idx_pan] + fwd_decls + kbase_c[idx_pan:]
 
+    drv_expr = f"&{drv_ident}" if drv_ident and drv_ident != "kbase_drv" else "&kbase_drv"
     ops_wrappers = (
         "static struct pan_kmod_dev *\n"
         "kbase_kmod_dev_create_ops(int fd, uint32_t flags,\n"
         "                          const struct pan_kmod_allocator *allocator)\n"
         "{\n"
-        "   return kbase_kmod_dev_create(fd, flags, &kbase_drv, allocator);\n"
+        f"   return kbase_kmod_dev_create(fd, flags, {drv_expr}, allocator);\n"
         "}\n\n"
         "static struct pan_kmod_bo *\n"
         "kbase_kmod_bo_import_ops(struct pan_kmod_dev *dev, int fd)\n"
@@ -230,6 +237,11 @@ if os.path.exists(kbase_src):
         line_start = kbase_c.rfind("\n", 0, idx_ops)
         insert_at = line_start + 1 if line_start != -1 else idx_ops
         kbase_c = kbase_c[:insert_at] + ops_wrappers + kbase_c[insert_at:]
+
+    if not drv_ident:
+        kbase_c = (
+            "static const struct pan_kmod_driver kbase_drv = {0};\n\n" + kbase_c
+        )
 
     with open(kbase_src, "w", encoding="utf-8") as ks:
         ks.write(kbase_c)
