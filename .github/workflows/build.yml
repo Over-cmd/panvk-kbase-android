@@ -80,7 +80,6 @@ jobs:
 
           mesa_dir = "work/mesa"
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
-          kmod_patch_path = "patches/kbase-common/002-kmod-build-kbase.patch"
           kmod_added_lines = []
 
           for patch_path in sorted(glob.glob("patches/*/*.patch")):
@@ -152,15 +151,17 @@ jobs:
 
               rebuilt_lines = []
               changed = False
+              is_002 = os.path.basename(patch_path).startswith("002-")
+              is_008 = os.path.basename(patch_path).startswith("008-")
 
               for header, target_file, hunks in file_sections:
                   # Evitar que vk_android.h bloquee 008-ahb-dma-buf-finder.patch por cambios de contexto en Mesa 26.3.0
-                  if os.path.basename(patch_path).startswith("008-") and target_file == "src/vulkan/runtime/vk_android.h":
+                  if is_008 and target_file == "src/vulkan/runtime/vk_android.h":
                       changed = True
                       continue
 
                   # Evitar que src/panfrost/lib/kmod/meson.build bloquee 002-kmod-build-kbase.patch por contexto distinto
-                  if patch_path.endswith("002-kmod-build-kbase.patch") and target_file == "src/panfrost/lib/kmod/meson.build":
+                  if is_002 and target_file == "src/panfrost/lib/kmod/meson.build":
                       for h in hunks:
                           for bl in h["body"]:
                               if bl.startswith("+") and not bl.startswith("+++"):
