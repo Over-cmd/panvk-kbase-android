@@ -81,74 +81,6 @@ jobs:
           mesa_dir = "work/mesa"
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
 
-          def norm_code(s):
-              return " ".join(s.strip().split())
-
-          def adapt_vk_android_h_hunk(h, src_lines):
-              if not src_lines:
-                  return None
-
-              added_lines = [l[1:] for l in h["body"] if l.startswith("+")]
-              approx_start = max(0, min(len(src_lines) - 1, h["old_start"] - 1))
-              anchor_idx = None
-
-              body_str = "".join(h["body"])
-
-              # Si el hunk busca #endif o #else cerca de old_start, elegir el más próximo a approx_start
-              if "#endif" in body_str or "#else" in body_str:
-                  best_dist = None
-                  for i, line in enumerate(src_lines):
-                      s = line.lstrip()
-                      if s.startswith(("#endif", "#else")):
-                          dist = abs(i - approx_start)
-                          if best_dist is None or dist < best_dist:
-                              best_dist = dist
-                              anchor_idx = i
-
-              if anchor_idx is None:
-                  priority_symbols = [
-                      "vk_android_rp_attachment_has_external_format",
-                      "GetAndroidHardwareBufferPropertiesANDROID",
-                      "AHardwareBuffer",
-                      "ANDROID_API_LEVEL",
-                  ]
-                  for sym in priority_symbols:
-                      if sym in body_str:
-                          best_dist = None
-                          for i, line in enumerate(src_lines):
-                              if sym in line:
-                                  dist = abs(i - approx_start)
-                                  if best_dist is None or dist < best_dist:
-                                      best_dist = dist
-                                      anchor_idx = i
-                          if anchor_idx is not None:
-                              break
-
-              if anchor_idx is None:
-                  anchor_idx = approx_start
-
-              anchor_line = src_lines[anchor_idx]
-              if not anchor_line.endswith("\n"):
-                  anchor_line = anchor_line + "\n"
-
-              src_norm_all = norm_code("".join(src_lines))
-              fresh_added = []
-              for a in added_lines:
-                  na = norm_code(a)
-                  if not na or na in src_norm_all:
-                      continue
-                  fresh_added.append(a if a.endswith("\n") else a + "\n")
-
-              new_body = [" " + anchor_line] + ["+" + a for a in fresh_added]
-              old_cnt = 1
-              new_cnt = 1 + len(fresh_added)
-              start_line = anchor_idx + 1
-
-              return (
-                  f"@@ -{start_line},{old_cnt} +{start_line},{new_cnt} @@{h['suffix']}\n",
-                  new_body,
-              )
-
           for patch_path in sorted(glob.glob("patches/*/*.patch")):
               with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
                   lines = f.readlines()
@@ -220,6 +152,11 @@ jobs:
               changed = False
 
               for header, target_file, hunks in file_sections:
+                  # Evitar que vk_android.h bloquee 008-ahb-dma-buf-finder.patch por cambios de contexto en Mesa 26.3.0
+                  if os.path.basename(patch_path).startswith("008-") and target_file == "src/vulkan/runtime/vk_android.h":
+                      changed = True
+                      continue
+
                   target_path = os.path.join(mesa_dir, target_file)
                   if not os.path.exists(target_path):
                       rebuilt_lines.extend(header)
@@ -261,16 +198,6 @@ jobs:
                               changed = True
                           rebuilt_lines.append(f"@@ -{new_pos},{old_cnt} +{new_pos},{new_cnt} @@{h['suffix']}\n")
                           rebuilt_lines.extend(h["body"])
-                      elif target_file == "src/vulkan/runtime/vk_android.h" and src_lines:
-                          adapted = adapt_vk_android_h_hunk(h, src_lines)
-                          if adapted is not None:
-                              changed = True
-                              hdr_line, new_body = adapted
-                              rebuilt_lines.append(hdr_line)
-                              rebuilt_lines.extend(new_body)
-                          else:
-                              rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
-                              rebuilt_lines.extend(h["body"])
                       else:
                           rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
                           rebuilt_lines.extend(h["body"])
@@ -284,6 +211,32 @@ jobs:
           git -C work/mesa reset --hard HEAD
           git -C work/mesa clean -fd
           ./scripts/apply-patches.sh --profile g52-v7-jm
+
+          python3 - <<'PY'
+          vk_hdr = "work/mesa/src/vulkan/runtime/vk_android.h"
+          if os.path.exists(vk_hdr):
+              with open(vk_hdr, "r", encoding="utf-8", errors="replace") as f:
+                  content = f.read()
+              decl = (
+                  "VkResult vk_common_GetAndroidHardwareBufferPropertiesANDROID(\n"
+                  "   VkDevice device_h, const struct AHardwareBuffer *buffer,\n"
+                  "   VkAndroidHardwareBufferPropertiesANDROID *pProperties);\n"
+              )
+              if "vk_common_GetAndroidHardwareBufferPropertiesANDROID" not in content:
+                  target = "vk_android_rp_attachment_has_external_format"
+                  idx = content.find(target)
+                  if idx != -1:
+                      end_stmt = content.find(";", idx)
+                      if end_stmt != -1:
+                          content = content[: end_stmt + 1] + "\n\n" + decl + content[end_stmt + 1 :]
+                      else:
+                          content = content + "\n" + decl
+                  else:
+                      content = content + "\n" + decl
+                  with open(vk_hdr, "w", encoding="utf-8") as f:
+                      f.write(content)
+                  print("Declaración añadida en src/vulkan/runtime/vk_android.h")
+          PY
 
       - name: Debug rejected hunks in Mesa 26.3.0
         if: failure()
