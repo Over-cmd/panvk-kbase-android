@@ -528,6 +528,8 @@ jobs:
           #define __SHIM_XCB_RANDR_H__
           #include <stdint.h>
           #include <xcb/xcb.h>
+          #define XCB_RANDR_SET_CONFIG_SUCCESS 0
+          #define XCB_RANDR_SET_CONFIG_INVALID_CONFIG_TIME 2
           #define XCB_RANDR_MODE_FLAG_HSYNC_POSITIVE 1
           #define XCB_RANDR_MODE_FLAG_HSYNC_NEGATIVE 2
           #define XCB_RANDR_MODE_FLAG_VSYNC_POSITIVE 4
