@@ -317,6 +317,7 @@ jobs:
           #include <stdbool.h>
           #include <stddef.h>
           #include <stdint.h>
+          #include <stdlib.h>
           #include <sys/ioctl.h>
           #include <drm.h>
           #define DRM_BUS_PCI 0
@@ -334,6 +335,25 @@ jobs:
               struct drmPciBusInfo *pci;
             } businfo;
           } drmDevice, *drmDevicePtr;
+          typedef struct _drmVersion {
+            int version_major;
+            int version_minor;
+            int version_patchlevel;
+            size_t name_len;
+            char *name;
+            size_t date_len;
+            char *date;
+            size_t desc_len;
+            char *desc;
+          } drmVersion, *drmVersionPtr;
+          static inline drmVersionPtr drmGetVersion(int fd) {
+            (void)fd;
+            drmVersionPtr v = (drmVersionPtr)calloc(1, sizeof(drmVersion));
+            return v;
+          }
+          static inline void drmFreeVersion(drmVersionPtr version) {
+            free(version);
+          }
           static inline int drmIoctl(int fd, unsigned long request, void *arg) { return ioctl(fd, request, arg); }
           static inline int drmGetDevice2(int fd, uint32_t flags, drmDevicePtr *device) { (void)fd; (void)flags; if (device) *device = (drmDevicePtr)0; return -1; }
           static inline void drmFreeDevice(drmDevicePtr *device) { if (device) *device = (drmDevicePtr)0; }
