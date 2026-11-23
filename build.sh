@@ -454,7 +454,7 @@ typedef struct {
   xcb_keycode_t min_keycode, max_keycode; uint32_t pad1;
 } xcb_setup_t;
 typedef struct { uint8_t pad0; } xcb_generic_event_t;
-typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
+typedef struct xcb_generic_error_t { uint8_t response_type, pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
 typedef struct { uint32_t sequence; } xcb_void_cookie_t, xcb_query_extension_cookie_t;
 typedef struct {
   uint8_t response_type, pad0; uint16_t sequence; uint32_t length;
@@ -521,18 +521,19 @@ typedef struct {
   uint8_t response_type, status; uint16_t sequence; uint32_t length, timestamp; xcb_randr_crtc_t crtc;
   uint32_t mm_width, mm_height; uint8_t connection, subpixel_order; uint16_t num_crtcs, num_modes, num_preferred, num_clones, name_len;
 } xcb_randr_get_output_info_reply_t;
-struct xcb_connection_t; struct xcb_generic_error_t;
+struct xcb_connection_t;
+typedef struct xcb_generic_error_t xcb_generic_error_t;
 static inline xcb_randr_query_version_cookie_t xcb_randr_query_version_unchecked(struct xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_randr_query_version_cookie_t ck = {0}; return ck; }
-static inline xcb_randr_query_version_reply_t *xcb_randr_query_version_reply(struct xcb_connection_t *c, xcb_randr_query_version_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (struct xcb_generic_error_t *)0; return (xcb_randr_query_version_reply_t *)0; }
+static inline xcb_randr_query_version_reply_t *xcb_randr_query_version_reply(struct xcb_connection_t *c, xcb_randr_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_randr_query_version_reply_t *)0; }
 static inline xcb_randr_get_crtc_info_cookie_t xcb_randr_get_crtc_info_unchecked(struct xcb_connection_t *c, xcb_randr_crtc_t crtc, uint32_t ts) { (void)c; (void)crtc; (void)ts; xcb_randr_get_crtc_info_cookie_t ck = {0}; return ck; }
-static inline xcb_randr_get_crtc_info_reply_t *xcb_randr_get_crtc_info_reply(struct xcb_connection_t *c, xcb_randr_get_crtc_info_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (struct xcb_generic_error_t *)0; return (xcb_randr_get_crtc_info_reply_t *)0; }
+static inline xcb_randr_get_crtc_info_reply_t *xcb_randr_get_crtc_info_reply(struct xcb_connection_t *c, xcb_randr_get_crtc_info_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_randr_get_crtc_info_reply_t *)0; }
 static inline xcb_randr_get_screen_resources_current_cookie_t xcb_randr_get_screen_resources_current_unchecked(struct xcb_connection_t *c, xcb_window_t w) { (void)c; (void)w; xcb_randr_get_screen_resources_current_cookie_t ck = {0}; return ck; }
-static inline xcb_randr_get_screen_resources_current_reply_t *xcb_randr_get_screen_resources_current_reply(struct xcb_connection_t *c, xcb_randr_get_screen_resources_current_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (struct xcb_generic_error_t *)0; return (xcb_randr_get_screen_resources_current_reply_t *)0; }
+static inline xcb_randr_get_screen_resources_current_reply_t *xcb_randr_get_screen_resources_current_reply(struct xcb_connection_t *c, xcb_randr_get_screen_resources_current_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_randr_get_screen_resources_current_reply_t *)0; }
 static inline xcb_randr_crtc_t *xcb_randr_get_screen_resources_current_crtcs(const xcb_randr_get_screen_resources_current_reply_t *r) { (void)r; return (xcb_randr_crtc_t *)0; }
 static inline xcb_randr_output_t *xcb_randr_get_screen_resources_current_outputs(const xcb_randr_get_screen_resources_current_reply_t *r) { (void)r; return (xcb_randr_output_t *)0; }
 static inline xcb_randr_mode_info_t *xcb_randr_get_screen_resources_current_modes(const xcb_randr_get_screen_resources_current_reply_t *r) { (void)r; return (xcb_randr_mode_info_t *)0; }
 static inline xcb_randr_get_output_info_cookie_t xcb_randr_get_output_info(struct xcb_connection_t *c, xcb_randr_output_t o, uint32_t ts) { (void)c; (void)o; (void)ts; xcb_randr_get_output_info_cookie_t ck = {0}; return ck; }
-static inline xcb_randr_get_output_info_reply_t *xcb_randr_get_output_info_reply(struct xcb_connection_t *c, xcb_randr_get_output_info_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (struct xcb_generic_error_t *)0; return (xcb_randr_get_output_info_reply_t *)0; }
+static inline xcb_randr_get_output_info_reply_t *xcb_randr_get_output_info_reply(struct xcb_connection_t *c, xcb_randr_get_output_info_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_randr_get_output_info_reply_t *)0; }
 #endif
 EOF
 
@@ -555,10 +556,10 @@ typedef struct { uint8_t response_type, nfd; uint16_t sequence; uint32_t length;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_dri3_query_version_reply_t;
 typedef struct { uint8_t response_type, nfd; uint16_t sequence; uint32_t length, pixmap_size; int32_t fd; } xcb_dri3_buffer_from_pixmap_reply_t;
 static inline xcb_dri3_open_cookie_t xcb_dri3_open(xcb_connection_t *c, xcb_drawable_t d, uint32_t p) { (void)c; (void)d; (void)p; xcb_dri3_open_cookie_t ck = {0}; return ck; }
-static inline xcb_dri3_open_reply_t *xcb_dri3_open_reply(xcb_connection_t *c, xcb_dri3_open_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_open_reply_t *)0; }
+static inline xcb_dri3_open_reply_t *xcb_dri3_open_reply(xcb_connection_t *c, xcb_dri3_open_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_open_reply_t *)0; }
 static inline int *xcb_dri3_open_reply_fds(xcb_connection_t *c, xcb_dri3_open_reply_t *r) { (void)c; (void)r; static int fds[1] = {-1}; return fds; }
 static inline xcb_dri3_query_version_cookie_t xcb_dri3_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_dri3_query_version_cookie_t ck = {0}; return ck; }
-static inline xcb_dri3_query_version_reply_t *xcb_dri3_query_version_reply(xcb_connection_t *c, xcb_dri3_query_version_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_query_version_reply_t *)0; }
+static inline xcb_dri3_query_version_reply_t *xcb_dri3_query_version_reply(xcb_connection_t *c, xcb_dri3_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_query_version_reply_t *)0; }
 #endif
 EOF
 
@@ -572,7 +573,7 @@ typedef uint32_t xcb_present_event_t;
 typedef struct { uint32_t sequence; } xcb_present_query_version_cookie_t;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_present_query_version_reply_t;
 static inline xcb_present_query_version_cookie_t xcb_present_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_present_query_version_cookie_t ck = {0}; return ck; }
-static inline xcb_present_query_version_reply_t *xcb_present_query_version_reply(xcb_connection_t *c, xcb_present_query_version_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_present_query_version_reply_t *)0; }
+static inline xcb_present_query_version_reply_t *xcb_present_query_version_reply(xcb_connection_t *c, xcb_present_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_present_query_version_reply_t *)0; }
 #endif
 EOF
 
@@ -609,7 +610,7 @@ typedef uint32_t xcb_xfixes_region_t;
 typedef struct { uint32_t sequence; } xcb_xfixes_query_version_cookie_t;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_xfixes_query_version_reply_t;
 static inline xcb_xfixes_query_version_cookie_t xcb_xfixes_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_xfixes_query_version_cookie_t ck = {0}; return ck; }
-static inline xcb_xfixes_query_version_reply_t *xcb_xfixes_query_version_reply(xcb_connection_t *c, xcb_xfixes_query_version_cookie_t ck, struct xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_xfixes_query_version_reply_t *)0; }
+static inline xcb_xfixes_query_version_reply_t *xcb_xfixes_query_version_reply(xcb_connection_t *c, xcb_xfixes_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_xfixes_query_version_reply_t *)0; }
 #endif
 EOF
 
