@@ -299,13 +299,43 @@ jobs:
           export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
           echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
 
-          mkdir -p shims/include/xcb shims/include/X11
+          mkdir -p shims/include/libdrm shims/include/xcb shims/include/X11
           NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-          if [ ! -f shims/libdrm.pc ]; then
-            cat <<EOF > shims/libdrm.pc
-          prefix=$NDK_SYSROOT/usr
+          cat <<'EOF' > shims/include/libdrm/drm.h
+          #ifndef __SHIM_DRM_H__
+          #define __SHIM_DRM_H__
+          #include <stdint.h>
+          typedef uint32_t drm_handle_t;
+          #define DRM_SYNCOBJ_CREATE 0
+          #define DRM_SYNCOBJ_DESTROY 0
+          #define DRM_SYNCOBJ_HANDLE_TO_FD 0
+          #define DRM_SYNCOBJ_FD_TO_HANDLE 0
+          #define DRM_SYNCOBJ_WAIT 0
+          #define DRM_SYNCOBJ_SIGNAL 0
+          struct drm_syncobj_create { uint32_t handle; uint32_t flags; };
+          struct drm_syncobj_destroy { uint32_t handle; uint32_t pad; };
+          struct drm_syncobj_handle { uint32_t handle; uint32_t flags; int32_t fd; uint32_t pad; };
+          struct drm_syncobj_wait { uint64_t handles; uint32_t count_handles; int64_t timeout_nsec; uint32_t flags; uint32_t first_signaled; uint32_t pad; };
+          #endif
+          EOF
+          cat <<'EOF' > shims/include/libdrm/xf86drm.h
+          #ifndef __SHIM_XF86DRM_H__
+          #define __SHIM_XF86DRM_H__
+          #include <stdint.h>
+          #include <drm.h>
+          static inline int drmSyncobjCreate(int fd, uint32_t flags, uint32_t *handle) { (void)fd; (void)flags; if (handle) *handle = 0; return -1; }
+          static inline int drmSyncobjDestroy(int fd, uint32_t handle) { (void)fd; (void)handle; return -1; }
+          static inline int drmSyncobjHandleToFD(int fd, uint32_t handle, int *obj_fd) { (void)fd; (void)handle; if (obj_fd) *obj_fd = -1; return -1; }
+          static inline int drmSyncobjFDToHandle(int fd, int obj_fd, uint32_t *handle) { (void)fd; (void)obj_fd; if (handle) *handle = 0; return -1; }
+          static inline int drmSyncobjWait(int fd, uint32_t *handles, uint32_t num_handles, int64_t timeout_nsec, uint32_t flags, uint32_t *first_signaled) { (void)fd; (void)handles; (void)num_handles; (void)timeout_nsec; (void)flags; (void)first_signaled; return -1; }
+          static inline int drmSyncobjSignal(int fd, const uint32_t *handles, uint32_t num_handles) { (void)fd; (void)handles; (void)num_handles; return -1; }
+          #endif
+          EOF
+
+          cat <<EOF > shims/libdrm.pc
+          prefix=$GITHUB_WORKSPACE/shims
           exec_prefix=\${prefix}
-          libdir=\${exec_prefix}/lib/aarch64-linux-android/30
+          libdir=$NDK_SYSROOT/usr/lib/aarch64-linux-android/30
           includedir=\${prefix}/include
 
           Name: libdrm
@@ -314,7 +344,6 @@ jobs:
           Libs: -L\${libdir}
           Cflags: -I\${includedir} -I\${includedir}/libdrm
           EOF
-          fi
 
           PLATFORMS="android"
           if [ "${{ matrix.flavor }}" = "x11" ]; then
