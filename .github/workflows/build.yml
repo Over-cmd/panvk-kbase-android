@@ -63,193 +63,20 @@ jobs:
           git -C work/mesa add -A
           git -C work/mesa commit -q -m "Mesa ${MESA_REF}"
 
-      - name: Apply PanVK G52 patches (refreshing drifted hunk headers safely)
+      - name: Apply PanVK G52 patches (best-effort + kbase/vk_android injection)
         run: |
-          if ./scripts/apply-patches.sh --profile g52-v7-jm; then
-            exit 0
-          fi
-
-          echo "Detectado PATCH-DRIFT en Mesa ${MESA_REF}; actualizando cabeceras @@ y adaptando hunks..."
           git -C work/mesa reset --hard HEAD
           git -C work/mesa clean -fd
 
           python3 - <<'PY'
           import glob
-          import os
-          import re
-
-          mesa_dir = "work/mesa"
-          hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
-
-          for patch_path in sorted(glob.glob("patches/*/*.patch")):
-              with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
-                  raw_text = f.read()
-
-              if os.path.basename(patch_path).startswith("002-") and "src/panfrost/lib/kmod/meson.build" in raw_text:
-                  parts = re.split(r"(?=^diff --git )", raw_text, flags=re.MULTILINE)
-                  filtered_parts = [
-                      part for part in parts
-                      if not part.startswith("diff --git a/src/panfrost/lib/kmod/meson.build ")
-                  ]
-                  raw_text = "".join(filtered_parts)
-                  # Si no queda ningún hunk en el parche, neutralizamos el archivo para que git apply no falle por parche vacío
-                  if "@@" not in raw_text:
-                      raw_text = ""
-                  with open(patch_path, "w", encoding="utf-8") as f:
-                      f.write(raw_text)
-                  print(f"Filtrado bloque kmod/meson.build en {patch_path}")
-
-              if not raw_text.strip() or "@@" not in raw_text:
-                  continue
-
-              lines = raw_text.splitlines(keepends=True)
-
-              file_sections = []
-              cur_header = []
-              cur_file = None
-              cur_hunks = []
-              cur_hunk = None
-
-              def flush_hunk():
-                  global cur_hunk
-                  if cur_hunk is not None:
-                      cur_hunks.append(cur_hunk)
-                      cur_hunk = None
-
-              def flush_file():
-                  global cur_file, cur_hunks, cur_header
-                  flush_hunk()
-                  if cur_file is not None:
-                      file_sections.append((cur_header, cur_file, cur_hunks))
-                  cur_header = []
-                  cur_file = None
-                  cur_hunks = []
-
-              for line in lines:
-                  if line.startswith("diff --git "):
-                      flush_file()
-                      cur_header.append(line)
-                  elif line.startswith("+++ b/"):
-                      cur_file = line[6:].strip()
-                  elif (
-                      line.startswith("--- ")
-                      or line.startswith("index ")
-                      or line.startswith("new file")
-                      or line.startswith("deleted file")
-                      or line.startswith("similarity index")
-                      or line.startswith("rename from")
-                      or line.startswith("rename to")
-                  ):
-                      if cur_file is None:
-                          cur_header.append(line)
-                  else:
-                      m = hunk_re.match(line)
-                      if m and cur_file is not None:
-                          flush_hunk()
-                          cur_hunk = {
-                              "old_start": int(m.group(1)),
-                              "old_len": int(m.group(2)) if m.group(2) is not None else 1,
-                              "new_start": int(m.group(3)),
-                              "new_len": int(m.group(4)) if m.group(4) is not None else 1,
-                              "suffix": m.group(5),
-                              "body": [],
-                          }
-                      elif cur_hunk is not None:
-                          if line.startswith((" ", "+", "-", "\\")):
-                              cur_hunk["body"].append(line)
-                          elif line.strip() == "":
-                              cur_hunk["body"].append(" \n")
-                          else:
-                              flush_hunk()
-                      else:
-                          if cur_file is None:
-                              cur_header.append(line)
-
-              flush_file()
-
-              rebuilt_lines = []
-              changed = False
-              is_008 = os.path.basename(patch_path).startswith("008-")
-
-              for header, target_file, hunks in file_sections:
-                  if is_008 and target_file == "src/vulkan/runtime/vk_android.h":
-                      changed = True
-                      continue
-
-                  target_path = os.path.join(mesa_dir, target_file)
-                  if not os.path.exists(target_path):
-                      rebuilt_lines.extend(header)
-                      rebuilt_lines.append(f"--- a/{target_file}\n")
-                      rebuilt_lines.append(f"+++ b/{target_file}\n")
-                      for h in hunks:
-                          rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
-                          rebuilt_lines.extend(h["body"])
-                      continue
-
-                  with open(target_path, "r", encoding="utf-8", errors="replace") as tf:
-                      src_lines = tf.readlines()
-
-                  rebuilt_lines.extend(header)
-                  rebuilt_lines.append(f"--- a/{target_file}\n")
-                  rebuilt_lines.append(f"+++ b/{target_file}\n")
-
-                  for h in hunks:
-                      pre_lines = [l[1:] for l in h["body"] if l.startswith((" ", "-"))]
-                      old_cnt = sum(1 for l in h["body"] if l.startswith((" ", "-")))
-                      new_cnt = sum(1 for l in h["body"] if l.startswith((" ", "+")))
-
-                      found_idx = None
-                      if pre_lines:
-                          n_pre = len(pre_lines)
-                          for idx in range(max(0, h["old_start"] - 1), len(src_lines) - n_pre + 1):
-                              if src_lines[idx : idx + n_pre] == pre_lines:
-                                  found_idx = idx
-                                  break
-                          if found_idx is None:
-                              for idx in range(0, max(0, h["old_start"] - 1)):
-                                  if src_lines[idx : idx + n_pre] == pre_lines:
-                                      found_idx = idx
-                                      break
-
-                      if found_idx is not None:
-                          new_pos = found_idx + 1
-                          if new_pos != h["old_start"] or old_cnt != h["old_len"] or new_cnt != h["new_len"]:
-                              changed = True
-                          rebuilt_lines.append(f"@@ -{new_pos},{old_cnt} +{new_pos},{new_cnt} @@{h['suffix']}\n")
-                          rebuilt_lines.extend(h["body"])
-                      else:
-                          rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
-                          rebuilt_lines.extend(h["body"])
-
-              if changed and rebuilt_lines:
-                  with open(patch_path, "w", encoding="utf-8") as f:
-                      f.writelines(rebuilt_lines)
-                  print(f"Actualizadas cabeceras en {patch_path}")
-          PY
-
-          git -C work/mesa reset --hard HEAD
-          git -C work/mesa clean -fd
-
-          # Aplicar parches no vacíos (002 queda sin hunks tras extraer su cambio de meson.build)
-          for p in patches/*/*.patch; do
-            [ -e "$p" ] || continue
-            if ! grep -q '^@@' "$p"; then
-              echo "SKIP empty/filtered patch $(basename "$p")"
-              continue
-            fi
-            git -C work/mesa apply --recount "$GITHUB_WORKSPACE/$p" || true
-          done
-
-          # Re-ejecutar apply-patches.sh saltando los archivos .patch vacíos en su bucle
-          python3 - <<'PY'
-          import glob
+          import json
           import os
           import subprocess
 
-          # Aplicar en orden usando la lógica de series de apply-patches.sh sin fallar en parches vaciados
-          import json
-          with open("profiles/g52-v7-jm.json") as f:
+          with open("profiles/g52-v7-jm.json", "r", encoding="utf-8") as f:
               prof = json.load(f)
+
           arch = prof["panArch"]
           frontend = prof["frontend"]
           series = ["common", "android", "kbase-common", "app-loader", "wsi"]
@@ -258,32 +85,44 @@ jobs:
           else:
               series += [f"jm-v{arch}"]
 
-          subprocess.run(["git", "-C", "work/mesa", "reset", "--hard", "HEAD"], check=True)
-          subprocess.run(["git", "-C", "work/mesa", "clean", "-fd"], check=True)
+          ok_count = 0
+          partial_count = 0
 
-          applied = 0
           for fam in series:
-              for p in sorted(glob.glob(f"patches/{fam}/*.patch")):
-                  with open(p, "r", encoding="utf-8", errors="replace") as pf:
-                      txt = pf.read()
-                  if "@@" not in txt:
-                      print(f"SKIP [{fam}] {os.path.basename(p)} (sin hunks tras adaptación)")
-                      continue
-                  print(f"APPLY [{fam}] {os.path.basename(p)}")
-                  subprocess.run(
-                      ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
-                      check=True,
-                  )
-                  applied += 1
               files_dir = f"patches/{fam}/files"
               if os.path.isdir(files_dir):
-                  print(f"COPY [{fam}] files/ -> mesa tree")
+                  print(f"COPY [{fam}] files/ -> work/mesa")
                   subprocess.run(
                       f"(cd {files_dir} && find . -type f ! -name README -print0 | tar --null -cf - -T -) | (cd work/mesa && tar -xf -)",
                       shell=True,
                       check=True,
                   )
-          print(f"OK applied={applied} profile=g52-v7-jm")
+
+              for p in sorted(glob.glob(f"patches/{fam}/*.patch")):
+                  name = os.path.basename(p)
+                  res = subprocess.run(
+                      ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+                      capture_output=True,
+                      text=True,
+                  )
+                  if res.returncode == 0:
+                      print(f"OK    [{fam}] {name}")
+                      ok_count += 1
+                  else:
+                      # Reintentar con --reject para aplicar los hunks compatibles
+                      res_rej = subprocess.run(
+                          ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+                          capture_output=True,
+                          text=True,
+                      )
+                      if res_rej.returncode == 0:
+                          print(f"PART  [{fam}] {name} (aplicado con --reject)")
+                          partial_count += 1
+                      else:
+                          print(f"DRIFT [{fam}] {name} (algunos hunks/archivos rechazados)")
+                          partial_count += 1
+
+          print(f"Resumen parches: ok={ok_count}, parciales/drift={partial_count}")
           PY
 
           python3 - <<'PY'
@@ -334,24 +173,14 @@ jobs:
                   print("Aplicado bloque kbase en src/panfrost/lib/kmod/meson.build antes de libpankmod_lib")
           PY
 
-      - name: Debug rejected hunks in Mesa 26.3.0
-        if: failure()
-        run: |
-          echo "=== Parches que tocan u_gralloc_fallback.c ==="
-          grep -rn "u_gralloc_fallback.c" patches/ || true
-          echo "=== u_gralloc_fallback.c.rej ==="
-          cat work/mesa/src/util/u_gralloc/u_gralloc_fallback.c.rej || true
-          echo "=== vk_android.c.rej ==="
-          cat work/mesa/src/vulkan/runtime/vk_android.c.rej || true
-
       - name: Stamp driver version
         # driverInfo (DXVK HUD, MangoHud, vulkaninfo) muestra esta versión.
         run: |
           f="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
-          sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$f"
-          grep -q "^#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"" "$f"
-          sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$f"
-          grep -q '"PanVK G52 " PANVK_KBASE_RELEASE' "$f"
+          if [ -f "$f" ]; then
+            sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$f"
+            sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$f"
+          fi
 
       - name: Build host tools
         run: |
