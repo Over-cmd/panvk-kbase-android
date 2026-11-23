@@ -332,6 +332,20 @@ jobs:
           Cflags: -I\${includedir}
           EOF
             fi
+            if [ ! -f shims/xcb-randr.pc ]; then
+              cat <<EOF > shims/xcb-randr.pc
+          prefix=$GITHUB_WORKSPACE/shims
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+
+          Name: XCB RandR
+          Description: XCB RandR shim for cross-build
+          Requires: xcb
+          Version: 1.17.0
+          Cflags: -I\${includedir}
+          EOF
+            fi
             cat <<'EOF' > shims/include/xcb/xcb.h
           #ifndef __SHIM_XCB_H__
           #define __SHIM_XCB_H__
@@ -346,6 +360,16 @@ jobs:
           typedef struct { uint8_t pad0; } xcb_generic_event_t;
           typedef struct { uint8_t response_type; uint8_t pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
           typedef struct { uint32_t sequence; } xcb_void_cookie_t;
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/xcb/randr.h
+          #ifndef __SHIM_XCB_RANDR_H__
+          #define __SHIM_XCB_RANDR_H__
+          #include <stdint.h>
+          #include <xcb/xcb.h>
+          typedef uint32_t xcb_randr_output_t;
+          typedef uint32_t xcb_randr_crtc_t;
+          typedef uint32_t xcb_randr_mode_t;
           #endif
           EOF
           fi
