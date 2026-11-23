@@ -299,7 +299,7 @@ jobs:
           export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
           echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
 
-          mkdir -p shims/include/libdrm shims/include/xcb shims/include/X11
+          mkdir -p shims/include/libdrm shims/include/xcb shims/include/X11/extensions
           NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           cat <<'EOF' > shims/include/libdrm/drm.h
           #ifndef __SHIM_DRM_H__
@@ -357,7 +357,7 @@ jobs:
           PLATFORMS="android"
           if [ "${{ matrix.flavor }}" = "x11" ]; then
             PLATFORMS="android,x11"
-            for pc_name in xcb xcb-randr x11-xcb xcb-keysyms xcb-dri3 xcb-present xcb-sync xcb-shm xcb-xfixes xshmfence; do
+            for pc_name in xcb xcb-randr x11-xcb xcb-keysyms xcb-dri3 xcb-present xcb-sync xcb-shm xcb-xfixes xshmfence xrandr x11; do
               if [ ! -f "shims/${pc_name}.pc" ]; then
                 cat <<EOF > "shims/${pc_name}.pc"
           prefix=$GITHUB_WORKSPACE/shims
@@ -459,11 +459,31 @@ jobs:
           typedef uint32_t xcb_xfixes_region_t;
           #endif
           EOF
+            cat <<'EOF' > shims/include/X11/Xlib.h
+          #ifndef __SHIM_XLIB_H__
+          #define __SHIM_XLIB_H__
+          #include <stdint.h>
+          typedef struct _XDisplay Display;
+          typedef unsigned long XID;
+          typedef XID Window;
+          typedef XID Drawable;
+          typedef int Status;
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/X11/extensions/Xrandr.h
+          #ifndef __SHIM_XRANDR_H__
+          #define __SHIM_XRANDR_H__
+          #include <X11/Xlib.h>
+          typedef XID RROutput;
+          typedef XID RRCrtc;
+          typedef XID RRMode;
+          #endif
+          EOF
             cat <<'EOF' > shims/include/X11/Xlib-xcb.h
           #ifndef __SHIM_XLIB_XCB_H__
           #define __SHIM_XLIB_XCB_H__
           #include <xcb/xcb.h>
-          typedef struct _XDisplay Display;
+          #include <X11/Xlib.h>
           static inline xcb_connection_t *XGetXCBConnection(Display *dpy) { (void)dpy; return (xcb_connection_t *)0; }
           #endif
           EOF
