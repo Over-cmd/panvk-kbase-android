@@ -209,22 +209,12 @@ if os.path.exists(kbase_src):
         flags=re.MULTILINE,
     )
 
-    insert_pos = None
-    if drv_name:
-        m_def = re.search(rf"\b{re.escape(drv_name)}\b\s*(?:\[[^\]]*\])?\s*=\s*\{{.*?\}};", kbase_c, flags=re.DOTALL)
-        if m_def:
-            insert_pos = m_def.end()
-
-    if insert_pos is not None:
-        kbase_c = kbase_c[:insert_pos] + wrappers + kbase_c[insert_pos:]
+    m_ops = re.search(r"^(?:static\s+)?(?:const\s+)?struct\s+pan_kmod_ops\s+kbase_kmod_ops\b|\bkbase_kmod_ops\s*=", kbase_c, flags=re.MULTILINE)
+    if m_ops:
+        idx_ops = m_ops.start()
+        kbase_c = kbase_c[:idx_ops] + wrappers + kbase_c[idx_ops:]
     else:
-        m_ops = re.search(r"\bkbase_kmod_ops\s*=", kbase_c)
-        if m_ops:
-            line_start = kbase_c.rfind("\n", 0, m_ops.start())
-            idx_ops = line_start + 1 if line_start != -1 else m_ops.start()
-            kbase_c = kbase_c[:idx_ops] + wrappers + kbase_c[idx_ops:]
-        else:
-            kbase_c = kbase_c + "\n" + wrappers
+        kbase_c = kbase_c + "\n" + wrappers
 
     with open(kbase_src, "w", encoding="utf-8") as ks:
         ks.write(kbase_c)
