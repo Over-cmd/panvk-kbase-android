@@ -87,8 +87,7 @@ jobs:
 
           def adapt_vk_android_h_hunk(h, src_lines):
               added_lines = [l[1:] for l in h["body"] if l.startswith("+")]
-              removed_lines = [l[1:] for l in h["body"] if l.startswith("-")]
-              if not added_lines:
+              if not added_lines or not src_lines:
                   return None
 
               approx_start = max(0, min(len(src_lines) - 1, h["old_start"] - 1))
@@ -138,18 +137,15 @@ jobs:
               if not anchor_line.endswith("\n"):
                   anchor_line = anchor_line + "\n"
 
+              # Solo 1 línea exacta de contexto y líneas añadidas (+), sin líneas eliminadas obsoletas
               new_body = [" " + anchor_line]
-              src_norm_lines = [norm_code(x) for x in src_lines]
-              for r in removed_lines:
-                  if norm_code(r) in src_norm_lines:
-                      new_body.append("-" + (r if r.endswith("\n") else r + "\n"))
               for a in added_lines:
                   if not a.endswith("\n"):
                       a = a + "\n"
                   new_body.append("+" + a)
 
-              old_cnt = sum(1 for l in new_body if l.startswith((" ", "-")))
-              new_cnt = sum(1 for l in new_body if l.startswith((" ", "+")))
+              old_cnt = 1
+              new_cnt = 1 + len(added_lines)
               start_line = anchor_idx + 1
 
               return (
