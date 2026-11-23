@@ -357,7 +357,7 @@ jobs:
           PLATFORMS="android"
           if [ "${{ matrix.flavor }}" = "x11" ]; then
             PLATFORMS="android,x11"
-            for pc_name in xcb xcb-randr x11-xcb xcb-keysyms xcb-dri3 xcb-present xcb-sync xcb-shm xcb-xfixes; do
+            for pc_name in xcb xcb-randr x11-xcb xcb-keysyms xcb-dri3 xcb-present xcb-sync xcb-shm xcb-xfixes xshmfence; do
               if [ ! -f "shims/${pc_name}.pc" ]; then
                 cat <<EOF > "shims/${pc_name}.pc"
           prefix=$GITHUB_WORKSPACE/shims
@@ -372,6 +372,18 @@ jobs:
           EOF
               fi
             done
+            cat <<'EOF' > shims/include/xshmfence.h
+          #ifndef __SHIM_XSHMFENCE_H__
+          #define __SHIM_XSHMFENCE_H__
+          struct xshmfence;
+          static inline int xshmfence_trigger(struct xshmfence *f) { (void)f; return -1; }
+          static inline int xshmfence_await(struct xshmfence *f) { (void)f; return -1; }
+          static inline void xshmfence_reset(struct xshmfence *f) { (void)f; }
+          static inline int xshmfence_alloc_shm(void) { return -1; }
+          static inline struct xshmfence *xshmfence_map_shm(int fd) { (void)fd; return (struct xshmfence *)0; }
+          static inline void xshmfence_unmap_shm(struct xshmfence *f) { (void)f; }
+          #endif
+          EOF
             cat <<'EOF' > shims/include/xcb/xcb.h
           #ifndef __SHIM_XCB_H__
           #define __SHIM_XCB_H__
