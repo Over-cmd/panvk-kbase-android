@@ -470,6 +470,9 @@ EOF
 #ifndef XCB_NONE
 #define XCB_NONE 0u
 #endif
+#define XCB_IMAGE_FORMAT_XY_BITMAP 0
+#define XCB_IMAGE_FORMAT_XY_PIXMAP 1
+#define XCB_IMAGE_FORMAT_Z_PIXMAP 2
 #define XCB_VISUAL_CLASS_STATIC_GRAY 0
 #define XCB_VISUAL_CLASS_GRAY_SCALE 1
 #define XCB_VISUAL_CLASS_STATIC_COLOR 2
@@ -486,6 +489,20 @@ typedef struct {
   uint16_t width;
   uint16_t height;
 } xcb_rectangle_t;
+typedef struct {
+  uint8_t major_opcode;
+  uint8_t format;
+  uint16_t length;
+  xcb_drawable_t drawable;
+  xcb_gcontext_t gc;
+  uint16_t width;
+  uint16_t height;
+  int16_t dst_x;
+  int16_t dst_y;
+  uint8_t left_pad;
+  uint8_t depth;
+  uint8_t pad[2];
+} xcb_put_image_request_t;
 typedef struct {
   xcb_visualid_t visual_id;
   uint8_t _class;
@@ -542,6 +559,12 @@ typedef struct {
   uint8_t response_type, same_screen; uint16_t sequence; uint32_t length;
   xcb_window_t child; int16_t dst_x; int16_t dst_y;
 } xcb_translate_coordinates_reply_t;
+static inline int xcb_flush(xcb_connection_t *c) { (void)c; return 0; }
+static inline uint32_t xcb_get_maximum_request_length(xcb_connection_t *c) { (void)c; return 65535u; }
+static inline xcb_void_cookie_t xcb_put_image(xcb_connection_t *c, uint8_t format, xcb_drawable_t drawable, xcb_gcontext_t gc, uint16_t width, uint16_t height, int16_t dst_x, int16_t dst_y, uint8_t left_pad, uint8_t depth, uint32_t data_len, const uint8_t *data) {
+  (void)c; (void)format; (void)drawable; (void)gc; (void)width; (void)height; (void)dst_x; (void)dst_y; (void)left_pad; (void)depth; (void)data_len; (void)data;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
 static inline const xcb_setup_t *xcb_get_setup(xcb_connection_t *c) { (void)c; static const xcb_setup_t s = {0}; return &s; }
 static inline xcb_screen_iterator_t xcb_setup_roots_iterator(const xcb_setup_t *R) {
   (void)R; static xcb_screen_t ds = {0}; xcb_screen_iterator_t it = { &ds, 1, 0 }; return it;
@@ -706,10 +729,16 @@ EOF
   cat <<'EOF' > shims/include/xcb/present.h
 #ifndef __SHIM_XCB_PRESENT_H__
 #define __SHIM_XCB_PRESENT_H__
+#include <stddef.h>
 #include <stdint.h>
+#include <xcb/xcb.h>
 typedef struct xcb_connection_t xcb_connection_t;
 typedef struct xcb_extension_t xcb_extension_t;
 typedef struct xcb_generic_error_t xcb_generic_error_t;
+typedef uint32_t xcb_present_event_t, xcb_present_window_t;
+typedef uint32_t xcb_randr_crtc_t;
+typedef uint32_t xcb_xfixes_region_t;
+typedef uint32_t xcb_sync_fence_t;
 static xcb_extension_t xcb_present_id = { "Present", 0 };
 #ifndef PresentWindowDestroyed
 #define PresentWindowDestroyed 1u
@@ -717,13 +746,23 @@ static xcb_extension_t xcb_present_id = { "Present", 0 };
 #define XCB_PRESENT_CONFIGURE_NOTIFY 0
 #define XCB_PRESENT_EVENT_IDLE_NOTIFY 0
 #define XCB_PRESENT_EVENT_COMPLETE_NOTIFY 1
-typedef uint32_t xcb_present_event_t;
+#define XCB_PRESENT_COMPLETE_KIND_PIXMAP 0
+#define XCB_PRESENT_COMPLETE_KIND_NOTIFY_MSC 1
+#define XCB_PRESENT_COMPLETE_MODE_COPY 0
+#define XCB_PRESENT_COMPLETE_MODE_FLIP 1
+#define XCB_PRESENT_COMPLETE_MODE_SKIP 2
+#define XCB_PRESENT_COMPLETE_MODE_SUBOPTIMAL_COPY 3
+#define XCB_PRESENT_OPTION_NONE 0u
+#define XCB_PRESENT_OPTION_ASYNC 1u
+#define XCB_PRESENT_OPTION_COPY 2u
+#define XCB_PRESENT_OPTION_UST 4u
+#define XCB_PRESENT_OPTION_SUBOPTIMAL 8u
 typedef struct {
   uint8_t response_type, extension;
   uint16_t sequence;
   uint32_t length;
   uint16_t event_type;
-  uint16_t pad0;
+  uint16_t evtype;
   xcb_present_event_t event;
 } xcb_present_generic_event_t;
 typedef struct {
@@ -769,6 +808,14 @@ typedef struct { uint32_t sequence; } xcb_present_query_version_cookie_t;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_present_query_version_reply_t;
 static inline xcb_present_query_version_cookie_t xcb_present_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_present_query_version_cookie_t ck = {0}; return ck; }
 static inline xcb_present_query_version_reply_t *xcb_present_query_version_reply(xcb_connection_t *c, xcb_present_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_present_query_version_reply_t *)0; }
+static inline xcb_void_cookie_t xcb_present_pixmap(xcb_connection_t *c, xcb_window_t window, xcb_pixmap_t pixmap, uint32_t serial, xcb_xfixes_region_t valid, xcb_xfixes_region_t update, int16_t x_off, int16_t y_off, xcb_randr_crtc_t target_crtc, xcb_sync_fence_t wait_fence, xcb_sync_fence_t idle_fence, uint32_t options, uint64_t target_msc, uint64_t divisor, uint64_t remainder, uint32_t notifies_len, const void *notifies) {
+  (void)c; (void)window; (void)pixmap; (void)serial; (void)valid; (void)update; (void)x_off; (void)y_off; (void)target_crtc; (void)wait_fence; (void)idle_fence; (void)options; (void)target_msc; (void)divisor; (void)remainder; (void)notifies_len; (void)notifies;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_present_pixmap_synced(xcb_connection_t *c, xcb_window_t window, xcb_pixmap_t pixmap, uint32_t serial, xcb_xfixes_region_t valid, xcb_xfixes_region_t update, int16_t x_off, int16_t y_off, xcb_randr_crtc_t target_crtc, uint32_t acquire_syncobj, uint32_t release_syncobj, uint64_t acquire_point, uint64_t release_point, uint32_t options, uint64_t target_msc, uint64_t divisor, uint64_t remainder, uint32_t notifies_len, const void *notifies) {
+  (void)c; (void)window; (void)pixmap; (void)serial; (void)valid; (void)update; (void)x_off; (void)y_off; (void)target_crtc; (void)acquire_syncobj; (void)release_syncobj; (void)acquire_point; (void)release_point; (void)options; (void)target_msc; (void)divisor; (void)remainder; (void)notifies_len; (void)notifies;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
 #endif
 EOF
 
