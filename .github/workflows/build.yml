@@ -303,17 +303,17 @@ jobs:
           NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           if [ ! -f shims/libdrm.pc ]; then
             cat <<EOF > shims/libdrm.pc
-prefix=$NDK_SYSROOT/usr
-exec_prefix=\${prefix}
-libdir=\${exec_prefix}/lib/aarch64-linux-android/30
-includedir=\${prefix}/include
+          prefix=$NDK_SYSROOT/usr
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib/aarch64-linux-android/30
+          includedir=\${prefix}/include
 
-Name: libdrm
-Description: Userspace interface to kernel DRM services (Android shim)
-Version: 2.4.131
-Libs: -L\${libdir}
-Cflags: -I\${includedir} -I\${includedir}/libdrm
-EOF
+          Name: libdrm
+          Description: Userspace interface to kernel DRM services (Android shim)
+          Version: 2.4.131
+          Libs: -L\${libdir}
+          Cflags: -I\${includedir} -I\${includedir}/libdrm
+          EOF
           fi
 
           TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
