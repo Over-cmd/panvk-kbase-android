@@ -37,10 +37,10 @@ jobs:
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
             build-essential \
-            llvm-20-dev \
-            libclang-20-dev \
-            libclc-20-dev \
-            libllvmspirvlib-20-dev \
+            llvm-21-dev \
+            libclang-21-dev \
+            libclc-21-dev \
+            libllvmspirvlib-21-dev \
             libelf-dev \
             spirv-tools \
             bison \
