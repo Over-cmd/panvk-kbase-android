@@ -73,7 +73,7 @@ jobs:
           git -C work/mesa reset --hard HEAD
           git -C work/mesa clean -fd
 
-          for p in patches/common/*.patch; do
+          for p in patches/*/*.patch; do
             [ -f "$p" ] || continue
             if ! git -C work/mesa apply --check "../$p" 2>/dev/null; then
               patch -d work/mesa -p1 --fuzz=3 -N < "$p"
