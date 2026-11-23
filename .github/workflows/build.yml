@@ -376,6 +376,19 @@ jobs:
           typedef uint32_t xcb_randr_mode_t;
 
           typedef struct {
+            uint32_t sequence;
+          } xcb_randr_query_version_cookie_t;
+
+          typedef struct {
+            uint8_t response_type;
+            uint8_t pad0;
+            uint16_t sequence;
+            uint32_t length;
+            uint32_t major_version;
+            uint32_t minor_version;
+          } xcb_randr_query_version_reply_t;
+
+          typedef struct {
             uint32_t id;
             uint16_t width;
             uint16_t height;
@@ -430,8 +443,52 @@ jobs:
             uint8_t pad1[8];
           } xcb_randr_get_screen_resources_current_reply_t;
 
+          typedef struct {
+            uint32_t sequence;
+          } xcb_randr_get_output_info_cookie_t;
+
+          typedef struct {
+            uint8_t response_type;
+            uint8_t status;
+            uint16_t sequence;
+            uint32_t length;
+            uint32_t timestamp;
+            xcb_randr_crtc_t crtc;
+            uint32_t mm_width;
+            uint32_t mm_height;
+            uint8_t connection;
+            uint8_t subpixel_order;
+            uint16_t num_crtcs;
+            uint16_t num_modes;
+            uint16_t num_preferred;
+            uint16_t num_clones;
+            uint16_t name_len;
+          } xcb_randr_get_output_info_reply_t;
+
           struct xcb_connection_t;
           struct xcb_generic_error_t;
+
+          static inline xcb_randr_query_version_cookie_t
+          xcb_randr_query_version_unchecked(struct xcb_connection_t *c,
+                                            uint32_t major_version,
+                                            uint32_t minor_version) {
+            (void)c;
+            (void)major_version;
+            (void)minor_version;
+            xcb_randr_query_version_cookie_t ck = {0};
+            return ck;
+          }
+
+          static inline xcb_randr_query_version_reply_t *
+          xcb_randr_query_version_reply(struct xcb_connection_t *c,
+                                        xcb_randr_query_version_cookie_t cookie,
+                                        struct xcb_generic_error_t **e) {
+            (void)c;
+            (void)cookie;
+            if (e)
+              *e = (struct xcb_generic_error_t *)0;
+            return (xcb_randr_query_version_reply_t *)0;
+          }
 
           static inline xcb_randr_get_crtc_info_cookie_t
           xcb_randr_get_crtc_info_unchecked(struct xcb_connection_t *c,
@@ -483,6 +540,13 @@ jobs:
             return (xcb_randr_crtc_t *)0;
           }
 
+          static inline xcb_randr_output_t *
+          xcb_randr_get_screen_resources_current_outputs(
+              const xcb_randr_get_screen_resources_current_reply_t *reply) {
+            (void)reply;
+            return (xcb_randr_output_t *)0;
+          }
+
           static inline xcb_randr_mode_info_t *
           xcb_randr_get_screen_resources_current_modes(
               const xcb_randr_get_screen_resources_current_reply_t *reply) {
@@ -490,11 +554,33 @@ jobs:
             return (xcb_randr_mode_info_t *)0;
           }
 
+          static inline xcb_randr_get_output_info_cookie_t
+          xcb_randr_get_output_info(struct xcb_connection_t *c,
+                                    xcb_randr_output_t output,
+                                    uint32_t config_timestamp) {
+            (void)c;
+            (void)output;
+            (void)config_timestamp;
+            xcb_randr_get_output_info_cookie_t ck = {0};
+            return ck;
+          }
+
+          static inline xcb_randr_get_output_info_reply_t *
+          xcb_randr_get_output_info_reply(struct xcb_connection_t *c,
+                                          xcb_randr_get_output_info_cookie_t cookie,
+                                          struct xcb_generic_error_t **e) {
+            (void)c;
+            (void)cookie;
+            if (e)
+              *e = (struct xcb_generic_error_t *)0;
+            return (xcb_randr_get_output_info_reply_t *)0;
+          }
+
           #endif
           EOF
           echo "=== Verificando shims/include/xcb/randr.h ==="
           wc -l shims/include/xcb/randr.h
-          grep -E "xcb_randr_(crtc_t|mode_info_t|get_crtc_info_|get_screen_resources_current_)" shims/include/xcb/randr.h || true
+          grep -E "xcb_randr_(crtc_t|mode_info_t|get_crtc_info_|get_screen_resources_current_|get_output_info_|query_version_)" shims/include/xcb/randr.h || true
           echo "=== Buscando randr en work/mesa/src/loader ==="
           grep -rn "randr" work/mesa/src/loader/loader_dri_helper.c work/mesa/src/loader/loader_dri_helper_screen.h || true
 
@@ -779,6 +865,33 @@ jobs:
             uint8_t root_depth;
             uint8_t allowed_depths_len;
           } xcb_screen_t;
+          typedef struct {
+            xcb_screen_t *data;
+            int rem;
+            int index;
+          } xcb_screen_iterator_t;
+          typedef struct {
+            uint8_t status;
+            uint8_t pad0;
+            uint16_t protocol_major_version;
+            uint16_t protocol_minor_version;
+            uint16_t length;
+            uint32_t release_number;
+            uint32_t resource_id_base;
+            uint32_t resource_id_mask;
+            uint32_t motion_buffer_size;
+            uint16_t vendor_len;
+            uint16_t maximum_request_length;
+            uint8_t roots_len;
+            uint8_t pixmap_formats_len;
+            uint8_t image_byte_order;
+            uint8_t bitmap_format_bit_order;
+            uint8_t bitmap_format_scanline_unit;
+            uint8_t bitmap_format_scanline_pad;
+            xcb_keycode_t min_keycode;
+            xcb_keycode_t max_keycode;
+            uint32_t pad1;
+          } xcb_setup_t;
           typedef struct { uint8_t pad0; } xcb_generic_event_t;
           typedef struct { uint8_t response_type; uint8_t pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
           typedef struct { uint32_t sequence; } xcb_void_cookie_t;
@@ -793,6 +906,17 @@ jobs:
             uint8_t first_event;
             uint8_t first_error;
           } xcb_query_extension_reply_t;
+          static inline const xcb_setup_t *xcb_get_setup(xcb_connection_t *c) {
+            (void)c;
+            static const xcb_setup_t s = {0};
+            return &s;
+          }
+          static inline xcb_screen_iterator_t xcb_setup_roots_iterator(const xcb_setup_t *R) {
+            (void)R;
+            static xcb_screen_t dummy_screen = {0};
+            xcb_screen_iterator_t it = { &dummy_screen, 1, 0 };
+            return it;
+          }
           static inline void xcb_prefetch_extension_data(xcb_connection_t *c, xcb_extension_t *ext) { (void)c; (void)ext; }
           static inline const xcb_query_extension_reply_t *xcb_get_extension_data(xcb_connection_t *c, xcb_extension_t *ext) {
             (void)c; (void)ext;
@@ -968,6 +1092,9 @@ jobs:
           #ifndef __SHIM_XLIB_H__
           #define __SHIM_XLIB_H__
           #include <stdint.h>
+          #ifndef None
+          #define None 0L
+          #endif
           typedef struct _XDisplay Display;
           typedef unsigned long XID;
           typedef XID Window;
