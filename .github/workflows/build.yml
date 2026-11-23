@@ -405,6 +405,7 @@ jobs:
           #define __SHIM_XCB_H__
           #include <stddef.h>
           #include <stdint.h>
+          #include <stdlib.h>
           typedef struct xcb_connection_t xcb_connection_t;
           typedef uint32_t xcb_window_t;
           typedef uint32_t xcb_drawable_t;
@@ -488,7 +489,17 @@ jobs:
           #include <stdint.h>
           #include <xcb/xcb.h>
           typedef uint32_t xcb_shm_seg_t;
+          static inline xcb_void_cookie_t xcb_shm_attach_checked(xcb_connection_t *c, xcb_shm_seg_t shmseg, uint32_t shmid, uint8_t read_only) {
+            (void)c; (void)shmseg; (void)shmid; (void)read_only;
+            xcb_void_cookie_t ck = {0};
+            return ck;
+          }
           static inline xcb_void_cookie_t xcb_shm_detach_checked(xcb_connection_t *c, xcb_shm_seg_t shmseg) {
+            (void)c; (void)shmseg;
+            xcb_void_cookie_t ck = {0};
+            return ck;
+          }
+          static inline xcb_void_cookie_t xcb_shm_detach(xcb_connection_t *c, xcb_shm_seg_t shmseg) {
             (void)c; (void)shmseg;
             xcb_void_cookie_t ck = {0};
             return ck;
