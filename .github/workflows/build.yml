@@ -74,143 +74,144 @@ jobs:
           git -C work/mesa clean -fd
 
           python3 - <<'PY'
-import glob
-import os
-import re
-import subprocess
+            import glob
+            import os
+            import re
+            import subprocess
 
-mesa_dir = "work/mesa"
-hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
+            mesa_dir = "work/mesa"
+            hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
 
-for patch_path in sorted(glob.glob("patches/*/*.patch")):
-    subprocess.run(["git", "-C", mesa_dir, "reset", "--hard", "HEAD"], check=True, stdout=subprocess.DEVNULL)
-    subprocess.run(["git", "-C", mesa_dir, "clean", "-fd"], check=True, stdout=subprocess.DEVNULL)
+            for patch_path in sorted(glob.glob("patches/*/*.patch")):
+                subprocess.run(["git", "-C", mesa_dir, "reset", "--hard", "HEAD"], check=True, stdout=subprocess.DEVNULL)
+                subprocess.run(["git", "-C", mesa_dir, "clean", "-fd"], check=True, stdout=subprocess.DEVNULL)
 
-    # Si ya aplica limpio sin offset/fuzz, no tocarlo
-    chk = subprocess.run(
-        ["git", "-C", mesa_dir, "apply", "--check", "--whitespace=nowarn", os.path.abspath(patch_path)],
-        capture_output=True,
-        text=True,
-    )
-    if chk.returncode == 0:
-        continue
+                chk = subprocess.run(
+                    ["git", "-C", mesa_dir, "apply", "--check", "--whitespace=nowarn", os.path.abspath(patch_path)],
+                    capture_output=True,
+                    text=True,
+                )
+                if chk.returncode == 0:
+                    continue
 
-    with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
-        lines = f.readlines()
+                with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
 
-    # Dividir el parche en secciones por archivo destino (b/...)
-    file_sections = []
-    cur_header = []
-    cur_file = None
-    cur_hunks = []
-    cur_hunk = None
+                file_sections = []
+                cur_header = []
+                cur_file = None
+                cur_hunks = []
+                cur_hunk = None
 
-    def flush_hunk():
-        nonlocal cur_hunk
-        if cur_hunk is not None:
-            cur_hunks.append(cur_hunk)
-            cur_hunk = None
+                def flush_hunk():
+                    nonlocal cur_hunk
+                    if cur_hunk is not None:
+                        cur_hunks.append(cur_hunk)
+                        cur_hunk = None
 
-    def flush_file():
-        nonlocal cur_file, cur_hunks, cur_header
-        flush_hunk()
-        if cur_file is not None:
-            file_sections.append((cur_header, cur_file, cur_hunks))
-        cur_header = []
-        cur_file = None
-        cur_hunks = []
-
-    for line in lines:
-        if line.startswith("diff --git "):
-            flush_file()
-            cur_header.append(line)
-        elif line.startswith("+++ b/"):
-            cur_file = line[6:].strip()
-        elif line.startswith("--- ") or line.startswith("index ") or line.startswith("new file") or line.startswith("deleted file") or line.startswith("similarity index") or line.startswith("rename from") or line.startswith("rename to"):
-            if cur_file is None:
-                cur_header.append(line)
-        else:
-            m = hunk_re.match(line)
-            if m and cur_file is not None:
-                flush_hunk()
-                cur_hunk = {
-                    "old_start": int(m.group(1)),
-                    "old_len": int(m.group(2)) if m.group(2) is not None else 1,
-                    "new_start": int(m.group(3)),
-                    "new_len": int(m.group(4)) if m.group(4) is not None else 1,
-                    "suffix": m.group(5),
-                    "body": [],
-                }
-            elif cur_hunk is not None:
-                if line.startswith((" ", "+", "-", "\\")):
-                    cur_hunk["body"].append(line)
-                else:
+                def flush_file():
+                    nonlocal cur_file, cur_hunks, cur_header
                     flush_hunk()
-            else:
-                if cur_file is None:
-                    cur_header.append(line)
+                    if cur_file is not None:
+                        file_sections.append((cur_header, cur_file, cur_hunks))
+                    cur_header = []
+                    cur_file = None
+                    cur_hunks = []
 
-    flush_file()
+                for line in lines:
+                    if line.startswith("diff --git "):
+                        flush_file()
+                        cur_header.append(line)
+                    elif line.startswith("+++ b/"):
+                        cur_file = line[6:].strip()
+                    elif (
+                        line.startswith("--- ")
+                        or line.startswith("index ")
+                        or line.startswith("new file")
+                        or line.startswith("deleted file")
+                        or line.startswith("similarity index")
+                        or line.startswith("rename from")
+                        or line.startswith("rename to")
+                    ):
+                        if cur_file is None:
+                            cur_header.append(line)
+                    else:
+                        m = hunk_re.match(line)
+                        if m and cur_file is not None:
+                            flush_hunk()
+                            cur_hunk = {
+                                "old_start": int(m.group(1)),
+                                "old_len": int(m.group(2)) if m.group(2) is not None else 1,
+                                "new_start": int(m.group(3)),
+                                "new_len": int(m.group(4)) if m.group(4) is not None else 1,
+                                "suffix": m.group(5),
+                                "body": [],
+                            }
+                        elif cur_hunk is not None:
+                            if line.startswith((" ", "+", "-", "\\")):
+                                cur_hunk["body"].append(line)
+                            else:
+                                flush_hunk()
+                        else:
+                            if cur_file is None:
+                                cur_header.append(line)
 
-    # Reconstruir cada hunk buscando su bloque pre-imagen en el archivo actual de work/mesa
-    rebuilt_lines = []
-    changed = False
+                flush_file()
 
-    for header, target_file, hunks in file_sections:
-        target_path = os.path.join(mesa_dir, target_file)
-        if not os.path.exists(target_path):
-            rebuilt_lines.extend(header)
-            rebuilt_lines.append(f"--- a/{target_file}\n")
-            rebuilt_lines.append(f"+++ b/{target_file}\n")
-            for h in hunks:
-                rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
-                rebuilt_lines.extend(h["body"])
-            continue
+                rebuilt_lines = []
+                changed = False
 
-        with open(target_path, "r", encoding="utf-8", errors="replace") as tf:
-            src_lines = tf.readlines()
+                for header, target_file, hunks in file_sections:
+                    target_path = os.path.join(mesa_dir, target_file)
+                    if not os.path.exists(target_path):
+                        rebuilt_lines.extend(header)
+                        rebuilt_lines.append(f"--- a/{target_file}\n")
+                        rebuilt_lines.append(f"+++ b/{target_file}\n")
+                        for h in hunks:
+                            rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
+                            rebuilt_lines.extend(h["body"])
+                        continue
 
-        rebuilt_lines.extend(header)
-        rebuilt_lines.append(f"--- a/{target_file}\n")
-        rebuilt_lines.append(f"+++ b/{target_file}\n")
+                    with open(target_path, "r", encoding="utf-8", errors="replace") as tf:
+                        src_lines = tf.readlines()
 
-        for h in hunks:
-            pre_lines = [l[1:] for l in h["body"] if l.startswith((" ", "-"))]
-            post_lines = [l[1:] for l in h["body"] if l.startswith((" ", "+"))]
-            old_cnt = sum(1 for l in h["body"] if l.startswith((" ", "-")))
-            new_cnt = sum(1 for l in h["body"] if l.startswith((" ", "+")))
+                    rebuilt_lines.extend(header)
+                    rebuilt_lines.append(f"--- a/{target_file}\n")
+                    rebuilt_lines.append(f"+++ b/{target_file}\n")
 
-            found_idx = None
-            if pre_lines:
-                n_pre = len(pre_lines)
-                # Buscar coincidencia exacta cerca de old_start primero, luego en todo el archivo
-                search_order = list(range(max(0, h["old_start"] - 1), len(src_lines) - n_pre + 1))
-                for idx in search_order:
-                    if src_lines[idx : idx + n_pre] == pre_lines:
-                        found_idx = idx
-                        break
-                if found_idx is None:
-                    for idx in range(0, max(0, h["old_start"] - 1)):
-                        if src_lines[idx : idx + n_pre] == pre_lines:
-                            found_idx = idx
-                            break
+                    for h in hunks:
+                        pre_lines = [l[1:] for l in h["body"] if l.startswith((" ", "-"))]
+                        old_cnt = sum(1 for l in h["body"] if l.startswith((" ", "-")))
+                        new_cnt = sum(1 for l in h["body"] if l.startswith((" ", "+")))
 
-            if found_idx is not None:
-                new_pos = found_idx + 1
-                if new_pos != h["old_start"] or old_cnt != h["old_len"] or new_cnt != h["new_len"]:
-                    changed = True
-                rebuilt_lines.append(f"@@ -{new_pos},{old_cnt} +{new_pos},{new_cnt} @@{h['suffix']}\n")
-                rebuilt_lines.extend(h["body"])
-            else:
-                # Si no coincide exactamente el pre-contexto, conservar el hunk original sin perderlo
-                rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
-                rebuilt_lines.extend(h["body"])
+                        found_idx = None
+                        if pre_lines:
+                            n_pre = len(pre_lines)
+                            for idx in range(max(0, h["old_start"] - 1), len(src_lines) - n_pre + 1):
+                                if src_lines[idx : idx + n_pre] == pre_lines:
+                                    found_idx = idx
+                                    break
+                            if found_idx is None:
+                                for idx in range(0, max(0, h["old_start"] - 1)):
+                                    if src_lines[idx : idx + n_pre] == pre_lines:
+                                        found_idx = idx
+                                        break
 
-    if changed and rebuilt_lines:
-        with open(patch_path, "w", encoding="utf-8") as f:
-            f.writelines(rebuilt_lines)
-        print(f"Actualizadas cabeceras en {patch_path}")
-PY
+                        if found_idx is not None:
+                            new_pos = found_idx + 1
+                            if new_pos != h["old_start"] or old_cnt != h["old_len"] or new_cnt != h["new_len"]:
+                                changed = True
+                            rebuilt_lines.append(f"@@ -{new_pos},{old_cnt} +{new_pos},{new_cnt} @@{h['suffix']}\n")
+                            rebuilt_lines.extend(h["body"])
+                        else:
+                            rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
+                            rebuilt_lines.extend(h["body"])
+
+                if changed and rebuilt_lines:
+                    with open(patch_path, "w", encoding="utf-8") as f:
+                        f.writelines(rebuilt_lines)
+                    print(f"Actualizadas cabeceras en {patch_path}")
+          PY
 
           git -C work/mesa reset --hard HEAD
           git -C work/mesa clean -fd
