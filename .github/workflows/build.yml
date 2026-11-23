@@ -299,7 +299,7 @@ jobs:
           export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
           echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
 
-          mkdir -p shims
+          mkdir -p shims/include/xcb
           NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           if [ ! -f shims/libdrm.pc ]; then
             cat <<EOF > shims/libdrm.pc
@@ -313,6 +313,40 @@ jobs:
           Version: 2.4.131
           Libs: -L\${libdir}
           Cflags: -I\${includedir} -I\${includedir}/libdrm
+          EOF
+          fi
+
+          PLATFORMS="android"
+          if [ "${{ matrix.flavor }}" = "x11" ]; then
+            PLATFORMS="android,x11"
+            if [ ! -f shims/xcb.pc ]; then
+              cat <<EOF > shims/xcb.pc
+          prefix=$GITHUB_WORKSPACE/shims
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+
+          Name: XCB
+          Description: XCB shim for cross-build
+          Version: 1.17.0
+          Cflags: -I\${includedir}
+          EOF
+            fi
+            cat <<'EOF' > shims/include/xcb/xcb.h
+          #ifndef __SHIM_XCB_H__
+          #define __SHIM_XCB_H__
+          #include <stdint.h>
+          typedef struct xcb_connection_t xcb_connection_t;
+          typedef uint32_t xcb_window_t;
+          typedef uint32_t xcb_drawable_t;
+          typedef uint32_t xcb_visualid_t;
+          typedef uint32_t xcb_colormap_t;
+          typedef uint32_t xcb_gcontext_t;
+          typedef uint32_t xcb_keycode_t;
+          typedef struct { uint8_t pad0; } xcb_generic_event_t;
+          typedef struct { uint8_t response_type; uint8_t pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
+          typedef struct { uint32_t sequence; } xcb_void_cookie_t;
+          #endif
           EOF
           fi
 
@@ -345,11 +379,6 @@ jobs:
           EOF
           fi
           cat android-cross.txt
-
-          PLATFORMS="android"
-          if [ "${{ matrix.flavor }}" = "x11" ]; then
-            PLATFORMS="android,x11"
-          fi
 
           meson setup build work/mesa \
             --cross-file android-cross.txt \
