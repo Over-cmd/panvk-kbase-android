@@ -91,26 +91,18 @@ jobs:
               if not added_lines:
                   return None
 
-              src_norm_all = norm_code("".join(src_lines))
-              non_empty_added = [
-                  norm_code(a)
-                  for a in added_lines
-                  if norm_code(a) and not norm_code(a).startswith(("#ifdef", "#endif", "#else", "{", "}"))
-              ]
-              if non_empty_added and all(a in src_norm_all for a in non_empty_added):
-                  return None
-
-              approx_start = max(0, h["old_start"] - 1)
+              approx_start = max(0, min(len(src_lines) - 1, h["old_start"] - 1))
               anchor_idx = None
 
-              # 1) Buscar directamente símbolos clave presentes en el hunk dentro de vk_android.h
               priority_symbols = [
                   "vk_android_rp_attachment_has_external_format",
                   "local_color_format",
                   "ANDROID_API_LEVEL",
+                  "vk_android",
               ]
+              body_str = "".join(h["body"])
               for sym in priority_symbols:
-                  if sym in "".join(h["body"]):
+                  if sym in body_str:
                       best_dist = None
                       for i, line in enumerate(src_lines):
                           if sym in line:
@@ -121,12 +113,11 @@ jobs:
                       if anchor_idx is not None:
                           break
 
-              # 2) Respaldo por identificadores del contexto/eliminaciones cercanos a old_start
               if anchor_idx is None:
                   tokens = []
                   for l in h["body"]:
-                      if l.startswith((" ", "-")):
-                          for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]{5,}", l[1:]):
+                      if l.startswith((" ", "-", "+")):
+                          for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]{4,}", l[1:]):
                               if tok not in tokens:
                                   tokens.append(tok)
                   best_dist = None
@@ -141,7 +132,7 @@ jobs:
                           break
 
               if anchor_idx is None:
-                  return None
+                  anchor_idx = approx_start
 
               anchor_line = src_lines[anchor_idx]
               if not anchor_line.endswith("\n"):
