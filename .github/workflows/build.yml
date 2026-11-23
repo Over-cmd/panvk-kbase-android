@@ -80,47 +80,8 @@ jobs:
 
           mesa_dir = "work/mesa"
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
-
-          def adapt_kmod_meson_hunk(h, src_lines):
-              if not src_lines:
-                  return None
-
-              added_lines = [l[1:] for l in h["body"] if l.startswith("+")]
-              if not added_lines:
-                  return None
-
-              anchor_idx = None
-              for i, line in enumerate(src_lines):
-                  if "libpankmod_lib" in line or "panfrost_kmod.c" in line:
-                      anchor_idx = i
-                      break
-
-              if anchor_idx is None:
-                  anchor_idx = max(0, min(len(src_lines) - 1, h["old_start"] - 1))
-
-              anchor_line = src_lines[anchor_idx]
-              if not anchor_line.endswith("\n"):
-                  anchor_line = anchor_line + "\n"
-
-              src_flat = " ".join("".join(src_lines).split())
-              fresh_added = []
-              for a in added_lines:
-                  a_clean = a.strip()
-                  if not a_clean:
-                      continue
-                  if " ".join(a_clean.split()) in src_flat:
-                      continue
-                  fresh_added.append(a if a.endswith("\n") else a + "\n")
-
-              if not fresh_added:
-                  return None
-
-              new_body = [" " + anchor_line] + ["+" + x for x in fresh_added]
-              start_line = anchor_idx + 1
-              return (
-                  f"@@ -{start_line},1 +{start_line},{1 + len(fresh_added)} @@{h['suffix']}\n",
-                  new_body,
-              )
+          kmod_patch_path = "patches/kbase-common/002-kmod-build-kbase.patch"
+          kmod_added_lines = []
 
           for patch_path in sorted(glob.glob("patches/*/*.patch")):
               with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
@@ -198,6 +159,15 @@ jobs:
                       changed = True
                       continue
 
+                  # Evitar que src/panfrost/lib/kmod/meson.build bloquee 002-kmod-build-kbase.patch por contexto distinto
+                  if patch_path.endswith("002-kmod-build-kbase.patch") and target_file == "src/panfrost/lib/kmod/meson.build":
+                      for h in hunks:
+                          for bl in h["body"]:
+                              if bl.startswith("+") and not bl.startswith("+++"):
+                                  kmod_added_lines.append(bl[1:])
+                      changed = True
+                      continue
+
                   target_path = os.path.join(mesa_dir, target_file)
                   if not os.path.exists(target_path):
                       rebuilt_lines.extend(header)
@@ -239,16 +209,6 @@ jobs:
                               changed = True
                           rebuilt_lines.append(f"@@ -{new_pos},{old_cnt} +{new_pos},{new_cnt} @@{h['suffix']}\n")
                           rebuilt_lines.extend(h["body"])
-                      elif target_file == "src/panfrost/lib/kmod/meson.build" and src_lines:
-                          adapted = adapt_kmod_meson_hunk(h, src_lines)
-                          if adapted is not None:
-                              changed = True
-                              hdr_line, new_body = adapted
-                              rebuilt_lines.append(hdr_line)
-                              rebuilt_lines.extend(new_body)
-                          else:
-                              rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
-                              rebuilt_lines.extend(h["body"])
                       else:
                           rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
                           rebuilt_lines.extend(h["body"])
@@ -257,6 +217,9 @@ jobs:
                   with open(patch_path, "w", encoding="utf-8") as f:
                       f.writelines(rebuilt_lines)
                   print(f"Actualizadas cabeceras en {patch_path}")
+
+          with open("work/mesa/.kmod_added_lines", "w", encoding="utf-8") as kf:
+              kf.writelines(kmod_added_lines)
           PY
 
           git -C work/mesa reset --hard HEAD
@@ -289,6 +252,20 @@ jobs:
                   with open(vk_hdr, "w", encoding="utf-8") as f:
                       f.write(content)
                   print("Declaración añadida en src/vulkan/runtime/vk_android.h")
+
+          kmod_meson = "work/mesa/src/panfrost/lib/kmod/meson.build"
+          added_file = "work/mesa/.kmod_added_lines"
+          if os.path.exists(kmod_meson) and os.path.exists(added_file):
+              with open(added_file, "r", encoding="utf-8", errors="replace") as af:
+                  added = [l for l in af.readlines() if l.strip()]
+              with open(kmod_meson, "r", encoding="utf-8", errors="replace") as mf:
+                  mcontent = mf.read()
+              fresh = [l if l.endswith("\n") else l + "\n" for l in added if l.strip() not in mcontent]
+              if fresh:
+                  mcontent = mcontent + "\n" + "".join(fresh)
+                  with open(kmod_meson, "w", encoding="utf-8") as mf:
+                      mf.write(mcontent)
+                  print("Aplicado cambio de 002-kmod-build-kbase.patch en src/panfrost/lib/kmod/meson.build")
           PY
 
       - name: Debug rejected hunks in Mesa 26.3.0
