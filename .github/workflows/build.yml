@@ -92,21 +92,37 @@ jobs:
               approx_start = max(0, min(len(src_lines) - 1, h["old_start"] - 1))
               anchor_idx = None
 
-              # Buscar el cierre del bloque #if de ANDROID_API_LEVEL >= 26 en vk_android.h
-              for i, line in enumerate(src_lines):
-                  if "ANDROID_API_LEVEL" in line and i >= 80:
-                      for j in range(i + 1, min(len(src_lines), i + 40)):
-                          if src_lines[j].lstrip().startswith(("#else", "#endif")):
-                              anchor_idx = j
-                              break
-                      if anchor_idx is not None:
-                          break
+              body_str = "".join(h["body"])
+
+              # Si el hunk busca #endif o #else cerca de old_start, elegir el más próximo a approx_start
+              if "#endif" in body_str or "#else" in body_str:
+                  best_dist = None
+                  for i, line in enumerate(src_lines):
+                      s = line.lstrip()
+                      if s.startswith(("#endif", "#else")):
+                          dist = abs(i - approx_start)
+                          if best_dist is None or dist < best_dist:
+                              best_dist = dist
+                              anchor_idx = i
 
               if anchor_idx is None:
-                  for i, line in enumerate(src_lines):
-                      if "vk_android_rp_attachment_has_external_format" in line:
-                          anchor_idx = min(len(src_lines) - 1, i + 2)
-                          break
+                  priority_symbols = [
+                      "vk_android_rp_attachment_has_external_format",
+                      "GetAndroidHardwareBufferPropertiesANDROID",
+                      "AHardwareBuffer",
+                      "ANDROID_API_LEVEL",
+                  ]
+                  for sym in priority_symbols:
+                      if sym in body_str:
+                          best_dist = None
+                          for i, line in enumerate(src_lines):
+                              if sym in line:
+                                  dist = abs(i - approx_start)
+                                  if best_dist is None or dist < best_dist:
+                                      best_dist = dist
+                                      anchor_idx = i
+                          if anchor_idx is not None:
+                              break
 
               if anchor_idx is None:
                   anchor_idx = approx_start
