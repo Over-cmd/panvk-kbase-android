@@ -92,9 +92,15 @@ jobs:
                       if not part.startswith("diff --git a/src/panfrost/lib/kmod/meson.build ")
                   ]
                   raw_text = "".join(filtered_parts)
+                  # Si no queda ningún hunk en el parche, neutralizamos el archivo para que git apply no falle por parche vacío
+                  if "@@" not in raw_text:
+                      raw_text = ""
                   with open(patch_path, "w", encoding="utf-8") as f:
                       f.write(raw_text)
                   print(f"Filtrado bloque kmod/meson.build en {patch_path}")
+
+              if not raw_text.strip() or "@@" not in raw_text:
+                  continue
 
               lines = raw_text.splitlines(keepends=True)
 
@@ -223,7 +229,62 @@ jobs:
 
           git -C work/mesa reset --hard HEAD
           git -C work/mesa clean -fd
-          ./scripts/apply-patches.sh --profile g52-v7-jm
+
+          # Aplicar parches no vacíos (002 queda sin hunks tras extraer su cambio de meson.build)
+          for p in patches/*/*.patch; do
+            [ -e "$p" ] || continue
+            if ! grep -q '^@@' "$p"; then
+              echo "SKIP empty/filtered patch $(basename "$p")"
+              continue
+            fi
+            git -C work/mesa apply --recount "$GITHUB_WORKSPACE/$p" || true
+          done
+
+          # Re-ejecutar apply-patches.sh saltando los archivos .patch vacíos en su bucle
+          python3 - <<'PY'
+          import glob
+          import os
+          import subprocess
+
+          # Aplicar en orden usando la lógica de series de apply-patches.sh sin fallar en parches vaciados
+          import json
+          with open("profiles/g52-v7-jm.json") as f:
+              prof = json.load(f)
+          arch = prof["panArch"]
+          frontend = prof["frontend"]
+          series = ["common", "android", "kbase-common", "app-loader", "wsi"]
+          if frontend == "CSF":
+              series += ["csf", f"csf-v{arch}"]
+          else:
+              series += [f"jm-v{arch}"]
+
+          subprocess.run(["git", "-C", "work/mesa", "reset", "--hard", "HEAD"], check=True)
+          subprocess.run(["git", "-C", "work/mesa", "clean", "-fd"], check=True)
+
+          applied = 0
+          for fam in series:
+              for p in sorted(glob.glob(f"patches/{fam}/*.patch")):
+                  with open(p, "r", encoding="utf-8", errors="replace") as pf:
+                      txt = pf.read()
+                  if "@@" not in txt:
+                      print(f"SKIP [{fam}] {os.path.basename(p)} (sin hunks tras adaptación)")
+                      continue
+                  print(f"APPLY [{fam}] {os.path.basename(p)}")
+                  subprocess.run(
+                      ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+                      check=True,
+                  )
+                  applied += 1
+              files_dir = f"patches/{fam}/files"
+              if os.path.isdir(files_dir):
+                  print(f"COPY [{fam}] files/ -> mesa tree")
+                  subprocess.run(
+                      f"(cd {files_dir} && find . -type f ! -name README -print0 | tar --null -cf - -T -) | (cd work/mesa && tar -xf -)",
+                      shell=True,
+                      check=True,
+                  )
+          print(f"OK applied={applied} profile=g52-v7-jm")
+          PY
 
           python3 - <<'PY'
           import os
