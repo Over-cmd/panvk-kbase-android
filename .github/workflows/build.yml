@@ -348,7 +348,7 @@ jobs:
           PLATFORMS="android"
           if [ "${{ matrix.flavor }}" = "x11" ]; then
             PLATFORMS="android,x11"
-            for pc_name in xcb xcb-randr x11-xcb xcb-keysyms xcb-dri3 xcb-present xcb-sync; do
+            for pc_name in xcb xcb-randr x11-xcb xcb-keysyms xcb-dri3 xcb-present xcb-sync xcb-shm xcb-xfixes; do
               if [ ! -f "shims/${pc_name}.pc" ]; then
                 cat <<EOF > "shims/${pc_name}.pc"
           prefix=$GITHUB_WORKSPACE/shims
@@ -420,6 +420,22 @@ jobs:
           #include <xcb/xcb.h>
           typedef uint32_t xcb_sync_fence_t;
           typedef uint32_t xcb_sync_counter_t;
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/xcb/shm.h
+          #ifndef __SHIM_XCB_SHM_H__
+          #define __SHIM_XCB_SHM_H__
+          #include <stdint.h>
+          #include <xcb/xcb.h>
+          typedef uint32_t xcb_shm_seg_t;
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/xcb/xfixes.h
+          #ifndef __SHIM_XCB_XFIXES_H__
+          #define __SHIM_XCB_XFIXES_H__
+          #include <stdint.h>
+          #include <xcb/xcb.h>
+          typedef uint32_t xcb_xfixes_region_t;
           #endif
           EOF
             cat <<'EOF' > shims/include/X11/Xlib-xcb.h
