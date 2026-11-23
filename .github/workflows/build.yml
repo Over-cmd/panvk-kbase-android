@@ -460,6 +460,25 @@ jobs:
           typedef XID Window;
           typedef XID Drawable;
           typedef int Status;
+          typedef int Bool;
+          #define True 1
+          #define False 0
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/X11/Xlibint.h
+          #ifndef __SHIM_XLIBINT_H__
+          #define __SHIM_XLIBINT_H__
+          #include <X11/Xlib.h>
+          typedef struct _XExtData {
+            int number;
+            struct _XExtData *next;
+            int (*free_private)(struct _XExtData *extension);
+            char *private_data;
+          } _XExtData, XExtData;
+          struct _XDisplay {
+            XExtData *ext_data;
+            int fd;
+          };
           #endif
           EOF
             cat <<'EOF' > shims/include/X11/extensions/Xrandr.h
