@@ -443,6 +443,18 @@ EOF
 #define XK_Mode_switch 0xff7e
 #define XK_script_switch 0xff7e
 #define XK_Num_Lock 0xff7f
+#define XK_F1 0xffbe
+#define XK_F2 0xffbf
+#define XK_F3 0xffc0
+#define XK_F4 0xffc1
+#define XK_F5 0xffc2
+#define XK_F6 0xffc3
+#define XK_F7 0xffc4
+#define XK_F8 0xffc5
+#define XK_F9 0xffc6
+#define XK_F10 0xffc7
+#define XK_F11 0xffc8
+#define XK_F12 0xffc9
 #define XK_Shift_L 0xffe1
 #define XK_Shift_R 0xffe2
 #define XK_Control_L 0xffe3
@@ -534,9 +546,16 @@ typedef struct {
   uint8_t roots_len, pixmap_formats_len, image_byte_order, bitmap_format_bit_order, bitmap_format_scanline_unit, bitmap_format_scanline_pad;
   xcb_keycode_t min_keycode, max_keycode; uint32_t pad1;
 } xcb_setup_t;
-typedef struct { uint8_t pad0; } xcb_generic_event_t;
+typedef struct { uint8_t response_type; uint8_t pad0; uint16_t sequence; uint32_t length; } xcb_generic_event_t;
 typedef struct xcb_generic_error_t { uint8_t response_type, pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
-typedef struct { uint32_t sequence; } xcb_void_cookie_t, xcb_query_extension_cookie_t, xcb_get_geometry_cookie_t, xcb_query_tree_cookie_t, xcb_get_window_attributes_cookie_t, xcb_translate_coordinates_cookie_t;
+typedef struct { uint32_t sequence; } xcb_void_cookie_t, xcb_query_extension_cookie_t, xcb_get_geometry_cookie_t, xcb_query_tree_cookie_t, xcb_get_window_attributes_cookie_t, xcb_translate_coordinates_cookie_t, xcb_query_keymap_cookie_t;
+typedef struct {
+  uint8_t response_type;
+  uint8_t pad0;
+  uint16_t sequence;
+  uint32_t length;
+  uint8_t keys[32];
+} xcb_query_keymap_reply_t;
 typedef struct {
   uint8_t response_type, pad0; uint16_t sequence; uint32_t length;
   uint8_t present, major_opcode, first_event, first_error;
@@ -561,6 +580,9 @@ typedef struct {
 } xcb_translate_coordinates_reply_t;
 static inline int xcb_flush(xcb_connection_t *c) { (void)c; return 0; }
 static inline uint32_t xcb_get_maximum_request_length(xcb_connection_t *c) { (void)c; return 65535u; }
+static inline xcb_generic_event_t *xcb_wait_for_special_event(xcb_connection_t *c, xcb_special_event_t *se) { (void)c; (void)se; return (xcb_generic_event_t *)0; }
+static inline xcb_query_keymap_cookie_t xcb_query_keymap(xcb_connection_t *c) { (void)c; xcb_query_keymap_cookie_t ck = {0}; return ck; }
+static inline xcb_query_keymap_reply_t *xcb_query_keymap_reply(xcb_connection_t *c, xcb_query_keymap_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_query_keymap_reply_t *)0; }
 static inline xcb_void_cookie_t xcb_put_image(xcb_connection_t *c, uint8_t format, xcb_drawable_t drawable, xcb_gcontext_t gc, uint16_t width, uint16_t height, int16_t dst_x, int16_t dst_y, uint8_t left_pad, uint8_t depth, uint32_t data_len, const uint8_t *data) {
   (void)c; (void)format; (void)drawable; (void)gc; (void)width; (void)height; (void)dst_x; (void)dst_y; (void)left_pad; (void)depth; (void)data_len; (void)data;
   xcb_void_cookie_t ck = {0}; return ck;
@@ -701,7 +723,10 @@ EOF
 #ifndef __SHIM_XCB_KEYSYMS_H__
 #define __SHIM_XCB_KEYSYMS_H__
 #include <xcb/xcb.h>
-typedef struct _xcb_key_symbols xcb_key_symbols_t;
+typedef struct _xcb_key_symbols { int dummy; } xcb_key_symbols_t;
+static inline xcb_key_symbols_t *xcb_key_symbols_alloc(xcb_connection_t *c) { (void)c; return (xcb_key_symbols_t *)0; }
+static inline xcb_keycode_t *xcb_key_symbols_get_keycode(xcb_key_symbols_t *syms, uint32_t keysym) { (void)syms; (void)keysym; return (xcb_keycode_t *)0; }
+static inline void xcb_key_symbols_free(xcb_key_symbols_t *syms) { (void)syms; }
 #endif
 EOF
 
@@ -744,8 +769,8 @@ static xcb_extension_t xcb_present_id = { "Present", 0 };
 #define PresentWindowDestroyed 1u
 #endif
 #define XCB_PRESENT_CONFIGURE_NOTIFY 0
-#define XCB_PRESENT_EVENT_IDLE_NOTIFY 0
 #define XCB_PRESENT_EVENT_COMPLETE_NOTIFY 1
+#define XCB_PRESENT_EVENT_IDLE_NOTIFY 2
 #define XCB_PRESENT_COMPLETE_KIND_PIXMAP 0
 #define XCB_PRESENT_COMPLETE_KIND_NOTIFY_MSC 1
 #define XCB_PRESENT_COMPLETE_MODE_COPY 0
@@ -834,7 +859,9 @@ EOF
 #include <stdint.h>
 #include <xcb/xcb.h>
 typedef uint32_t xcb_shm_seg_t;
+static inline xcb_void_cookie_t xcb_shm_attach(xcb_connection_t *c, xcb_shm_seg_t s, uint32_t id, uint8_t ro) { (void)c; (void)s; (void)id; (void)ro; xcb_void_cookie_t ck = {0}; return ck; }
 static inline xcb_void_cookie_t xcb_shm_attach_checked(xcb_connection_t *c, xcb_shm_seg_t s, uint32_t id, uint8_t ro) { (void)c; (void)s; (void)id; (void)ro; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_shm_create_pixmap_checked(xcb_connection_t *c, xcb_pixmap_t pid, xcb_drawable_t d, uint16_t w, uint16_t h, uint8_t depth, xcb_shm_seg_t s, uint32_t offset) { (void)c; (void)pid; (void)d; (void)w; (void)h; (void)depth; (void)s; (void)offset; xcb_void_cookie_t ck = {0}; return ck; }
 static inline xcb_void_cookie_t xcb_shm_detach_checked(xcb_connection_t *c, xcb_shm_seg_t s) { (void)c; (void)s; xcb_void_cookie_t ck = {0}; return ck; }
 static inline xcb_void_cookie_t xcb_shm_detach(xcb_connection_t *c, xcb_shm_seg_t s) { (void)c; (void)s; xcb_void_cookie_t ck = {0}; return ck; }
 #endif
@@ -844,6 +871,7 @@ EOF
 #ifndef __SHIM_XCB_XFIXES_H__
 #define __SHIM_XCB_XFIXES_H__
 #include <stdint.h>
+#include <xcb/xcb.h>
 typedef struct xcb_connection_t xcb_connection_t;
 typedef struct xcb_generic_error_t xcb_generic_error_t;
 #define XCB_XFIXES_MAJOR_VERSION 4
@@ -853,6 +881,8 @@ typedef struct { uint32_t sequence; } xcb_xfixes_query_version_cookie_t;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_xfixes_query_version_reply_t;
 static inline xcb_xfixes_query_version_cookie_t xcb_xfixes_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_xfixes_query_version_cookie_t ck = {0}; return ck; }
 static inline xcb_xfixes_query_version_reply_t *xcb_xfixes_query_version_reply(xcb_connection_t *c, xcb_xfixes_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_xfixes_query_version_reply_t *)0; }
+static inline xcb_void_cookie_t xcb_xfixes_create_region(xcb_connection_t *c, xcb_xfixes_region_t r, uint32_t rects_len, const xcb_rectangle_t *rects) { (void)c; (void)r; (void)rects_len; (void)rects; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_xfixes_set_region(xcb_connection_t *c, xcb_xfixes_region_t r, uint32_t rects_len, const xcb_rectangle_t *rects) { (void)c; (void)r; (void)rects_len; (void)rects; xcb_void_cookie_t ck = {0}; return ck; }
 #endif
 EOF
 
