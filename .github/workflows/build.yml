@@ -184,6 +184,10 @@ jobs:
 
       - name: Build host tools
         run: |
+          if [ -x /usr/bin/llvm-config-21 ]; then
+            export LLVM_CONFIG=/usr/bin/llvm-config-21
+          fi
+          echo "Using LLVM_CONFIG=${LLVM_CONFIG:-default}"
           meson setup build-host work/mesa \
             -Dbuildtype=release \
             -Db_ndebug=true \
