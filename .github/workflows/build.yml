@@ -213,6 +213,8 @@ jobs:
           ./scripts/apply-patches.sh --profile g52-v7-jm
 
           python3 - <<'PY'
+          import os
+
           vk_hdr = "work/mesa/src/vulkan/runtime/vk_android.h"
           if os.path.exists(vk_hdr):
               with open(vk_hdr, "r", encoding="utf-8", errors="replace") as f:
