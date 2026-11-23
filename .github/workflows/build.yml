@@ -860,6 +860,7 @@ jobs:
           typedef unsigned long XID;
           typedef XID Window;
           typedef XID Drawable;
+          typedef unsigned long VisualID;
           typedef int Status;
           typedef int Bool;
           #define True 1
