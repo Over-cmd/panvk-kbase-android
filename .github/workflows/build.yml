@@ -320,12 +320,28 @@ jobs:
           #include <stdlib.h>
           #include <sys/ioctl.h>
           #include <drm.h>
+          #define DRM_NODE_PRIMARY 0
+          #define DRM_NODE_RENDER 2
           #define DRM_BUS_PCI 0
+          #define DRM_BUS_PLATFORM 1
+          #define DRM_BUS_HOST1X 2
           struct drmPciBusInfo {
             uint16_t domain;
             uint8_t bus;
             uint8_t dev;
             uint8_t func;
+          };
+          struct drmPlatformBusInfo {
+            char *fullname;
+          };
+          struct drmHost1xBusInfo {
+            char *fullname;
+          };
+          struct drmPciDeviceInfo {
+            uint16_t vendor_id;
+            uint16_t device_id;
+            uint16_t subvendor_id;
+            uint16_t subdevice_id;
           };
           typedef struct _drmDevice {
             int available_nodes;
@@ -333,7 +349,12 @@ jobs:
             int bustype;
             union {
               struct drmPciBusInfo *pci;
+              struct drmPlatformBusInfo *platform;
+              struct drmHost1xBusInfo *host1x;
             } businfo;
+            union {
+              struct drmPciDeviceInfo *pci;
+            } deviceinfo;
           } drmDevice, *drmDevicePtr;
           typedef struct _drmVersion {
             int version_major;
@@ -346,6 +367,10 @@ jobs:
             size_t desc_len;
             char *desc;
           } drmVersion, *drmVersionPtr;
+          static inline int drmCommandWriteRead(int fd, unsigned long drmCommandIndex, void *data, unsigned long size) {
+            (void)fd; (void)drmCommandIndex; (void)data; (void)size;
+            return -1;
+          }
           static inline drmVersionPtr drmGetVersion(int fd) {
             (void)fd;
             drmVersionPtr v = (drmVersionPtr)calloc(1, sizeof(drmVersion));
@@ -355,6 +380,11 @@ jobs:
             free(version);
           }
           static inline int drmIoctl(int fd, unsigned long request, void *arg) { return ioctl(fd, request, arg); }
+          static inline int drmGetDeviceFromDevId(dev_t dev_id, uint32_t flags, drmDevicePtr *device) {
+            (void)dev_id; (void)flags;
+            if (device) *device = (drmDevicePtr)0;
+            return -1;
+          }
           static inline int drmGetDevice2(int fd, uint32_t flags, drmDevicePtr *device) { (void)fd; (void)flags; if (device) *device = (drmDevicePtr)0; return -1; }
           static inline void drmFreeDevice(drmDevicePtr *device) { if (device) *device = (drmDevicePtr)0; }
           static inline bool drmDevicesEqual(drmDevicePtr a, drmDevicePtr b) { (void)a; (void)b; return false; }
@@ -431,12 +461,6 @@ jobs:
             const char *name;
             int global_id;
           } xcb_extension_t;
-          typedef struct {
-            int present;
-            uint8_t major_opcode;
-            uint8_t first_event;
-            uint8_t first_error;
-          } xcb_query_extension_data_t;
           typedef uint32_t xcb_window_t;
           typedef uint32_t xcb_drawable_t;
           typedef uint32_t xcb_visualid_t;
@@ -458,10 +482,10 @@ jobs:
             uint8_t first_error;
           } xcb_query_extension_reply_t;
           static inline void xcb_prefetch_extension_data(xcb_connection_t *c, xcb_extension_t *ext) { (void)c; (void)ext; }
-          static inline const xcb_query_extension_data_t *xcb_get_extension_data(xcb_connection_t *c, xcb_extension_t *ext) {
+          static inline const xcb_query_extension_reply_t *xcb_get_extension_data(xcb_connection_t *c, xcb_extension_t *ext) {
             (void)c; (void)ext;
-            static const xcb_query_extension_data_t d = {0, 0, 0, 0};
-            return &d;
+            static const xcb_query_extension_reply_t r = {0};
+            return &r;
           }
           static inline uint32_t xcb_generate_id(xcb_connection_t *c) { (void)c; return 0; }
           static inline xcb_generic_error_t *xcb_request_check(xcb_connection_t *c, xcb_void_cookie_t cookie) { (void)c; (void)cookie; return (xcb_generic_error_t *)0; }
@@ -508,6 +532,15 @@ jobs:
             uint32_t length;
             int32_t fd;
           } xcb_dri3_open_reply_t;
+          typedef struct { uint32_t sequence; } xcb_dri3_query_version_cookie_t;
+          typedef struct {
+            uint8_t response_type;
+            uint8_t pad0;
+            uint16_t sequence;
+            uint32_t length;
+            uint32_t major_version;
+            uint32_t minor_version;
+          } xcb_dri3_query_version_reply_t;
           typedef struct { uint8_t response_type; uint8_t nfd; uint16_t sequence; uint32_t length; uint32_t pixmap_size; int32_t fd; } xcb_dri3_buffer_from_pixmap_reply_t;
           static inline xcb_dri3_open_cookie_t xcb_dri3_open(xcb_connection_t *c, xcb_drawable_t drawable, uint32_t provider) {
             (void)c; (void)drawable; (void)provider;
@@ -523,6 +556,15 @@ jobs:
             static int fds[1] = {-1};
             return fds;
           }
+          static inline xcb_dri3_query_version_cookie_t xcb_dri3_query_version(xcb_connection_t *c, uint32_t major_version, uint32_t minor_version) {
+            (void)c; (void)major_version; (void)minor_version;
+            xcb_dri3_query_version_cookie_t ck = {0};
+            return ck;
+          }
+          static inline xcb_dri3_query_version_reply_t *xcb_dri3_query_version_reply(xcb_connection_t *c, xcb_dri3_query_version_cookie_t cookie, xcb_generic_error_t **e) {
+            (void)c; (void)cookie; if (e) *e = (xcb_generic_error_t *)0;
+            return (xcb_dri3_query_version_reply_t *)0;
+          }
           #endif
           EOF
             cat <<'EOF' > shims/include/xcb/present.h
@@ -530,7 +572,26 @@ jobs:
           #define __SHIM_XCB_PRESENT_H__
           #include <stdint.h>
           #include <xcb/xcb.h>
+          static xcb_extension_t xcb_present_id = { "Present", 0 };
           typedef uint32_t xcb_present_event_t;
+          typedef struct { uint32_t sequence; } xcb_present_query_version_cookie_t;
+          typedef struct {
+            uint8_t response_type;
+            uint8_t pad0;
+            uint16_t sequence;
+            uint32_t length;
+            uint32_t major_version;
+            uint32_t minor_version;
+          } xcb_present_query_version_reply_t;
+          static inline xcb_present_query_version_cookie_t xcb_present_query_version(xcb_connection_t *c, uint32_t major_version, uint32_t minor_version) {
+            (void)c; (void)major_version; (void)minor_version;
+            xcb_present_query_version_cookie_t ck = {0};
+            return ck;
+          }
+          static inline xcb_present_query_version_reply_t *xcb_present_query_version_reply(xcb_connection_t *c, xcb_present_query_version_cookie_t cookie, xcb_generic_error_t **e) {
+            (void)c; (void)cookie; if (e) *e = (xcb_generic_error_t *)0;
+            return (xcb_present_query_version_reply_t *)0;
+          }
           #endif
           EOF
             cat <<'EOF' > shims/include/xcb/sync.h
@@ -570,6 +631,8 @@ jobs:
           #define __SHIM_XCB_XFIXES_H__
           #include <stdint.h>
           #include <xcb/xcb.h>
+          #define XCB_XFIXES_MAJOR_VERSION 4
+          #define XCB_XFIXES_MINOR_VERSION 0
           typedef uint32_t xcb_xfixes_region_t;
           typedef struct { uint32_t sequence; } xcb_xfixes_query_version_cookie_t;
           typedef struct {
