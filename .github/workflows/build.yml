@@ -295,6 +295,10 @@ jobs:
 
           #include <stdint.h>
 
+          #ifndef XCB_NONE
+          #define XCB_NONE 0u
+          #endif
+
           #define XCB_RANDR_SET_CONFIG_SUCCESS 0
           #define XCB_RANDR_SET_CONFIG_INVALID_CONFIG_TIME 2
 
@@ -312,6 +316,7 @@ jobs:
           #define XCB_RANDR_MODE_FLAG_VMIX_POSITIVE 2048
           #define XCB_RANDR_MODE_FLAG_VMIX_NEGATIVE 4096
 
+          typedef uint32_t xcb_window_t;
           typedef uint32_t xcb_randr_output_t;
           typedef uint32_t xcb_randr_crtc_t;
           typedef uint32_t xcb_randr_mode_t;
@@ -353,6 +358,24 @@ jobs:
             uint16_t num_possible_outputs;
           } xcb_randr_get_crtc_info_reply_t;
 
+          typedef struct {
+            uint32_t sequence;
+          } xcb_randr_get_screen_resources_current_cookie_t;
+
+          typedef struct {
+            uint8_t response_type;
+            uint8_t pad0;
+            uint16_t sequence;
+            uint32_t length;
+            uint32_t timestamp;
+            uint32_t config_timestamp;
+            uint16_t num_crtcs;
+            uint16_t num_outputs;
+            uint16_t num_modes;
+            uint16_t num_names;
+            uint8_t pad1[8];
+          } xcb_randr_get_screen_resources_current_reply_t;
+
           struct xcb_connection_t;
           struct xcb_generic_error_t;
 
@@ -378,11 +401,46 @@ jobs:
             return (xcb_randr_get_crtc_info_reply_t *)0;
           }
 
+          static inline xcb_randr_get_screen_resources_current_cookie_t
+          xcb_randr_get_screen_resources_current_unchecked(struct xcb_connection_t *c,
+                                                           xcb_window_t window) {
+            (void)c;
+            (void)window;
+            xcb_randr_get_screen_resources_current_cookie_t ck = {0};
+            return ck;
+          }
+
+          static inline xcb_randr_get_screen_resources_current_reply_t *
+          xcb_randr_get_screen_resources_current_reply(
+              struct xcb_connection_t *c,
+              xcb_randr_get_screen_resources_current_cookie_t cookie,
+              struct xcb_generic_error_t **e) {
+            (void)c;
+            (void)cookie;
+            if (e)
+              *e = (struct xcb_generic_error_t *)0;
+            return (xcb_randr_get_screen_resources_current_reply_t *)0;
+          }
+
+          static inline xcb_randr_crtc_t *
+          xcb_randr_get_screen_resources_current_crtcs(
+              const xcb_randr_get_screen_resources_current_reply_t *reply) {
+            (void)reply;
+            return (xcb_randr_crtc_t *)0;
+          }
+
+          static inline xcb_randr_mode_info_t *
+          xcb_randr_get_screen_resources_current_modes(
+              const xcb_randr_get_screen_resources_current_reply_t *reply) {
+            (void)reply;
+            return (xcb_randr_mode_info_t *)0;
+          }
+
           #endif
           EOF
           echo "=== Verificando shims/include/xcb/randr.h ==="
           wc -l shims/include/xcb/randr.h
-          grep -E "xcb_randr_(crtc_t|mode_info_t|get_crtc_info_)" shims/include/xcb/randr.h || true
+          grep -E "xcb_randr_(crtc_t|mode_info_t|get_crtc_info_|get_screen_resources_current_)" shims/include/xcb/randr.h || true
           echo "=== Buscando randr en work/mesa/src/loader ==="
           grep -rn "randr" work/mesa/src/loader/loader_dri_helper.c work/mesa/src/loader/loader_dri_helper_screen.h || true
 
@@ -558,6 +616,9 @@ jobs:
           #include <stddef.h>
           #include <stdint.h>
           #include <stdlib.h>
+          #ifndef XCB_NONE
+          #define XCB_NONE 0u
+          #endif
           typedef struct xcb_connection_t xcb_connection_t;
           typedef struct xcb_extension_t {
             const char *name;
