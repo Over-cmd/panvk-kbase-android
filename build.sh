@@ -416,9 +416,22 @@ EOF
 #ifndef XCB_NONE
 #define XCB_NONE 0u
 #endif
+#define XCB_VISUAL_CLASS_STATIC_GRAY 0
+#define XCB_VISUAL_CLASS_GRAY_SCALE 1
+#define XCB_VISUAL_CLASS_STATIC_COLOR 2
+#define XCB_VISUAL_CLASS_PSEUDO_COLOR 3
+#define XCB_VISUAL_CLASS_TRUE_COLOR 4
+#define XCB_VISUAL_CLASS_DIRECT_COLOR 5
 typedef struct xcb_connection_t xcb_connection_t;
+typedef struct xcb_special_event_t { uint8_t pad0; } xcb_special_event_t;
 typedef struct xcb_extension_t { const char *name; int global_id; } xcb_extension_t;
-typedef uint32_t xcb_window_t, xcb_drawable_t, xcb_visualid_t, xcb_colormap_t, xcb_gcontext_t, xcb_keycode_t, xcb_timestamp_t;
+typedef uint32_t xcb_window_t, xcb_drawable_t, xcb_pixmap_t, xcb_gc_t, xcb_visualid_t, xcb_colormap_t, xcb_gcontext_t, xcb_keycode_t, xcb_timestamp_t;
+typedef struct {
+  int16_t x;
+  int16_t y;
+  uint16_t width;
+  uint16_t height;
+} xcb_rectangle_t;
 typedef struct {
   xcb_visualid_t visual_id;
   uint8_t _class;
@@ -452,7 +465,7 @@ typedef struct {
 } xcb_setup_t;
 typedef struct { uint8_t pad0; } xcb_generic_event_t;
 typedef struct xcb_generic_error_t { uint8_t response_type, pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
-typedef struct { uint32_t sequence; } xcb_void_cookie_t, xcb_query_extension_cookie_t, xcb_get_geometry_cookie_t, xcb_query_tree_cookie_t, xcb_get_window_attributes_cookie_t;
+typedef struct { uint32_t sequence; } xcb_void_cookie_t, xcb_query_extension_cookie_t, xcb_get_geometry_cookie_t, xcb_query_tree_cookie_t, xcb_get_window_attributes_cookie_t, xcb_translate_coordinates_cookie_t;
 typedef struct {
   uint8_t response_type, pad0; uint16_t sequence; uint32_t length;
   uint8_t present, major_opcode, first_event, first_error;
@@ -471,6 +484,10 @@ typedef struct {
   uint32_t backing_planes, backing_pixel; uint8_t save_under, map_is_installed, map_state, override_redirect;
   xcb_colormap_t colormap; uint32_t all_event_masks, your_event_mask; uint16_t do_not_propagate_mask, pad0;
 } xcb_get_window_attributes_reply_t;
+typedef struct {
+  uint8_t response_type, same_screen; uint16_t sequence; uint32_t length;
+  xcb_window_t child; int16_t dst_x; int16_t dst_y;
+} xcb_translate_coordinates_reply_t;
 static inline const xcb_setup_t *xcb_get_setup(xcb_connection_t *c) { (void)c; static const xcb_setup_t s = {0}; return &s; }
 static inline xcb_screen_iterator_t xcb_setup_roots_iterator(const xcb_setup_t *R) {
   (void)R; static xcb_screen_t ds = {0}; xcb_screen_iterator_t it = { &ds, 1, 0 }; return it;
@@ -503,6 +520,9 @@ static inline xcb_query_extension_cookie_t xcb_query_extension(xcb_connection_t 
 static inline xcb_query_extension_reply_t *xcb_query_extension_reply(xcb_connection_t *c, xcb_query_extension_cookie_t ck, xcb_generic_error_t **e) {
   (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_query_extension_reply_t *)0;
 }
+static inline xcb_get_geometry_cookie_t xcb_get_geometry(xcb_connection_t *c, xcb_drawable_t d) {
+  (void)c; (void)d; xcb_get_geometry_cookie_t ck = {0}; return ck;
+}
 static inline xcb_get_geometry_cookie_t xcb_get_geometry_unchecked(xcb_connection_t *c, xcb_drawable_t d) {
   (void)c; (void)d; xcb_get_geometry_cookie_t ck = {0}; return ck;
 }
@@ -523,6 +543,12 @@ static inline xcb_get_window_attributes_cookie_t xcb_get_window_attributes(xcb_c
 }
 static inline xcb_get_window_attributes_reply_t *xcb_get_window_attributes_reply(xcb_connection_t *c, xcb_get_window_attributes_cookie_t ck, xcb_generic_error_t **e) {
   (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_get_window_attributes_reply_t *)0;
+}
+static inline xcb_translate_coordinates_cookie_t xcb_translate_coordinates(xcb_connection_t *c, xcb_window_t sw, xcb_window_t dw, int16_t sx, int16_t sy) {
+  (void)c; (void)sw; (void)dw; (void)sx; (void)sy; xcb_translate_coordinates_cookie_t ck = {0}; return ck;
+}
+static inline xcb_translate_coordinates_reply_t *xcb_translate_coordinates_reply(xcb_connection_t *c, xcb_translate_coordinates_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_translate_coordinates_reply_t *)0;
 }
 #include <xcb/randr.h>
 #include <xcb/xfixes.h>
