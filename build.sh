@@ -547,6 +547,9 @@ static inline xcb_get_window_attributes_reply_t *xcb_get_window_attributes_reply
 static inline xcb_translate_coordinates_cookie_t xcb_translate_coordinates(xcb_connection_t *c, xcb_window_t sw, xcb_window_t dw, int16_t sx, int16_t sy) {
   (void)c; (void)sw; (void)dw; (void)sx; (void)sy; xcb_translate_coordinates_cookie_t ck = {0}; return ck;
 }
+static inline xcb_translate_coordinates_cookie_t xcb_translate_coordinates_unchecked(xcb_connection_t *c, xcb_window_t sw, xcb_window_t dw, int16_t sx, int16_t sy) {
+  (void)c; (void)sw; (void)dw; (void)sx; (void)sy; xcb_translate_coordinates_cookie_t ck = {0}; return ck;
+}
 static inline xcb_translate_coordinates_reply_t *xcb_translate_coordinates_reply(xcb_connection_t *c, xcb_translate_coordinates_cookie_t ck, xcb_generic_error_t **e) {
   (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_translate_coordinates_reply_t *)0;
 }
@@ -654,7 +657,60 @@ typedef struct xcb_connection_t xcb_connection_t;
 typedef struct xcb_extension_t xcb_extension_t;
 typedef struct xcb_generic_error_t xcb_generic_error_t;
 static xcb_extension_t xcb_present_id = { "Present", 0 };
+#ifndef PresentWindowDestroyed
+#define PresentWindowDestroyed 1u
+#endif
+#define XCB_PRESENT_CONFIGURE_NOTIFY 0
+#define XCB_PRESENT_EVENT_IDLE_NOTIFY 0
+#define XCB_PRESENT_EVENT_COMPLETE_NOTIFY 1
 typedef uint32_t xcb_present_event_t;
+typedef struct {
+  uint8_t response_type, extension;
+  uint16_t sequence;
+  uint32_t length;
+  uint16_t event_type;
+  uint16_t pad0;
+  xcb_present_event_t event;
+} xcb_present_generic_event_t;
+typedef struct {
+  uint8_t response_type, extension;
+  uint16_t sequence;
+  uint32_t length;
+  uint16_t event_type;
+  uint16_t pad0;
+  xcb_present_event_t event;
+  uint32_t window;
+  int16_t x, y;
+  uint16_t width, height;
+  int16_t off_x, off_y;
+  uint16_t pixmap_width, pixmap_height;
+  int32_t pixmap_flags;
+} xcb_present_configure_notify_event_t;
+typedef struct {
+  uint8_t response_type, extension;
+  uint16_t sequence;
+  uint32_t length;
+  uint16_t event_type;
+  uint16_t pad0;
+  xcb_present_event_t event;
+  uint32_t window;
+  uint32_t serial;
+  uint32_t pixmap;
+  uint32_t idle_fence;
+} xcb_present_idle_notify_event_t;
+typedef struct {
+  uint8_t response_type, extension;
+  uint16_t sequence;
+  uint32_t length;
+  uint16_t event_type;
+  uint8_t kind, mode;
+  xcb_present_event_t event;
+  uint32_t window;
+  uint32_t serial;
+  uint64_t ust;
+  uint64_t msc;
+  uint64_t sbc;
+} xcb_present_complete_notify_event_t;
 typedef struct { uint32_t sequence; } xcb_present_query_version_cookie_t;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_present_query_version_reply_t;
 static inline xcb_present_query_version_cookie_t xcb_present_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_present_query_version_cookie_t ck = {0}; return ck; }
