@@ -299,7 +299,7 @@ jobs:
           export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
           echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
 
-          mkdir -p shims/include/xcb
+          mkdir -p shims/include/xcb shims/include/X11
           NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           if [ ! -f shims/libdrm.pc ]; then
             cat <<EOF > shims/libdrm.pc
@@ -346,6 +346,34 @@ jobs:
           Cflags: -I\${includedir}
           EOF
             fi
+            if [ ! -f shims/x11-xcb.pc ]; then
+              cat <<EOF > shims/x11-xcb.pc
+          prefix=$GITHUB_WORKSPACE/shims
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+
+          Name: X11 XCB
+          Description: X11 XCB shim for cross-build
+          Requires: xcb
+          Version: 1.17.0
+          Cflags: -I\${includedir}
+          EOF
+            fi
+            if [ ! -f shims/xcb-keysyms.pc ]; then
+              cat <<EOF > shims/xcb-keysyms.pc
+          prefix=$GITHUB_WORKSPACE/shims
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+
+          Name: XCB KeySyms
+          Description: XCB KeySyms shim for cross-build
+          Requires: xcb
+          Version: 0.4.1
+          Cflags: -I\${includedir}
+          EOF
+            fi
             cat <<'EOF' > shims/include/xcb/xcb.h
           #ifndef __SHIM_XCB_H__
           #define __SHIM_XCB_H__
@@ -370,6 +398,22 @@ jobs:
           typedef uint32_t xcb_randr_output_t;
           typedef uint32_t xcb_randr_crtc_t;
           typedef uint32_t xcb_randr_mode_t;
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/xcb/xcb_keysyms.h
+          #ifndef __SHIM_XCB_KEYSYMS_H__
+          #define __SHIM_XCB_KEYSYMS_H__
+          #include <stdint.h>
+          #include <xcb/xcb.h>
+          typedef struct _xcb_key_symbols xcb_key_symbols_t;
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/X11/Xlib-xcb.h
+          #ifndef __SHIM_XLIB_XCB_H__
+          #define __SHIM_XLIB_XCB_H__
+          #include <xcb/xcb.h>
+          typedef struct _XDisplay Display;
+          static inline xcb_connection_t *XGetXCBConnection(Display *dpy) { (void)dpy; return (xcb_connection_t *)0; }
           #endif
           EOF
           fi
