@@ -41,6 +41,8 @@ jobs:
             libclang-21-dev \
             libclc-21-dev \
             libllvmspirvlib-21-dev \
+            libspirv-tools-dev \
+            spirv-headers-dev \
             libelf-dev \
             spirv-tools \
             bison \
