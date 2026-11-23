@@ -186,6 +186,34 @@ jobs:
               with open(kmod_meson, "w", encoding="utf-8") as mf:
                   mf.write(mcontent)
               print("Aplicado bloque condicional kbase_kmod.c en src/panfrost/lib/kmod/meson.build")
+
+          pan_kmod_hdr = "work/mesa/src/panfrost/lib/kmod/pan_kmod.h"
+          if os.path.exists(pan_kmod_hdr):
+              with open(pan_kmod_hdr, "r", encoding="utf-8", errors="replace") as kh:
+                  kcontent = kh.read()
+              if "bo->dev->ops->bo_munmap" in kcontent:
+                  if "#include <sys/mman.h>" not in kcontent:
+                      kcontent = "#include <sys/mman.h>\n" + kcontent
+                  kcontent = re.sub(
+                      r"if\s*\(bo->dev->ops->bo_munmap\)\s*\n\s*return\s+bo->dev->ops->bo_munmap\(bo,\s*host_addr,\s*size\);\s*\n*",
+                      "",
+                      kcontent,
+                  )
+                  kcontent = re.sub(
+                      r"return\s+munmap\(host_addr,\s*size\);",
+                      "return munmap(host_addr, size);",
+                      kcontent,
+                  )
+                  if "munmap(host_addr, size)" not in kcontent:
+                      kcontent = re.sub(
+                          r"(pan_kmod_bo_munmap\s*\([^)]*\)\s*\{)",
+                          r"\1\n   return munmap(host_addr, size);",
+                          kcontent,
+                          count=1,
+                      )
+                  with open(pan_kmod_hdr, "w", encoding="utf-8") as kh:
+                      kh.write(kcontent)
+                  print("Parcheado pan_kmod_bo_munmap en src/panfrost/lib/kmod/pan_kmod.h para usar munmap")
           PY
 
       - name: Stamp driver version
