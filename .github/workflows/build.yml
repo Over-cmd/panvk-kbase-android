@@ -80,11 +80,23 @@ jobs:
 
           mesa_dir = "work/mesa"
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
-          kmod_added_lines = []
 
           for patch_path in sorted(glob.glob("patches/*/*.patch")):
               with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
-                  lines = f.readlines()
+                  raw_text = f.read()
+
+              if os.path.basename(patch_path).startswith("002-") and "src/panfrost/lib/kmod/meson.build" in raw_text:
+                  parts = re.split(r"(?=^diff --git )", raw_text, flags=re.MULTILINE)
+                  filtered_parts = [
+                      part for part in parts
+                      if not part.startswith("diff --git a/src/panfrost/lib/kmod/meson.build ")
+                  ]
+                  raw_text = "".join(filtered_parts)
+                  with open(patch_path, "w", encoding="utf-8") as f:
+                      f.write(raw_text)
+                  print(f"Filtrado bloque kmod/meson.build en {patch_path}")
+
+              lines = raw_text.splitlines(keepends=True)
 
               file_sections = []
               cur_header = []
@@ -151,21 +163,10 @@ jobs:
 
               rebuilt_lines = []
               changed = False
-              is_002 = os.path.basename(patch_path).startswith("002-")
               is_008 = os.path.basename(patch_path).startswith("008-")
 
               for header, target_file, hunks in file_sections:
-                  # Evitar que vk_android.h bloquee 008-ahb-dma-buf-finder.patch por cambios de contexto en Mesa 26.3.0
                   if is_008 and target_file == "src/vulkan/runtime/vk_android.h":
-                      changed = True
-                      continue
-
-                  # Evitar que src/panfrost/lib/kmod/meson.build bloquee 002-kmod-build-kbase.patch por contexto distinto
-                  if is_002 and target_file == "src/panfrost/lib/kmod/meson.build":
-                      for h in hunks:
-                          for bl in h["body"]:
-                              if bl.startswith("+") and not bl.startswith("+++"):
-                                  kmod_added_lines.append(bl[1:])
                       changed = True
                       continue
 
@@ -218,9 +219,6 @@ jobs:
                   with open(patch_path, "w", encoding="utf-8") as f:
                       f.writelines(rebuilt_lines)
                   print(f"Actualizadas cabeceras en {patch_path}")
-
-          with open("work/mesa/.kmod_added_lines", "w", encoding="utf-8") as kf:
-              kf.writelines(kmod_added_lines)
           PY
 
           git -C work/mesa reset --hard HEAD
@@ -255,18 +253,24 @@ jobs:
                   print("Declaración añadida en src/vulkan/runtime/vk_android.h")
 
           kmod_meson = "work/mesa/src/panfrost/lib/kmod/meson.build"
-          added_file = "work/mesa/.kmod_added_lines"
-          if os.path.exists(kmod_meson) and os.path.exists(added_file):
-              with open(added_file, "r", encoding="utf-8", errors="replace") as af:
-                  added = [l for l in af.readlines() if l.strip()]
+          kbase_block = (
+              "if panfrost_kmds.contains('kbase')\n"
+              "  libpankmod_lib_files += files('kbase_kmod.c')\n"
+              "endif\n\n"
+          )
+          if os.path.exists(kmod_meson):
               with open(kmod_meson, "r", encoding="utf-8", errors="replace") as mf:
                   mcontent = mf.read()
-              fresh = [l if l.endswith("\n") else l + "\n" for l in added if l.strip() not in mcontent]
-              if fresh:
-                  mcontent = mcontent + "\n" + "".join(fresh)
+              if "panfrost_kmds.contains('kbase')" not in mcontent:
+                  marker = "libpankmod_lib = static_library("
+                  idx = mcontent.find(marker)
+                  if idx != -1:
+                      mcontent = mcontent[:idx] + kbase_block + mcontent[idx:]
+                  else:
+                      mcontent = mcontent + "\n" + kbase_block
                   with open(kmod_meson, "w", encoding="utf-8") as mf:
                       mf.write(mcontent)
-                  print("Aplicado cambio de 002-kmod-build-kbase.patch en src/panfrost/lib/kmod/meson.build")
+                  print("Aplicado bloque kbase en src/panfrost/lib/kmod/meson.build antes de libpankmod_lib")
           PY
 
       - name: Debug rejected hunks in Mesa 26.3.0
