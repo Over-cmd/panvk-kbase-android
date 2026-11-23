@@ -83,49 +83,52 @@ jobs:
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
 
           def adapt_vk_android_h_hunk(h, src_lines):
-              body_text = "".join(h["body"])
-              if "vk_android_rp_attachment_has_external_format" not in body_text:
-                  return None
-
               added_lines = [l[1:] for l in h["body"] if l.startswith("+")]
               removed_lines = [l[1:] for l in h["body"] if l.startswith("-")]
+              ctx_candidates = [l[1:].strip() for l in h["body"] if l.startswith(" ") and l[1:].strip()]
               if not added_lines:
                   return None
 
-              # Buscar el punto de inserción justo antes del #else de ANDROID_API_LEVEL >= 26
-              else_idx = None
-              for i, line in enumerate(src_lines):
-                  if "ANDROID_API_LEVEL >= 26" in line and "#else" in line:
-                      else_idx = i
-                      break
-
-              if else_idx is None:
+              # Evitar duplicar si las líneas añadidas ya existen en el archivo
+              src_joined = "".join(src_lines)
+              non_empty_added = [a.strip() for a in added_lines if a.strip() and not a.strip().startswith(("#ifdef", "#endif", "#else", "{", "}"))]
+              if non_empty_added and all(a in src_joined for a in non_empty_added):
                   return None
 
-              # Retroceder hasta la línea no vacía anterior al #else para tomar contexto válido
-              anchor_idx = else_idx - 1
-              while anchor_idx > 0 and src_lines[anchor_idx].strip() == "":
-                  anchor_idx -= 1
+              anchor_idx = None
 
-              # Evitar duplicar si ya existe un símbolo clave de added_lines en vk_android.h
-              key_tokens = [
-                  tok.strip(" ;()")
-                  for l in added_lines
-                  for tok in l.split()
-                  if "ahb" in tok.lower() or "dma_buf" in tok.lower() or "finder" in tok.lower()
-              ]
-              if key_tokens and any(k in "".join(src_lines) for k in key_tokens if len(k) > 6):
+              # 1) Si menciona vk_android_rp_attachment_has_external_format, buscar antes del #else de ANDROID_API_LEVEL >= 26
+              if "vk_android_rp_attachment_has_external_format" in "".join(h["body"]):
+                  for i, line in enumerate(src_lines):
+                      if "ANDROID_API_LEVEL >= 26" in line and "#else" in line:
+                          anchor_idx = i - 1
+                          while anchor_idx > 0 and src_lines[anchor_idx].strip() == "":
+                              anchor_idx -= 1
+                          break
+
+              # 2) Buscar la línea de contexto más cercana a old_start en el archivo actual
+              if anchor_idx is None and ctx_candidates:
+                  best_dist = None
+                  approx_start = max(0, h["old_start"] - 1)
+                  for i, line in enumerate(src_lines):
+                      s = line.strip()
+                      if s in ctx_candidates:
+                          dist = abs(i - approx_start)
+                          if best_dist is None or dist < best_dist:
+                              best_dist = dist
+                              anchor_idx = i
+
+              if anchor_idx is None:
                   return None
 
-              ctx_start = max(0, anchor_idx - 2)
-              ctx_end = anchor_idx + 1
+              ctx_start = max(0, anchor_idx - 1)
+              ctx_end = min(len(src_lines), anchor_idx + 2)
               pre_ctx = src_lines[ctx_start:ctx_end]
 
               new_body = []
               for l in pre_ctx:
                   new_body.append(" " + l)
               for r in removed_lines:
-                  # Solo incluir líneas eliminadas si existen exactamente en el contexto
                   if r in src_lines:
                       new_body.append("-" + r)
               for a in added_lines:
