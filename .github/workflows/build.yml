@@ -463,9 +463,13 @@ jobs:
           #ifndef __SHIM_DRM_H__
           #define __SHIM_DRM_H__
           #include <drm-uapi/drm.h>
+          #include <fcntl.h>
           #include <stdint.h>
           #ifndef DRM_CAP_SYNCOBJ_TIMELINE
           #define DRM_CAP_SYNCOBJ_TIMELINE 0x14
+          #endif
+          #ifndef DRM_RDWR
+          #define DRM_RDWR O_RDWR
           #endif
           #endif
           EOF
@@ -542,6 +546,20 @@ jobs:
             return (char *)0;
           }
           static inline int drmIoctl(int fd, unsigned long request, void *arg) { return ioctl(fd, request, arg); }
+          static inline int drmCloseBufferHandle(int fd, uint32_t handle) {
+            (void)fd; (void)handle;
+            return 0;
+          }
+          static inline int drmPrimeFDToHandle(int fd, int prime_fd, uint32_t *handle) {
+            (void)fd; (void)prime_fd;
+            if (handle) *handle = 0;
+            return -1;
+          }
+          static inline int drmPrimeHandleToFD(int fd, uint32_t handle, uint32_t flags, int *prime_fd) {
+            (void)fd; (void)handle; (void)flags;
+            if (prime_fd) *prime_fd = -1;
+            return -1;
+          }
           static inline int drmGetDeviceFromDevId(dev_t dev_id, uint32_t flags, drmDevicePtr *device) {
             (void)dev_id; (void)flags;
             if (device) *device = (drmDevicePtr)0;
