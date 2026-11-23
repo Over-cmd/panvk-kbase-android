@@ -586,6 +586,14 @@ jobs:
             (void)c; (void)cookie; if (e) *e = (xcb_generic_error_t *)0;
             return (xcb_randr_get_crtc_info_reply_t *)0;
           }
+          static inline char *xcb_randr_mode_info_name(const xcb_randr_mode_info_t *r) {
+            (void)r;
+            return (char *)0;
+          }
+          static inline xcb_randr_output_t *xcb_randr_get_crtc_info_outputs(const xcb_randr_get_crtc_info_reply_t *r) {
+            (void)r;
+            return (xcb_randr_output_t *)0;
+          }
           #endif
           EOF
 
