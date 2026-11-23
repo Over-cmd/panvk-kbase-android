@@ -282,7 +282,35 @@ jobs:
           fi
           export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
           echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
-          envsubst < android.toml > android-cross.txt
+
+          TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          if [ -f android.toml ]; then
+            envsubst < android.toml > android-cross.txt
+          else
+            cat <<EOF > android-cross.txt
+[binaries]
+c = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang'
+cpp = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang++'
+ar = '$TOOLCHAIN_BIN/llvm-ar'
+strip = '$TOOLCHAIN_BIN/llvm-strip'
+pkgconfig = 'pkg-config'
+
+[built-in options]
+c_args = ['-L$CLANG_LIB_DIR']
+cpp_args = ['-L$CLANG_LIB_DIR']
+c_link_args = ['-L$CLANG_LIB_DIR']
+cpp_link_args = ['-L$CLANG_LIB_DIR']
+
+[properties]
+needs_exe_wrapper = true
+
+[host_machine]
+system = 'android'
+cpu_family = 'aarch64'
+cpu = 'armv8-a'
+endian = 'little'
+EOF
+          fi
           cat android-cross.txt
 
           PLATFORMS="android"
