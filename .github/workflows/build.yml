@@ -314,8 +314,15 @@ jobs:
           cat <<'EOF' > shims/include/libdrm/xf86drm.h
           #ifndef __SHIM_XF86DRM_H__
           #define __SHIM_XF86DRM_H__
+          #include <stddef.h>
           #include <stdint.h>
           #include <drm.h>
+          typedef struct _drmDevice {
+            int available_nodes;
+            char **nodes;
+          } drmDevice, *drmDevicePtr;
+          static inline int drmGetDevices2(uint32_t flags, drmDevicePtr *devices, int max_devices) { (void)flags; (void)devices; (void)max_devices; return 0; }
+          static inline void drmFreeDevices(drmDevicePtr *devices, int count) { (void)devices; (void)count; }
           static inline int drmGetCap(int fd, uint64_t capability, uint64_t *value) { (void)fd; (void)capability; if (value) *value = 0; return -1; }
           static inline int drmSyncobjCreate(int fd, uint32_t flags, uint32_t *handle) { (void)fd; (void)flags; if (handle) *handle = 0; return -1; }
           static inline int drmSyncobjDestroy(int fd, uint32_t handle) { (void)fd; (void)handle; return -1; }
@@ -529,6 +536,11 @@ jobs:
           EOF
           fi
           cat android-cross.txt
+
+          PLATFORMS="android"
+          if [ "${{ matrix.flavor }}" = "x11" ]; then
+            PLATFORMS="android,x11"
+          fi
 
           meson setup build work/mesa \
             --cross-file android-cross.txt \
