@@ -386,6 +386,7 @@ jobs:
             cat <<'EOF' > shims/include/xcb/xcb.h
           #ifndef __SHIM_XCB_H__
           #define __SHIM_XCB_H__
+          #include <stddef.h>
           #include <stdint.h>
           typedef struct xcb_connection_t xcb_connection_t;
           typedef uint32_t xcb_window_t;
@@ -397,6 +398,28 @@ jobs:
           typedef struct { uint8_t pad0; } xcb_generic_event_t;
           typedef struct { uint8_t response_type; uint8_t pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
           typedef struct { uint32_t sequence; } xcb_void_cookie_t;
+          typedef struct { uint32_t sequence; } xcb_query_extension_cookie_t;
+          typedef struct {
+            uint8_t response_type;
+            uint8_t pad0;
+            uint16_t sequence;
+            uint32_t length;
+            uint8_t present;
+            uint8_t major_opcode;
+            uint8_t first_event;
+            uint8_t first_error;
+          } xcb_query_extension_reply_t;
+          static inline uint32_t xcb_generate_id(xcb_connection_t *c) { (void)c; return 0; }
+          static inline xcb_generic_error_t *xcb_request_check(xcb_connection_t *c, xcb_void_cookie_t cookie) { (void)c; (void)cookie; return (xcb_generic_error_t *)0; }
+          static inline xcb_query_extension_cookie_t xcb_query_extension(xcb_connection_t *c, uint16_t name_len, const char *name) {
+            (void)c; (void)name_len; (void)name;
+            xcb_query_extension_cookie_t ck = {0};
+            return ck;
+          }
+          static inline xcb_query_extension_reply_t *xcb_query_extension_reply(xcb_connection_t *c, xcb_query_extension_cookie_t cookie, xcb_generic_error_t **e) {
+            (void)c; (void)cookie; if (e) *e = (xcb_generic_error_t *)0;
+            return (xcb_query_extension_reply_t *)0;
+          }
           #endif
           EOF
             cat <<'EOF' > shims/include/xcb/randr.h
@@ -448,6 +471,11 @@ jobs:
           #include <stdint.h>
           #include <xcb/xcb.h>
           typedef uint32_t xcb_shm_seg_t;
+          static inline xcb_void_cookie_t xcb_shm_detach_checked(xcb_connection_t *c, xcb_shm_seg_t shmseg) {
+            (void)c; (void)shmseg;
+            xcb_void_cookie_t ck = {0};
+            return ck;
+          }
           #endif
           EOF
             cat <<'EOF' > shims/include/xcb/xfixes.h
@@ -470,6 +498,7 @@ jobs:
           typedef int Bool;
           #define True 1
           #define False 0
+          #define BadRequest 1
           #endif
           EOF
             cat <<'EOF' > shims/include/X11/Xlibint.h
@@ -482,9 +511,14 @@ jobs:
             int (*free_private)(struct _XExtData *extension);
             char *private_data;
           } _XExtData, XExtData;
+          typedef struct _XLockPtrs {
+            void (*lock_display)(Display *dpy);
+            void (*unlock_display)(Display *dpy);
+          } *_XLockPtrs;
           struct _XDisplay {
             XExtData *ext_data;
             int fd;
+            _XLockPtrs lock_fns;
           };
           #endif
           EOF
