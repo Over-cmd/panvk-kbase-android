@@ -468,6 +468,14 @@ typedef struct {
   uint32_t blue_mask;
   uint8_t pad0[4];
 } xcb_visualtype_t;
+typedef struct { xcb_visualtype_t *data; int rem; int index; } xcb_visualtype_iterator_t;
+typedef struct {
+  uint8_t depth;
+  uint8_t pad0;
+  uint16_t visuals_len;
+  uint8_t pad1[4];
+} xcb_depth_t;
+typedef struct { xcb_depth_t *data; int rem; int index; } xcb_depth_iterator_t;
 typedef struct {
   xcb_window_t root; xcb_colormap_t default_colormap; uint32_t white_pixel, black_pixel, current_input_masks;
   uint16_t width_in_pixels, height_in_pixels, width_in_millimeters, height_in_millimeters, min_installed_maps, max_installed_maps;
@@ -483,7 +491,7 @@ typedef struct {
 } xcb_setup_t;
 typedef struct { uint8_t pad0; } xcb_generic_event_t;
 typedef struct xcb_generic_error_t { uint8_t response_type, pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
-typedef struct { uint32_t sequence; } xcb_void_cookie_t, xcb_query_extension_cookie_t, xcb_get_geometry_cookie_t;
+typedef struct { uint32_t sequence; } xcb_void_cookie_t, xcb_query_extension_cookie_t, xcb_get_geometry_cookie_t, xcb_query_tree_cookie_t, xcb_get_window_attributes_cookie_t;
 typedef struct {
   uint8_t response_type, pad0; uint16_t sequence; uint32_t length;
   uint8_t present, major_opcode, first_event, first_error;
@@ -492,11 +500,33 @@ typedef struct {
   uint8_t response_type, depth; uint16_t sequence; uint32_t length;
   xcb_window_t root; int16_t x, y; uint16_t width, height, border_width; uint8_t pad0[2];
 } xcb_get_geometry_reply_t;
+typedef struct {
+  uint8_t response_type, pad0; uint16_t sequence; uint32_t length;
+  xcb_window_t root; xcb_window_t parent; uint16_t children_len; uint8_t pad1[14];
+} xcb_query_tree_reply_t;
+typedef struct {
+  uint8_t response_type, backing_store; uint16_t sequence; uint32_t length;
+  xcb_visualid_t visual; uint16_t _class; uint8_t bit_gravity, win_gravity;
+  uint32_t backing_planes, backing_pixel; uint8_t save_under, map_is_installed, map_state, override_redirect;
+  xcb_colormap_t colormap; uint32_t all_event_masks, your_event_mask; uint16_t do_not_propagate_mask, pad0;
+} xcb_get_window_attributes_reply_t;
 static inline const xcb_setup_t *xcb_get_setup(xcb_connection_t *c) { (void)c; static const xcb_setup_t s = {0}; return &s; }
 static inline xcb_screen_iterator_t xcb_setup_roots_iterator(const xcb_setup_t *R) {
   (void)R; static xcb_screen_t ds = {0}; xcb_screen_iterator_t it = { &ds, 1, 0 }; return it;
 }
 static inline void xcb_screen_next(xcb_screen_iterator_t *i) {
+  if (i && i->rem > 0) { i->rem--; i->index++; }
+}
+static inline xcb_depth_iterator_t xcb_screen_allowed_depths_iterator(const xcb_screen_t *R) {
+  (void)R; static xcb_depth_t dd = {0}; xcb_depth_iterator_t it = { &dd, 0, 0 }; return it;
+}
+static inline void xcb_depth_next(xcb_depth_iterator_t *i) {
+  if (i && i->rem > 0) { i->rem--; i->index++; }
+}
+static inline xcb_visualtype_iterator_t xcb_depth_visuals_iterator(const xcb_depth_t *R) {
+  (void)R; xcb_visualtype_iterator_t it = { (xcb_visualtype_t *)0, 0, 0 }; return it;
+}
+static inline void xcb_visualtype_next(xcb_visualtype_iterator_t *i) {
   if (i && i->rem > 0) { i->rem--; i->index++; }
 }
 static inline void xcb_discard_reply(xcb_connection_t *c, unsigned int sequence) { (void)c; (void)sequence; }
@@ -517,6 +547,21 @@ static inline xcb_get_geometry_cookie_t xcb_get_geometry_unchecked(xcb_connectio
 }
 static inline xcb_get_geometry_reply_t *xcb_get_geometry_reply(xcb_connection_t *c, xcb_get_geometry_cookie_t ck, xcb_generic_error_t **e) {
   (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_get_geometry_reply_t *)0;
+}
+static inline xcb_query_tree_cookie_t xcb_query_tree(xcb_connection_t *c, xcb_window_t w) {
+  (void)c; (void)w; xcb_query_tree_cookie_t ck = {0}; return ck;
+}
+static inline xcb_query_tree_reply_t *xcb_query_tree_reply(xcb_connection_t *c, xcb_query_tree_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_query_tree_reply_t *)0;
+}
+static inline xcb_window_t *xcb_query_tree_children(const xcb_query_tree_reply_t *r) {
+  (void)r; return (xcb_window_t *)0;
+}
+static inline xcb_get_window_attributes_cookie_t xcb_get_window_attributes(xcb_connection_t *c, xcb_window_t w) {
+  (void)c; (void)w; xcb_get_window_attributes_cookie_t ck = {0}; return ck;
+}
+static inline xcb_get_window_attributes_reply_t *xcb_get_window_attributes_reply(xcb_connection_t *c, xcb_get_window_attributes_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_get_window_attributes_reply_t *)0;
 }
 #include <xcb/randr.h>
 #include <xcb/xfixes.h>
