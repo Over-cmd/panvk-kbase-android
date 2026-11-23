@@ -294,7 +294,6 @@ jobs:
           #define __SHIM_XCB_RANDR_H__
 
           #include <stdint.h>
-          #include <xcb/xcb.h>
 
           #define XCB_RANDR_SET_CONFIG_SUCCESS 0
           #define XCB_RANDR_SET_CONFIG_INVALID_CONFIG_TIME 2
@@ -342,7 +341,7 @@ jobs:
             uint8_t status;
             uint16_t sequence;
             uint32_t length;
-            xcb_timestamp_t timestamp;
+            uint32_t timestamp;
             int16_t x;
             int16_t y;
             uint16_t width;
@@ -354,10 +353,13 @@ jobs:
             uint16_t num_possible_outputs;
           } xcb_randr_get_crtc_info_reply_t;
 
+          struct xcb_connection_t;
+          struct xcb_generic_error_t;
+
           static inline xcb_randr_get_crtc_info_cookie_t
-          xcb_randr_get_crtc_info_unchecked(xcb_connection_t *c,
+          xcb_randr_get_crtc_info_unchecked(struct xcb_connection_t *c,
                                             xcb_randr_crtc_t crtc,
-                                            xcb_timestamp_t config_timestamp) {
+                                            uint32_t config_timestamp) {
             (void)c;
             (void)crtc;
             (void)config_timestamp;
@@ -366,13 +368,13 @@ jobs:
           }
 
           static inline xcb_randr_get_crtc_info_reply_t *
-          xcb_randr_get_crtc_info_reply(xcb_connection_t *c,
+          xcb_randr_get_crtc_info_reply(struct xcb_connection_t *c,
                                         xcb_randr_get_crtc_info_cookie_t cookie,
-                                        xcb_generic_error_t **e) {
+                                        struct xcb_generic_error_t **e) {
             (void)c;
             (void)cookie;
             if (e)
-              *e = (xcb_generic_error_t *)0;
+              *e = (struct xcb_generic_error_t *)0;
             return (xcb_randr_get_crtc_info_reply_t *)0;
           }
 
@@ -617,6 +619,7 @@ jobs:
             (void)c; (void)cookie; if (e) *e = (xcb_generic_error_t *)0;
             return (xcb_query_extension_reply_t *)0;
           }
+          #include <xcb/randr.h>
           #endif
           EOF
 
