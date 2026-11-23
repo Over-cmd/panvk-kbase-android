@@ -69,7 +69,7 @@ jobs:
             exit 0
           fi
 
-          echo "Detectado PATCH-DRIFT en Mesa ${MESA_REF}; actualizando cabeceras @@ de parches..."
+          echo "Detectado PATCH-DRIFT en Mesa ${MESA_REF}; actualizando cabeceras @@ y adaptando hunks..."
           git -C work/mesa reset --hard HEAD
           git -C work/mesa clean -fd
 
@@ -81,6 +81,66 @@ jobs:
 
           mesa_dir = "work/mesa"
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
+
+          def adapt_vk_android_h_hunk(h, src_lines):
+              body_text = "".join(h["body"])
+              if "vk_android_rp_attachment_has_external_format" not in body_text:
+                  return None
+
+              added_lines = [l[1:] for l in h["body"] if l.startswith("+")]
+              removed_lines = [l[1:] for l in h["body"] if l.startswith("-")]
+              if not added_lines:
+                  return None
+
+              # Buscar el punto de inserción justo antes del #else de ANDROID_API_LEVEL >= 26
+              else_idx = None
+              for i, line in enumerate(src_lines):
+                  if "ANDROID_API_LEVEL >= 26" in line and "#else" in line:
+                      else_idx = i
+                      break
+
+              if else_idx is None:
+                  return None
+
+              # Retroceder hasta la línea no vacía anterior al #else para tomar contexto válido
+              anchor_idx = else_idx - 1
+              while anchor_idx > 0 and src_lines[anchor_idx].strip() == "":
+                  anchor_idx -= 1
+
+              # Evitar duplicar si ya existe un símbolo clave de added_lines en vk_android.h
+              key_tokens = [
+                  tok.strip(" ;()")
+                  for l in added_lines
+                  for tok in l.split()
+                  if "ahb" in tok.lower() or "dma_buf" in tok.lower() or "finder" in tok.lower()
+              ]
+              if key_tokens and any(k in "".join(src_lines) for k in key_tokens if len(k) > 6):
+                  return None
+
+              ctx_start = max(0, anchor_idx - 2)
+              ctx_end = anchor_idx + 1
+              pre_ctx = src_lines[ctx_start:ctx_end]
+
+              new_body = []
+              for l in pre_ctx:
+                  new_body.append(" " + l)
+              for r in removed_lines:
+                  # Solo incluir líneas eliminadas si existen exactamente en el contexto
+                  if r in src_lines:
+                      new_body.append("-" + r)
+              for a in added_lines:
+                  if not a.endswith("\n"):
+                      a = a + "\n"
+                  new_body.append("+" + a)
+
+              old_cnt = sum(1 for l in new_body if l.startswith((" ", "-")))
+              new_cnt = sum(1 for l in new_body if l.startswith((" ", "+")))
+              start_line = ctx_start + 1
+
+              return (
+                  f"@@ -{start_line},{old_cnt} +{start_line},{new_cnt} @@{h['suffix']}\n",
+                  new_body,
+              )
 
           for patch_path in sorted(glob.glob("patches/*/*.patch")):
               with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
@@ -192,6 +252,16 @@ jobs:
                               changed = True
                           rebuilt_lines.append(f"@@ -{new_pos},{old_cnt} +{new_pos},{new_cnt} @@{h['suffix']}\n")
                           rebuilt_lines.extend(h["body"])
+                      elif target_file == "src/vulkan/runtime/vk_android.h":
+                          adapted = adapt_vk_android_h_hunk(h, src_lines)
+                          if adapted is not None:
+                              changed = True
+                              hdr_line, new_body = adapted
+                              rebuilt_lines.append(hdr_line)
+                              rebuilt_lines.extend(new_body)
+                          else:
+                              rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
+                              rebuilt_lines.extend(h["body"])
                       else:
                           rebuilt_lines.append(f"@@ -{h['old_start']},{h['old_len']} +{h['new_start']},{h['new_len']} @@{h['suffix']}\n")
                           rebuilt_lines.extend(h["body"])
