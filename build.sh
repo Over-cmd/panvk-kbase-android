@@ -653,8 +653,7 @@ EOF
 #define __SHIM_XCB_SHM_H__
 #include <errno.h>
 #include <stdint.h>
-typedef struct xcb_connection_t xcb_connection_t;
-typedef struct { uint32_t sequence; } xcb_void_cookie_t;
+#include <xcb/xcb.h>
 typedef uint32_t xcb_shm_seg_t;
 static inline xcb_void_cookie_t xcb_shm_attach_checked(xcb_connection_t *c, xcb_shm_seg_t s, uint32_t id, uint8_t ro) { (void)c; (void)s; (void)id; (void)ro; xcb_void_cookie_t ck = {0}; return ck; }
 static inline xcb_void_cookie_t xcb_shm_detach_checked(xcb_connection_t *c, xcb_shm_seg_t s) { (void)c; (void)s; xcb_void_cookie_t ck = {0}; return ck; }
