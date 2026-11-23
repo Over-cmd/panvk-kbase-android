@@ -157,64 +157,25 @@ if os.path.exists(kbase_src):
         kbase_c = ks.read()
 
     kbase_c = re.sub(
-        r"\n?static struct pan_kmod_dev \*\nkbase_kmod_dev_create_pan\(.*?\n\}\n\nstatic struct pan_kmod_bo \*\nkbase_kmod_bo_import_pan\(.*?\n\}\n\n?",
-        "\n",
-        kbase_c,
-        flags=re.DOTALL,
-    )
-    kbase_c = re.sub(
         r"pan_kmod_dev_init\s*\(\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,\)]+)\s*\)",
         r"pan_kmod_dev_init(\1, \2, \3, \4, \6, \5, NULL)",
         kbase_c,
     )
 
-    m_drv = re.search(
-        r"\b(?:struct\s+)?pan_kmod_driver\b[^\n;]*?\b(kbase_drv|[a-zA-Z_][a-zA-Z0-9_]*_drv|[a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\[[^\]]*\])?\s*=",
-        kbase_c,
-    )
-    drv_name = m_drv.group(1) if m_drv else None
-    drv_expr = f"&{drv_name}" if drv_name else "(const struct pan_kmod_driver *)0"
-    print(f"Usando drv_expr={drv_expr} para kbase_kmod_dev_create_pan")
-
-    wrappers = (
-        "\nstatic struct pan_kmod_dev *\n"
-        "kbase_kmod_dev_create_pan(int fd, uint32_t flags,\n"
-        "                          const struct pan_kmod_allocator *allocator)\n"
-        "{\n"
-        f"   return kbase_kmod_dev_create(fd, flags, {drv_expr}, allocator);\n"
-        "}\n\n"
+    fwd_decls = (
+        "struct pan_kmod_driver;\n"
+        "extern const struct pan_kmod_driver kbase_drv;\n"
+        "static struct pan_kmod_dev *\n"
+        "kbase_kmod_dev_create(int fd, uint32_t flags,\n"
+        "                      const struct pan_kmod_driver *driver,\n"
+        "                      const struct pan_kmod_allocator *allocator);\n"
         "static struct pan_kmod_bo *\n"
-        "kbase_kmod_bo_import_pan(struct pan_kmod_dev *dev, int fd)\n"
-        "{\n"
-        "   return kbase_kmod_bo_import_fd(dev, fd, 0);\n"
-        "}\n\n"
+        "kbase_kmod_bo_import_fd(struct pan_kmod_dev *dev, int fd, uint64_t size);\n\n"
     )
-
-    kbase_c = re.sub(
-        r"^\s*\.(?:bo_import_fd|bo_export_fd|bo_get_mmap_offset|bo_munmap)\s*=\s*[^,\n]+,?\s*\n",
-        "",
-        kbase_c,
-        flags=re.MULTILINE,
-    )
-    kbase_c = re.sub(
-        r"^\s*\.dev_create\s*=\s*[^,\n]+,",
-        "   .dev_create = kbase_kmod_dev_create_pan,",
-        kbase_c,
-        flags=re.MULTILINE,
-    )
-    kbase_c = re.sub(
-        r"^\s*\.bo_import\s*=\s*[^,\n]+,",
-        "   .bo_import = kbase_kmod_bo_import_pan,",
-        kbase_c,
-        flags=re.MULTILINE,
-    )
-
-    m_ops = re.search(r"^(?:static\s+)?(?:const\s+)?struct\s+pan_kmod_ops\s+kbase_kmod_ops\b|\bkbase_kmod_ops\s*=", kbase_c, flags=re.MULTILINE)
-    if m_ops:
-        idx_ops = m_ops.start()
-        kbase_c = kbase_c[:idx_ops] + wrappers + kbase_c[idx_ops:]
-    else:
-        kbase_c = kbase_c + "\n" + wrappers
+    target_pan = "static struct pan_kmod_dev *\nkbase_kmod_dev_create_pan("
+    idx_pan = kbase_c.find(target_pan)
+    if idx_pan != -1 and "kbase_kmod_bo_import_fd(struct pan_kmod_dev *dev, int fd, uint64_t size);" not in kbase_c[:idx_pan]:
+        kbase_c = kbase_c[:idx_pan] + fwd_decls + kbase_c[idx_pan:]
 
     with open(kbase_src, "w", encoding="utf-8") as ks:
         ks.write(kbase_c)
