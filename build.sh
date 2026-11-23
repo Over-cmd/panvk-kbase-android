@@ -164,7 +164,7 @@ if os.path.exists(kbase_src):
 
     fwd_decls = (
         "struct pan_kmod_driver;\n"
-        "extern const struct pan_kmod_driver kbase_drv;\n"
+        "static const struct pan_kmod_driver kbase_drv __attribute__((unused));\n"
         "static struct pan_kmod_dev *\n"
         "kbase_kmod_dev_create(int fd, uint32_t flags,\n"
         "                      const struct pan_kmod_driver *driver,\n"
@@ -200,8 +200,7 @@ if os.path.exists(kbase_src):
         "#endif\n"
         "}\n\n"
     )
-    has_export_fn = "kbase_kmod_bo_export_fd(" in kbase_c
-    if has_export_fn:
+    if "kbase_kmod_bo_export_fd(" in kbase_c:
         ops_wrappers = ops_wrappers.replace("#ifdef HAVE_KBASE_BO_EXPORT_FD\n", "#if 1\n")
 
     kbase_c = re.sub(
@@ -215,8 +214,8 @@ if os.path.exists(kbase_src):
         kbase_c,
     )
     kbase_c = re.sub(
-        r"(\.bo_export\s*=\s*)kbase_kmod_bo_export_fd\s*,",
-        r"\1kbase_kmod_bo_export_ops,",
+        r"\.bo_export_fd\s*=\s*[^,\n}]+([,}])",
+        r".bo_export = kbase_kmod_bo_export_ops\1",
         kbase_c,
     )
     kbase_c = re.sub(
