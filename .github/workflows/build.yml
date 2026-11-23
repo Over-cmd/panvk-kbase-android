@@ -304,19 +304,11 @@ jobs:
           cat <<'EOF' > shims/include/libdrm/drm.h
           #ifndef __SHIM_DRM_H__
           #define __SHIM_DRM_H__
+          #include <drm-uapi/drm.h>
           #include <stdint.h>
-          typedef uint32_t drm_handle_t;
-          #define DRM_CAP_SYNCOBJ_TIMELINE 0x13
-          #define DRM_SYNCOBJ_CREATE 0
-          #define DRM_SYNCOBJ_DESTROY 0
-          #define DRM_SYNCOBJ_HANDLE_TO_FD 0
-          #define DRM_SYNCOBJ_FD_TO_HANDLE 0
-          #define DRM_SYNCOBJ_WAIT 0
-          #define DRM_SYNCOBJ_SIGNAL 0
-          struct drm_syncobj_create { uint32_t handle; uint32_t flags; };
-          struct drm_syncobj_destroy { uint32_t handle; uint32_t pad; };
-          struct drm_syncobj_handle { uint32_t handle; uint32_t flags; int32_t fd; uint32_t pad; };
-          struct drm_syncobj_wait { uint64_t handles; uint32_t count_handles; int64_t timeout_nsec; uint32_t flags; uint32_t first_signaled; uint32_t pad; };
+          #ifndef DRM_CAP_SYNCOBJ_TIMELINE
+          #define DRM_CAP_SYNCOBJ_TIMELINE 0x14
+          #endif
           #endif
           EOF
           cat <<'EOF' > shims/include/libdrm/xf86drm.h
