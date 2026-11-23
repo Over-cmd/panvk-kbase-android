@@ -168,8 +168,12 @@ if os.path.exists(kbase_src):
         kbase_c,
     )
 
-    m_drv = re.search(r"\bpan_kmod_driver\b[^\n;]*?\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\[[^\]]*\])?\s*=", kbase_c)
-    drv_expr = f"&{m_drv.group(1)}" if m_drv else "(const struct pan_kmod_driver *)0"
+    m_drv = re.search(
+        r"\b(?:struct\s+)?pan_kmod_driver\b[^\n;]*?\b(kbase_drv|[a-zA-Z_][a-zA-Z0-9_]*_drv|[a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\[[^\]]*\])?\s*=",
+        kbase_c,
+    )
+    drv_name = m_drv.group(1) if m_drv else None
+    drv_expr = f"&{drv_name}" if drv_name else "(const struct pan_kmod_driver *)0"
     print(f"Usando drv_expr={drv_expr} para kbase_kmod_dev_create_pan")
 
     wrappers = (
@@ -186,17 +190,41 @@ if os.path.exists(kbase_src):
         "}\n\n"
     )
 
-    kbase_c = re.sub(r"^\s*\.(?:bo_import_fd|bo_export_fd|bo_get_mmap_offset|bo_munmap)\s*=\s*[^,\n]+,?\s*\n", "", kbase_c, flags=re.MULTILINE)
-    kbase_c = re.sub(r"^\s*\.dev_create\s*=\s*[^,\n]+,", "   .dev_create = kbase_kmod_dev_create_pan,", kbase_c, flags=re.MULTILINE)
-    kbase_c = re.sub(r"^\s*\.bo_import\s*=\s*[^,\n]+,", "   .bo_import = kbase_kmod_bo_import_pan,", kbase_c, flags=re.MULTILINE)
+    kbase_c = re.sub(
+        r"^\s*\.(?:bo_import_fd|bo_export_fd|bo_get_mmap_offset|bo_munmap)\s*=\s*[^,\n]+,?\s*\n",
+        "",
+        kbase_c,
+        flags=re.MULTILINE,
+    )
+    kbase_c = re.sub(
+        r"^\s*\.dev_create\s*=\s*[^,\n]+,",
+        "   .dev_create = kbase_kmod_dev_create_pan,",
+        kbase_c,
+        flags=re.MULTILINE,
+    )
+    kbase_c = re.sub(
+        r"^\s*\.bo_import\s*=\s*[^,\n]+,",
+        "   .bo_import = kbase_kmod_bo_import_pan,",
+        kbase_c,
+        flags=re.MULTILINE,
+    )
 
-    m_ops = re.search(r"\bkbase_kmod_ops\s*=", kbase_c)
-    if m_ops:
-        line_start = kbase_c.rfind("\n", 0, m_ops.start())
-        idx_ops = line_start + 1 if line_start != -1 else m_ops.start()
-        kbase_c = kbase_c[:idx_ops] + wrappers + kbase_c[idx_ops:]
+    insert_pos = None
+    if drv_name:
+        m_def = re.search(rf"\b{re.escape(drv_name)}\b\s*(?:\[[^\]]*\])?\s*=\s*\{{.*?\}};", kbase_c, flags=re.DOTALL)
+        if m_def:
+            insert_pos = m_def.end()
+
+    if insert_pos is not None:
+        kbase_c = kbase_c[:insert_pos] + wrappers + kbase_c[insert_pos:]
     else:
-        kbase_c = kbase_c + "\n" + wrappers
+        m_ops = re.search(r"\bkbase_kmod_ops\s*=", kbase_c)
+        if m_ops:
+            line_start = kbase_c.rfind("\n", 0, m_ops.start())
+            idx_ops = line_start + 1 if line_start != -1 else m_ops.start()
+            kbase_c = kbase_c[:idx_ops] + wrappers + kbase_c[idx_ops:]
+        else:
+            kbase_c = kbase_c + "\n" + wrappers
 
     with open(kbase_src, "w", encoding="utf-8") as ks:
         ks.write(kbase_c)
