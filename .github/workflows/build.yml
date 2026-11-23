@@ -471,6 +471,25 @@ jobs:
           typedef uint32_t xcb_colormap_t;
           typedef uint32_t xcb_gcontext_t;
           typedef uint32_t xcb_keycode_t;
+          typedef uint32_t xcb_timestamp_t;
+          typedef struct {
+            xcb_window_t root;
+            xcb_colormap_t default_colormap;
+            uint32_t white_pixel;
+            uint32_t black_pixel;
+            uint32_t current_input_masks;
+            uint16_t width_in_pixels;
+            uint16_t height_in_pixels;
+            uint16_t width_in_millimeters;
+            uint16_t height_in_millimeters;
+            uint16_t min_installed_maps;
+            uint16_t max_installed_maps;
+            xcb_visualid_t root_visual;
+            uint8_t backing_stores;
+            uint8_t save_unders;
+            uint8_t root_depth;
+            uint8_t allowed_depths_len;
+          } xcb_screen_t;
           typedef struct { uint8_t pad0; } xcb_generic_event_t;
           typedef struct { uint8_t response_type; uint8_t pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
           typedef struct { uint32_t sequence; } xcb_void_cookie_t;
@@ -509,9 +528,63 @@ jobs:
           #define __SHIM_XCB_RANDR_H__
           #include <stdint.h>
           #include <xcb/xcb.h>
+          #define XCB_RANDR_MODE_FLAG_HSYNC_POSITIVE 1
+          #define XCB_RANDR_MODE_FLAG_HSYNC_NEGATIVE 2
+          #define XCB_RANDR_MODE_FLAG_VSYNC_POSITIVE 4
+          #define XCB_RANDR_MODE_FLAG_VSYNC_NEGATIVE 8
+          #define XCB_RANDR_MODE_FLAG_INTERLACE 16
+          #define XCB_RANDR_MODE_FLAG_DOUBLE_SCAN 32
+          #define XCB_RANDR_MODE_FLAG_CSYNC 64
+          #define XCB_RANDR_MODE_FLAG_CSYNC_POSITIVE 128
+          #define XCB_RANDR_MODE_FLAG_CSYNC_NEGATIVE 256
+          #define XCB_RANDR_MODE_FLAG_HMIX_POSITIVE 512
+          #define XCB_RANDR_MODE_FLAG_HMIX_NEGATIVE 1024
+          #define XCB_RANDR_MODE_FLAG_VMIX_POSITIVE 2048
+          #define XCB_RANDR_MODE_FLAG_VMIX_NEGATIVE 4096
           typedef uint32_t xcb_randr_output_t;
           typedef uint32_t xcb_randr_crtc_t;
           typedef uint32_t xcb_randr_mode_t;
+          typedef struct {
+            uint32_t id;
+            uint16_t width;
+            uint16_t height;
+            uint32_t dot_clock;
+            uint16_t hsync_start;
+            uint16_t hsync_end;
+            uint16_t htotal;
+            uint16_t hskew;
+            uint16_t vsync_start;
+            uint16_t vsync_end;
+            uint16_t vtotal;
+            uint16_t name_len;
+            uint32_t mode_flags;
+          } xcb_randr_mode_info_t;
+          typedef struct { uint32_t sequence; } xcb_randr_get_crtc_info_cookie_t;
+          typedef struct {
+            uint8_t response_type;
+            uint8_t status;
+            uint16_t sequence;
+            uint32_t length;
+            xcb_timestamp_t timestamp;
+            int16_t x;
+            int16_t y;
+            uint16_t width;
+            uint16_t height;
+            xcb_randr_mode_t mode;
+            uint16_t rotation;
+            uint16_t rotations;
+            uint16_t num_outputs;
+            uint16_t num_possible_outputs;
+          } xcb_randr_get_crtc_info_reply_t;
+          static inline xcb_randr_get_crtc_info_cookie_t xcb_randr_get_crtc_info_unchecked(xcb_connection_t *c, xcb_randr_crtc_t crtc, xcb_timestamp_t config_timestamp) {
+            (void)c; (void)crtc; (void)config_timestamp;
+            xcb_randr_get_crtc_info_cookie_t ck = {0};
+            return ck;
+          }
+          static inline xcb_randr_get_crtc_info_reply_t *xcb_randr_get_crtc_info_reply(xcb_connection_t *c, xcb_randr_get_crtc_info_cookie_t cookie, xcb_generic_error_t **e) {
+            (void)c; (void)cookie; if (e) *e = (xcb_generic_error_t *)0;
+            return (xcb_randr_get_crtc_info_reply_t *)0;
+          }
           #endif
           EOF
             cat <<'EOF' > shims/include/xcb/xcb_keysyms.h
