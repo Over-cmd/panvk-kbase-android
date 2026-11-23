@@ -88,63 +88,52 @@ jobs:
           def adapt_vk_android_h_hunk(h, src_lines):
               added_lines = [l[1:] for l in h["body"] if l.startswith("+")]
               removed_lines = [l[1:] for l in h["body"] if l.startswith("-")]
-              ctx_candidates = [norm_code(l[1:]) for l in h["body"] if l.startswith((" ", "-")) and norm_code(l[1:])]
               if not added_lines:
                   return None
 
-              src_joined = "".join(src_lines)
+              src_norm_all = norm_code("".join(src_lines))
               non_empty_added = [
                   norm_code(a)
                   for a in added_lines
                   if norm_code(a) and not norm_code(a).startswith(("#ifdef", "#endif", "#else", "{", "}"))
               ]
-              if non_empty_added and all(a in norm_code(src_joined) for a in non_empty_added):
+              if non_empty_added and all(a in src_norm_all for a in non_empty_added):
                   return None
 
-              anchor_idx = None
               approx_start = max(0, h["old_start"] - 1)
+              tokens = []
+              for l in h["body"]:
+                  if l.startswith((" ", "-", "+")):
+                      for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]{5,}", l[1:]):
+                          if tok not in tokens:
+                              tokens.append(tok)
 
-              # 1) Si menciona vk_android_rp_attachment_has_external_format, buscar antes del #else de ANDROID_API_LEVEL >= 26
-              if "vk_android_rp_attachment_has_external_format" in "".join(h["body"]):
-                  for i, line in enumerate(src_lines):
-                      if "ANDROID_API_LEVEL >= 26" in line and "#else" in line:
-                          anchor_idx = i - 1
-                          while anchor_idx > 0 and src_lines[anchor_idx].strip() == "":
-                              anchor_idx -= 1
-                          break
+              anchor_idx = None
+              best_dist = None
 
-              # 2) Buscar líneas de contexto normalizadas cercanas a old_start
-              if anchor_idx is None and ctx_candidates:
-                  best_score = None
+              # Priorizar tokens del contexto o eliminación que aparezcan en vk_android.h
+              for tok in tokens:
                   for i, line in enumerate(src_lines):
-                      ns = norm_code(line)
-                      if not ns:
-                          continue
-                      if ns in ctx_candidates:
+                      if tok in line:
                           dist = abs(i - approx_start)
-                          score = (0, dist)
-                          if best_score is None or score < best_score:
-                              best_score = score
+                          if best_dist is None or dist < best_dist:
+                              best_dist = dist
                               anchor_idx = i
-                      elif any(c in ns or ns in c for c in ctx_candidates if len(c) > 10):
-                          dist = abs(i - approx_start)
-                          score = (1, dist)
-                          if best_score is None or score < best_score:
-                              best_score = score
-                              anchor_idx = i
+                  if anchor_idx is not None:
+                      break
 
               if anchor_idx is None:
                   return None
 
-              ctx_start = max(0, anchor_idx - 1)
-              ctx_end = min(len(src_lines), anchor_idx + 2)
-              pre_ctx = src_lines[ctx_start:ctx_end]
+              # Usar una única línea exacta del archivo como contexto para evitar desajustes de líneas vecinas
+              anchor_line = src_lines[anchor_idx]
+              if not anchor_line.endswith("\n"):
+                  anchor_line = anchor_line + "\n"
 
-              new_body = []
-              for l in pre_ctx:
-                  new_body.append(" " + l)
+              new_body = [" " + anchor_line]
+              src_norm_lines = [norm_code(x) for x in src_lines]
               for r in removed_lines:
-                  if norm_code(r) in [norm_code(x) for x in src_lines]:
+                  if norm_code(r) in src_norm_lines:
                       new_body.append("-" + (r if r.endswith("\n") else r + "\n"))
               for a in added_lines:
                   if not a.endswith("\n"):
@@ -153,7 +142,7 @@ jobs:
 
               old_cnt = sum(1 for l in new_body if l.startswith((" ", "-")))
               new_cnt = sum(1 for l in new_body if l.startswith((" ", "+")))
-              start_line = ctx_start + 1
+              start_line = anchor_idx + 1
 
               return (
                   f"@@ -{start_line},{old_cnt} +{start_line},{new_cnt} @@{h['suffix']}\n",
