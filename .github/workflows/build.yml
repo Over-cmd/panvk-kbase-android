@@ -101,31 +101,48 @@ jobs:
                   return None
 
               approx_start = max(0, h["old_start"] - 1)
-              tokens = []
-              for l in h["body"]:
-                  if l.startswith((" ", "-", "+")):
-                      for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]{5,}", l[1:]):
-                          if tok not in tokens:
-                              tokens.append(tok)
-
               anchor_idx = None
-              best_dist = None
 
-              # Priorizar tokens del contexto o eliminación que aparezcan en vk_android.h
-              for tok in tokens:
-                  for i, line in enumerate(src_lines):
-                      if tok in line:
-                          dist = abs(i - approx_start)
-                          if best_dist is None or dist < best_dist:
-                              best_dist = dist
-                              anchor_idx = i
-                  if anchor_idx is not None:
-                      break
+              # 1) Buscar directamente símbolos clave presentes en el hunk dentro de vk_android.h
+              priority_symbols = [
+                  "vk_android_rp_attachment_has_external_format",
+                  "local_color_format",
+                  "ANDROID_API_LEVEL",
+              ]
+              for sym in priority_symbols:
+                  if sym in "".join(h["body"]):
+                      best_dist = None
+                      for i, line in enumerate(src_lines):
+                          if sym in line:
+                              dist = abs(i - approx_start)
+                              if best_dist is None or dist < best_dist:
+                                  best_dist = dist
+                                  anchor_idx = i
+                      if anchor_idx is not None:
+                          break
+
+              # 2) Respaldo por identificadores del contexto/eliminaciones cercanos a old_start
+              if anchor_idx is None:
+                  tokens = []
+                  for l in h["body"]:
+                      if l.startswith((" ", "-")):
+                          for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]{5,}", l[1:]):
+                              if tok not in tokens:
+                                  tokens.append(tok)
+                  best_dist = None
+                  for tok in tokens:
+                      for i, line in enumerate(src_lines):
+                          if tok in line:
+                              dist = abs(i - approx_start)
+                              if best_dist is None or dist < best_dist:
+                                  best_dist = dist
+                                  anchor_idx = i
+                      if anchor_idx is not None:
+                          break
 
               if anchor_idx is None:
                   return None
 
-              # Usar una única línea exacta del archivo como contexto para evitar desajustes de líneas vecinas
               anchor_line = src_lines[anchor_idx]
               if not anchor_line.endswith("\n"):
                   anchor_line = anchor_line + "\n"
