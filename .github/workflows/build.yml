@@ -82,20 +82,27 @@ jobs:
           mesa_dir = "work/mesa"
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
 
+          def norm_code(s):
+              return " ".join(s.strip().split())
+
           def adapt_vk_android_h_hunk(h, src_lines):
               added_lines = [l[1:] for l in h["body"] if l.startswith("+")]
               removed_lines = [l[1:] for l in h["body"] if l.startswith("-")]
-              ctx_candidates = [l[1:].strip() for l in h["body"] if l.startswith(" ") and l[1:].strip()]
+              ctx_candidates = [norm_code(l[1:]) for l in h["body"] if l.startswith((" ", "-")) and norm_code(l[1:])]
               if not added_lines:
                   return None
 
-              # Evitar duplicar si las líneas añadidas ya existen en el archivo
               src_joined = "".join(src_lines)
-              non_empty_added = [a.strip() for a in added_lines if a.strip() and not a.strip().startswith(("#ifdef", "#endif", "#else", "{", "}"))]
-              if non_empty_added and all(a in src_joined for a in non_empty_added):
+              non_empty_added = [
+                  norm_code(a)
+                  for a in added_lines
+                  if norm_code(a) and not norm_code(a).startswith(("#ifdef", "#endif", "#else", "{", "}"))
+              ]
+              if non_empty_added and all(a in norm_code(src_joined) for a in non_empty_added):
                   return None
 
               anchor_idx = None
+              approx_start = max(0, h["old_start"] - 1)
 
               # 1) Si menciona vk_android_rp_attachment_has_external_format, buscar antes del #else de ANDROID_API_LEVEL >= 26
               if "vk_android_rp_attachment_has_external_format" in "".join(h["body"]):
@@ -106,16 +113,24 @@ jobs:
                               anchor_idx -= 1
                           break
 
-              # 2) Buscar la línea de contexto más cercana a old_start en el archivo actual
+              # 2) Buscar líneas de contexto normalizadas cercanas a old_start
               if anchor_idx is None and ctx_candidates:
-                  best_dist = None
-                  approx_start = max(0, h["old_start"] - 1)
+                  best_score = None
                   for i, line in enumerate(src_lines):
-                      s = line.strip()
-                      if s in ctx_candidates:
+                      ns = norm_code(line)
+                      if not ns:
+                          continue
+                      if ns in ctx_candidates:
                           dist = abs(i - approx_start)
-                          if best_dist is None or dist < best_dist:
-                              best_dist = dist
+                          score = (0, dist)
+                          if best_score is None or score < best_score:
+                              best_score = score
+                              anchor_idx = i
+                      elif any(c in ns or ns in c for c in ctx_candidates if len(c) > 10):
+                          dist = abs(i - approx_start)
+                          score = (1, dist)
+                          if best_score is None or score < best_score:
+                              best_score = score
                               anchor_idx = i
 
               if anchor_idx is None:
@@ -129,8 +144,8 @@ jobs:
               for l in pre_ctx:
                   new_body.append(" " + l)
               for r in removed_lines:
-                  if r in src_lines:
-                      new_body.append("-" + r)
+                  if norm_code(r) in [norm_code(x) for x in src_lines]:
+                      new_body.append("-" + (r if r.endswith("\n") else r + "\n"))
               for a in added_lines:
                   if not a.endswith("\n"):
                       a = a + "\n"
