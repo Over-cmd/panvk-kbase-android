@@ -255,28 +255,20 @@ jobs:
                   "static struct pan_kmod_bo *\n"
                   "kbase_kmod_bo_import_pan(struct pan_kmod_dev *dev, int fd)\n"
                   "{\n"
-                  "#ifdef kbase_kmod_bo_import_fd\n"
                   "   return kbase_kmod_bo_import_fd(dev, fd, 0);\n"
-                  "#else\n"
-                  "   (void)dev; (void)fd; return NULL;\n"
-                  "#endif\n"
-                  "}\n"
+                  "}\n\n"
               )
 
               # Eliminar campos inexistentes o incompatibles en kbase_kmod_ops
               kbase_c = re.sub(r"^\s*\.(?:bo_import_fd|bo_export_fd|bo_get_mmap_offset|bo_munmap)\s*=\s*[^,\n]+,?\s*\n", "", kbase_c, flags=re.MULTILINE)
-              kbase_c = re.sub(r"^\s*\.dev_create\s*=\s*kbase_kmod_dev_create\s*,", "   .dev_create = kbase_kmod_dev_create_pan,", kbase_c, flags=re.MULTILINE)
-              if "kbase_kmod_bo_import_fd" in kbase_c:
-                  wrappers = wrappers.replace("#ifdef kbase_kmod_bo_import_fd\n   return kbase_kmod_bo_import_fd(dev, fd, 0);\n#else\n   (void)dev; (void)fd; return NULL;\n#endif", "   return kbase_kmod_bo_import_fd(dev, fd, 0);")
-                  kbase_c = re.sub(r"^\s*\.bo_import\s*=\s*[^,\n]+,", "   .bo_import = kbase_kmod_bo_import_pan,", kbase_c, flags=re.MULTILINE)
-              else:
-                  kbase_c = re.sub(r"^\s*\.bo_import\s*=\s*[^,\n]+,?\s*\n", "", kbase_c, flags=re.MULTILINE)
+              kbase_c = re.sub(r"^\s*\.dev_create\s*=\s*[^,\n]+,", "   .dev_create = kbase_kmod_dev_create_pan,", kbase_c, flags=re.MULTILINE)
+              kbase_c = re.sub(r"^\s*\.bo_import\s*=\s*[^,\n]+,", "   .bo_import = kbase_kmod_bo_import_pan,", kbase_c, flags=re.MULTILINE)
 
               if "kbase_kmod_dev_create_pan" not in kbase_c:
-                  ops_marker = "static const struct pan_kmod_ops kbase_kmod_ops"
-                  idx_ops = kbase_c.find(ops_marker)
-                  if idx_ops != -1:
-                      kbase_c = kbase_c[:idx_ops] + wrappers + "\n" + kbase_c[idx_ops:]
+                  m_ops = re.search(r"^[^\n]*\bkbase_kmod_ops\b[^\n=]*=", kbase_c, flags=re.MULTILINE)
+                  if m_ops:
+                      idx_ops = m_ops.start()
+                      kbase_c = kbase_c[:idx_ops] + wrappers + kbase_c[idx_ops:]
                   else:
                       kbase_c = kbase_c + "\n" + wrappers
 
