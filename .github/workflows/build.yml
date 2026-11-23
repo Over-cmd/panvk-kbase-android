@@ -83,7 +83,7 @@ jobs:
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
 
           for patch_path in sorted(glob.glob("patches/*/*.patch")):
-              subprocess.run(["git", "-C", mesa_dir, "reset", "--hard", "HEAD"], check=True, stdout=subprocess.DEVNULL)
+              subprocess.run(["git", "-C", mesa_dir, "reset", --hard", "HEAD"], check=True, stdout=subprocess.DEVNULL)
               subprocess.run(["git", "-C", mesa_dir, "clean", "-fd"], check=True, stdout=subprocess.DEVNULL)
 
               chk = subprocess.run(
@@ -104,13 +104,13 @@ jobs:
               cur_hunk = None
 
               def flush_hunk():
-                  nonlocal cur_hunk
+                  global cur_hunk
                   if cur_hunk is not None:
                       cur_hunks.append(cur_hunk)
                       cur_hunk = None
 
               def flush_file():
-                  nonlocal cur_file, cur_hunks, cur_header
+                  global cur_file, cur_hunks, cur_header
                   flush_hunk()
                   if cur_file is not None:
                       file_sections.append((cur_header, cur_file, cur_hunks))
