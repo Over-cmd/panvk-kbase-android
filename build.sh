@@ -583,6 +583,7 @@ static inline uint32_t xcb_get_maximum_request_length(xcb_connection_t *c) { (vo
 static inline xcb_generic_event_t *xcb_wait_for_special_event(xcb_connection_t *c, xcb_special_event_t *se) { (void)c; (void)se; return (xcb_generic_event_t *)0; }
 static inline xcb_query_keymap_cookie_t xcb_query_keymap(xcb_connection_t *c) { (void)c; xcb_query_keymap_cookie_t ck = {0}; return ck; }
 static inline xcb_query_keymap_reply_t *xcb_query_keymap_reply(xcb_connection_t *c, xcb_query_keymap_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_query_keymap_reply_t *)0; }
+static inline xcb_void_cookie_t xcb_free_pixmap(xcb_connection_t *c, xcb_pixmap_t pixmap) { (void)c; (void)pixmap; xcb_void_cookie_t ck = {0}; return ck; }
 static inline xcb_void_cookie_t xcb_put_image(xcb_connection_t *c, uint8_t format, xcb_drawable_t drawable, xcb_gcontext_t gc, uint16_t width, uint16_t height, int16_t dst_x, int16_t dst_y, uint8_t left_pad, uint8_t depth, uint32_t data_len, const uint8_t *data) {
   (void)c; (void)format; (void)drawable; (void)gc; (void)width; (void)height; (void)dst_x; (void)dst_y; (void)left_pad; (void)depth; (void)data_len; (void)data;
   xcb_void_cookie_t ck = {0}; return ck;
@@ -734,20 +735,58 @@ EOF
 #ifndef __SHIM_XCB_DRI3_H__
 #define __SHIM_XCB_DRI3_H__
 #include <stdint.h>
+#include <xcb/xcb.h>
 typedef struct xcb_connection_t xcb_connection_t;
 typedef struct xcb_extension_t xcb_extension_t;
-typedef uint32_t xcb_drawable_t;
+typedef uint32_t xcb_drawable_t, xcb_pixmap_t, xcb_window_t;
 typedef struct xcb_generic_error_t xcb_generic_error_t;
 static xcb_extension_t xcb_dri3_id = { "DRI3", 0 };
-typedef struct { uint32_t sequence; } xcb_dri3_open_cookie_t, xcb_dri3_query_version_cookie_t;
+typedef struct { uint32_t sequence; } xcb_dri3_open_cookie_t, xcb_dri3_query_version_cookie_t, xcb_dri3_get_supported_modifiers_cookie_t;
 typedef struct { uint8_t response_type, nfd; uint16_t sequence; uint32_t length; int32_t fd; } xcb_dri3_open_reply_t;
 typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_dri3_query_version_reply_t;
 typedef struct { uint8_t response_type, nfd; uint16_t sequence; uint32_t length, pixmap_size; int32_t fd; } xcb_dri3_buffer_from_pixmap_reply_t;
+typedef struct {
+  uint8_t response_type, pad0;
+  uint16_t sequence;
+  uint32_t length;
+  uint32_t num_window_modifiers;
+  uint32_t num_screen_modifiers;
+  uint8_t pad1[16];
+} xcb_dri3_get_supported_modifiers_reply_t;
 static inline xcb_dri3_open_cookie_t xcb_dri3_open(xcb_connection_t *c, xcb_drawable_t d, uint32_t p) { (void)c; (void)d; (void)p; xcb_dri3_open_cookie_t ck = {0}; return ck; }
 static inline xcb_dri3_open_reply_t *xcb_dri3_open_reply(xcb_connection_t *c, xcb_dri3_open_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_open_reply_t *)0; }
 static inline int *xcb_dri3_open_reply_fds(xcb_connection_t *c, xcb_dri3_open_reply_t *r) { (void)c; (void)r; static int fds[1] = {-1}; return fds; }
 static inline xcb_dri3_query_version_cookie_t xcb_dri3_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_dri3_query_version_cookie_t ck = {0}; return ck; }
 static inline xcb_dri3_query_version_reply_t *xcb_dri3_query_version_reply(xcb_connection_t *c, xcb_dri3_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_query_version_reply_t *)0; }
+static inline xcb_void_cookie_t xcb_dri3_pixmap_from_buffer_checked(xcb_connection_t *c, xcb_pixmap_t pixmap, xcb_drawable_t drawable, uint32_t size, uint16_t width, uint16_t height, uint16_t stride, uint8_t depth, uint8_t bpp, int32_t fd) {
+  (void)c; (void)pixmap; (void)drawable; (void)size; (void)width; (void)height; (void)stride; (void)depth; (void)bpp; (void)fd;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_dri3_pixmap_from_buffers_checked(xcb_connection_t *c, xcb_pixmap_t pixmap, xcb_window_t window, uint8_t num_buffers, uint16_t width, uint16_t height, uint32_t stride0, uint32_t offset0, uint32_t stride1, uint32_t offset1, uint32_t stride2, uint32_t offset2, uint32_t stride3, uint32_t offset3, uint8_t depth, uint8_t bpp, uint64_t modifier, const int32_t *fds) {
+  (void)c; (void)pixmap; (void)window; (void)num_buffers; (void)width; (void)height; (void)stride0; (void)offset0; (void)stride1; (void)offset1; (void)stride2; (void)offset2; (void)stride3; (void)offset3; (void)depth; (void)bpp; (void)modifier; (void)fds;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_dri3_import_syncobj_checked(xcb_connection_t *c, uint32_t syncobj, xcb_drawable_t drawable, int32_t fd) {
+  (void)c; (void)syncobj; (void)drawable; (void)fd;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_dri3_fence_from_fd(xcb_connection_t *c, xcb_drawable_t drawable, uint32_t fence, uint8_t initially_triggered, int32_t fd) {
+  (void)c; (void)drawable; (void)fence; (void)initially_triggered; (void)fd;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_dri3_free_syncobj(xcb_connection_t *c, uint32_t syncobj) {
+  (void)c; (void)syncobj;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_dri3_get_supported_modifiers_cookie_t xcb_dri3_get_supported_modifiers(xcb_connection_t *c, uint32_t window, uint8_t depth, uint8_t bpp) {
+  (void)c; (void)window; (void)depth; (void)bpp;
+  xcb_dri3_get_supported_modifiers_cookie_t ck = {0}; return ck;
+}
+static inline xcb_dri3_get_supported_modifiers_reply_t *xcb_dri3_get_supported_modifiers_reply(xcb_connection_t *c, xcb_dri3_get_supported_modifiers_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_get_supported_modifiers_reply_t *)0;
+}
+static inline uint64_t *xcb_dri3_get_supported_modifiers_window_modifiers(const xcb_dri3_get_supported_modifiers_reply_t *r) { (void)r; return (uint64_t *)0; }
+static inline uint64_t *xcb_dri3_get_supported_modifiers_screen_modifiers(const xcb_dri3_get_supported_modifiers_reply_t *r) { (void)r; return (uint64_t *)0; }
 #endif
 EOF
 
@@ -848,7 +887,9 @@ EOF
 #ifndef __SHIM_XCB_SYNC_H__
 #define __SHIM_XCB_SYNC_H__
 #include <stdint.h>
+#include <xcb/xcb.h>
 typedef uint32_t xcb_sync_fence_t, xcb_sync_counter_t;
+static inline xcb_void_cookie_t xcb_sync_destroy_fence(xcb_connection_t *c, xcb_sync_fence_t fence) { (void)c; (void)fence; xcb_void_cookie_t ck = {0}; return ck; }
 #endif
 EOF
 
@@ -883,6 +924,7 @@ static inline xcb_xfixes_query_version_cookie_t xcb_xfixes_query_version(xcb_con
 static inline xcb_xfixes_query_version_reply_t *xcb_xfixes_query_version_reply(xcb_connection_t *c, xcb_xfixes_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_xfixes_query_version_reply_t *)0; }
 static inline xcb_void_cookie_t xcb_xfixes_create_region(xcb_connection_t *c, xcb_xfixes_region_t r, uint32_t rects_len, const xcb_rectangle_t *rects) { (void)c; (void)r; (void)rects_len; (void)rects; xcb_void_cookie_t ck = {0}; return ck; }
 static inline xcb_void_cookie_t xcb_xfixes_set_region(xcb_connection_t *c, xcb_xfixes_region_t r, uint32_t rects_len, const xcb_rectangle_t *rects) { (void)c; (void)r; (void)rects_len; (void)rects; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_xfixes_destroy_region(xcb_connection_t *c, xcb_xfixes_region_t r) { (void)c; (void)r; xcb_void_cookie_t ck = {0}; return ck; }
 #endif
 EOF
 
