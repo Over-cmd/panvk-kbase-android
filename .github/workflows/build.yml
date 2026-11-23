@@ -348,61 +348,21 @@ jobs:
           PLATFORMS="android"
           if [ "${{ matrix.flavor }}" = "x11" ]; then
             PLATFORMS="android,x11"
-            if [ ! -f shims/xcb.pc ]; then
-              cat <<EOF > shims/xcb.pc
+            for pc_name in xcb xcb-randr x11-xcb xcb-keysyms xcb-dri3 xcb-present xcb-sync; do
+              if [ ! -f "shims/${pc_name}.pc" ]; then
+                cat <<EOF > "shims/${pc_name}.pc"
           prefix=$GITHUB_WORKSPACE/shims
           exec_prefix=\${prefix}
           libdir=\${exec_prefix}/lib
           includedir=\${prefix}/include
 
-          Name: XCB
-          Description: XCB shim for cross-build
+          Name: ${pc_name}
+          Description: ${pc_name} shim for cross-build
           Version: 1.17.0
           Cflags: -I\${includedir}
           EOF
-            fi
-            if [ ! -f shims/xcb-randr.pc ]; then
-              cat <<EOF > shims/xcb-randr.pc
-          prefix=$GITHUB_WORKSPACE/shims
-          exec_prefix=\${prefix}
-          libdir=\${exec_prefix}/lib
-          includedir=\${prefix}/include
-
-          Name: XCB RandR
-          Description: XCB RandR shim for cross-build
-          Requires: xcb
-          Version: 1.17.0
-          Cflags: -I\${includedir}
-          EOF
-            fi
-            if [ ! -f shims/x11-xcb.pc ]; then
-              cat <<EOF > shims/x11-xcb.pc
-          prefix=$GITHUB_WORKSPACE/shims
-          exec_prefix=\${prefix}
-          libdir=\${exec_prefix}/lib
-          includedir=\${prefix}/include
-
-          Name: X11 XCB
-          Description: X11 XCB shim for cross-build
-          Requires: xcb
-          Version: 1.17.0
-          Cflags: -I\${includedir}
-          EOF
-            fi
-            if [ ! -f shims/xcb-keysyms.pc ]; then
-              cat <<EOF > shims/xcb-keysyms.pc
-          prefix=$GITHUB_WORKSPACE/shims
-          exec_prefix=\${prefix}
-          libdir=\${exec_prefix}/lib
-          includedir=\${prefix}/include
-
-          Name: XCB KeySyms
-          Description: XCB KeySyms shim for cross-build
-          Requires: xcb
-          Version: 0.4.1
-          Cflags: -I\${includedir}
-          EOF
-            fi
+              fi
+            done
             cat <<'EOF' > shims/include/xcb/xcb.h
           #ifndef __SHIM_XCB_H__
           #define __SHIM_XCB_H__
@@ -435,6 +395,31 @@ jobs:
           #include <stdint.h>
           #include <xcb/xcb.h>
           typedef struct _xcb_key_symbols xcb_key_symbols_t;
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/xcb/dri3.h
+          #ifndef __SHIM_XCB_DRI3_H__
+          #define __SHIM_XCB_DRI3_H__
+          #include <stdint.h>
+          #include <xcb/xcb.h>
+          typedef struct { uint8_t response_type; uint8_t nfd; uint16_t sequence; uint32_t length; uint32_t pixmap_size; int32_t fd; } xcb_dri3_buffer_from_pixmap_reply_t;
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/xcb/present.h
+          #ifndef __SHIM_XCB_PRESENT_H__
+          #define __SHIM_XCB_PRESENT_H__
+          #include <stdint.h>
+          #include <xcb/xcb.h>
+          typedef uint32_t xcb_present_event_t;
+          #endif
+          EOF
+            cat <<'EOF' > shims/include/xcb/sync.h
+          #ifndef __SHIM_XCB_SYNC_H__
+          #define __SHIM_XCB_SYNC_H__
+          #include <stdint.h>
+          #include <xcb/xcb.h>
+          typedef uint32_t xcb_sync_fence_t;
+          typedef uint32_t xcb_sync_counter_t;
           #endif
           EOF
             cat <<'EOF' > shims/include/X11/Xlib-xcb.h
