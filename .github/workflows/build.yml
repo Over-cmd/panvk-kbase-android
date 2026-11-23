@@ -77,7 +77,6 @@ jobs:
           import glob
           import os
           import re
-          import subprocess
 
           mesa_dir = "work/mesa"
           hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
@@ -212,6 +211,8 @@ jobs:
                       elif cur_hunk is not None:
                           if line.startswith((" ", "+", "-", "\\")):
                               cur_hunk["body"].append(line)
+                          elif line.strip() == "":
+                              cur_hunk["body"].append(" \n")
                           else:
                               flush_hunk()
                       else:
