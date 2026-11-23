@@ -137,6 +137,24 @@ jobs:
           import os
           import re
 
+          meson_opts = "work/mesa/meson.options"
+          if os.path.exists(meson_opts):
+              with open(meson_opts, "r", encoding="utf-8", errors="replace") as f:
+                  opts_content = f.read()
+              if "'panfrost-kmds'" not in opts_content:
+                  kmds_opt = (
+                      "\noption(\n"
+                      "  'panfrost-kmds',\n"
+                      "  type : 'array',\n"
+                      "  value : ['panthor'],\n"
+                      "  choices : ['panthor', 'kbase'],\n"
+                      "  description : 'KMDs to support in panfrost driver.'\n"
+                      ")\n"
+                  )
+                  with open(meson_opts, "w", encoding="utf-8") as f:
+                      f.write(opts_content + kmds_opt)
+                  print("Añadida opción panfrost-kmds en meson.options")
+
           vk_hdr = "work/mesa/src/vulkan/runtime/vk_android.h"
           if os.path.exists(vk_hdr):
               with open(vk_hdr, "r", encoding="utf-8", errors="replace") as f:
@@ -291,7 +309,7 @@ jobs:
           cpp = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang++'
           ar = '$TOOLCHAIN_BIN/llvm-ar'
           strip = '$TOOLCHAIN_BIN/llvm-strip'
-          pkgconfig = 'pkg-config'
+          pkg-config = 'pkg-config'
 
           [built-in options]
           c_args = ['-L$CLANG_LIB_DIR']
