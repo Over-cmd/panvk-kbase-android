@@ -177,6 +177,61 @@ if os.path.exists(kbase_src):
     if idx_pan != -1 and "kbase_kmod_bo_import_fd(struct pan_kmod_dev *dev, int fd, uint64_t size);" not in kbase_c[:idx_pan]:
         kbase_c = kbase_c[:idx_pan] + fwd_decls + kbase_c[idx_pan:]
 
+    ops_wrappers = (
+        "static struct pan_kmod_dev *\n"
+        "kbase_kmod_dev_create_ops(int fd, uint32_t flags,\n"
+        "                          const struct pan_kmod_allocator *allocator)\n"
+        "{\n"
+        "   return kbase_kmod_dev_create(fd, flags, &kbase_drv, allocator);\n"
+        "}\n\n"
+        "static struct pan_kmod_bo *\n"
+        "kbase_kmod_bo_import_ops(struct pan_kmod_dev *dev, int fd)\n"
+        "{\n"
+        "   return kbase_kmod_bo_import_fd(dev, fd, 0);\n"
+        "}\n\n"
+        "static int\n"
+        "kbase_kmod_bo_export_ops(struct pan_kmod_bo *bo)\n"
+        "{\n"
+        "#ifdef HAVE_KBASE_BO_EXPORT_FD\n"
+        "   return kbase_kmod_bo_export_fd(bo);\n"
+        "#else\n"
+        "   (void)bo;\n"
+        "   return -1;\n"
+        "#endif\n"
+        "}\n\n"
+    )
+    has_export_fn = "kbase_kmod_bo_export_fd(" in kbase_c
+    if has_export_fn:
+        ops_wrappers = ops_wrappers.replace("#ifdef HAVE_KBASE_BO_EXPORT_FD\n", "#if 1\n")
+
+    kbase_c = re.sub(
+        r"(\.dev_create\s*=\s*)kbase_kmod_dev_create\s*,",
+        r"\1kbase_kmod_dev_create_ops,",
+        kbase_c,
+    )
+    kbase_c = re.sub(
+        r"(\.bo_import\s*=\s*)kbase_kmod_bo_import\s*,",
+        r"\1kbase_kmod_bo_import_ops,",
+        kbase_c,
+    )
+    kbase_c = re.sub(
+        r"(\.bo_export\s*=\s*)kbase_kmod_bo_export_fd\s*,",
+        r"\1kbase_kmod_bo_export_ops,",
+        kbase_c,
+    )
+    kbase_c = re.sub(
+        r"\s*\.(?:bo_import_fd|bo_get_mmap_offset|bo_munmap)\s*=\s*[^,\n]+,?\s*\n",
+        "\n",
+        kbase_c,
+    )
+
+    ops_marker = "kbase_kmod_ops"
+    idx_ops = kbase_c.rfind(ops_marker)
+    if idx_ops != -1 and "kbase_kmod_dev_create_ops(" not in kbase_c:
+        line_start = kbase_c.rfind("\n", 0, idx_ops)
+        insert_at = line_start + 1 if line_start != -1 else idx_ops
+        kbase_c = kbase_c[:insert_at] + ops_wrappers + kbase_c[insert_at:]
+
     with open(kbase_src, "w", encoding="utf-8") as ks:
         ks.write(kbase_c)
 PY
