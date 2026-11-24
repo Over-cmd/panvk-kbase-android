@@ -36,7 +36,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
-            build-essential cmake ninja-build llvm-21-dev libclang-21-dev \
+            build-essential cmake ninja-build zip llvm-21-dev libclang-21-dev \
             libclc-21-dev libllvmspirvlib-21-dev libelf-dev spirv-tools \
             bison flex libdrm-dev pkg-config gettext
           SPIRV_PKGS=$(apt-cache search --names-only '^(lib)?spirv-(tools\vert{}headers)(-dev)?$' | awk '{print $1}' | tr '\n' ' ')
@@ -66,8 +66,54 @@ jobs:
           ./build.sh "$FLAVOR"
 
       - name: Package driver
+        env:
+          FLAVOR: ${{ matrix.flavor }}
         run: |
-          ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
+          set -euo pipefail
+
+          SO_PATH="$(find build -name 'libvulkan_panfrost.so' -type f | head -n 1)"
+          if [ -z "$SO_PATH" ]; then
+            echo "ERROR: No se encontró libvulkan_panfrost.so en build/" >&2
+            exit 1
+          fi
+
+          PKG_DIR="$PWD/pkg_out_${FLAVOR}"
+          ZIP_NAME="PanVK-G52-${PANVK_RELEASE}-${FLAVOR}.zip"
+          MANIFEST_NAME="PanVK-G52-${PANVK_RELEASE}-${FLAVOR}-MANIFEST.txt"
+
+          rm -rf "$PKG_DIR" "$ZIP_NAME" "$MANIFEST_NAME" SHA256SUMS.txt
+          mkdir -p "$PKG_DIR"
+
+          cp "$SO_PATH" "$PKG_DIR/libvulkan_panfrost.so"
+
+          cat <<EOF > "$PKG_DIR/meta.json"
+          {
+            "schemaVersion": 1,
+            "name": "PanVK G52 (${FLAVOR})",
+            "description": "PanVK Mali-G52 (kbase) Vulkan driver (${FLAVOR})",
+            "author": "PanVK / Mesa",
+            "packageVersion": "${PANVK_RELEASE}",
+            "vendor": "ARM Mali",
+            "driverVersion": "${PANVK_RELEASE}",
+            "minApi": 30,
+            "libraryName": "libvulkan_panfrost.so"
+          }
+          EOF
+
+          (cd "$PKG_DIR" && zip -r "$PWD/../$ZIP_NAME" .)
+
+          {
+            echo "Package: ${ZIP_NAME}"
+            echo "Version: ${PANVK_RELEASE}"
+            echo "Flavor: ${FLAVOR}"
+            echo "Mesa Ref: ${MESA_REF}"
+            echo "Source SO: ${SO_PATH}"
+            echo "--- Contents ---"
+            unzip -l "$ZIP_NAME"
+          } > "$MANIFEST_NAME"
+
+          sha256sum "$ZIP_NAME" "$MANIFEST_NAME" > SHA256SUMS.txt
+          ls -lh "$ZIP_NAME" "$MANIFEST_NAME" SHA256SUMS.txt
 
       - name: Upload packaged ZIP driver
         uses: actions/upload-artifact@v4
