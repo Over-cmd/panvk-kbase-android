@@ -1,6 +1,6 @@
 From: abhay-byte <abhay02delhi@gmail.com>
 Date: 2026-10-16
-Subject: [PATCH jm-v7 003] kbase: skip MEM_JIT_INIT on Bifrost JM, GROW_ON_GPF tiler heap with 1 MiB commit biblioklept
+Subject: [PATCH jm-v7 003] kbase: skip MEM_JIT_INIT on Bifrost JM, GROW_ON_GPF tiler heap with 1 MiB commit
 
 Purpose: KBASE_IOCTL_MEM_JIT_INIT fails with ENOMEM on G52 r1 kernels.
 Nothing panvk allocates on JM needs JIT or CUSTOM_VA (CSF tiler heap
@@ -28,9 +28,9 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
 index bb7eaee86fa..9830f5d3efe 100644
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
-@@ -1538,7 +1538,19 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+@@ -1196,7 +1196,19 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
        .max_allocations = 255,
-       .phys_pages = (128ull << 30) / kbase_kmod_page_size(),
+       .phys_pages = 1ull << 25,
     };
 -   if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
 +   /* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA
