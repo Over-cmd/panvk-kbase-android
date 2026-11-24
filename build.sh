@@ -6,10 +6,12 @@ WORKSPACE_DIR="${GITHUB_WORKSPACE:-$(pwd)}"
 cd "$WORKSPACE_DIR"
 
 : "${PANVK_RELEASE:=0.0.2-alpha-G52}"
+: "${MESA_REF:=mesa-26.3.0}"
 
-echo "=== [1/4] Aplicando parches PanVK G52 sobre work/mesa ==="
-git -C work/mesa reset --hard HEAD
-git -C work/mesa clean -fd
+echo "=== [1/4] Preparando work/mesa limpio en ${MESA_REF} ==="
+git -C work/mesa fetch --tags --force || true
+git -C work/mesa checkout -f "$MESA_REF"
+git -C work/mesa clean -fdx
 
 python3 - <<'PY'
 import glob
@@ -17,51 +19,72 @@ import json
 import os
 import subprocess
 
-with open("profiles/g52-v7-jm.json", "r", encoding="utf-8") as f:
-    prof = json.load(f)
+patch_dir = "panvk-driver-patch"
+if os.path.isdir(patch_dir):
+    print("Aplicando scripts y parches desde panvk-driver-patch/...")
+    for py_script in ["apply_kbase_patch.py", "fix_kbase_patch.py"]:
+        sp = os.path.join(patch_dir, py_script)
+        if os.path.isfile(sp):
+            print(f"RUN   {sp}")
+            subprocess.run(["python3", os.path.abspath(sp), os.path.abspath("work/mesa")], check=True)
 
-arch = prof["panArch"]
-frontend = prof["frontend"]
-series = ["common", "android", "kbase-common", "app-loader", "wsi"]
-series += ["csf", f"csf-v{arch}"] if frontend == "CSF" else [f"jm-v{arch}"]
-
-ok_count = 0
-partial_count = 0
-
-for fam in series:
-    files_dir = f"patches/{fam}/files"
-    if os.path.isdir(files_dir):
-        print(f"COPY [{fam}] files/ -> work/mesa")
-        subprocess.run(
-            f"(cd {files_dir} && find . -type f ! -name README -print0 | tar --null -cf - -T -) | (cd work/mesa && tar -xf -)",
-            shell=True,
-            check=True,
-        )
-
-    for p in sorted(glob.glob(f"patches/{fam}/*.patch")):
-        name = os.path.basename(p)
+    ordered_patches = [
+        "gpu_variant_fix.patch",
+        "gpu_queue_kbase.patch",
+        "exec_init_order_fix.patch",
+        "wsi_present_sync_fix.patch",
+        "winlator_wsi_sync_fixes.patch",
+        "android_wsi_ahb_fixes.patch",
+    ]
+    applied = set()
+    for p_name in ordered_patches + sorted(os.path.basename(x) for x in glob.glob(os.path.join(patch_dir, "*.patch"))):
+        if p_name in applied:
+            continue
+        applied.add(p_name)
+        p_path = os.path.join(patch_dir, p_name)
+        if not os.path.isfile(p_path):
+            continue
         res = subprocess.run(
-            ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+            ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p_path)],
             capture_output=True,
             text=True,
         )
         if res.returncode == 0:
-            print(f"OK    [{fam}] {name}")
-            ok_count += 1
+            print(f"OK    {p_name}")
         else:
             res_rej = subprocess.run(
-                ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+                ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", os.path.abspath(p_path)],
                 capture_output=True,
                 text=True,
             )
-            if res_rej.returncode == 0:
-                print(f"PART  [{fam}] {name} (aplicado con --reject)")
-                partial_count += 1
-            else:
-                print(f"DRIFT [{fam}] {name} (algunos hunks/archivos rechazados)")
-                partial_count += 1
-
-print(f"Resumen parches: ok={ok_count}, parciales/drift={partial_count}")
+            print(f"PART  {p_name} (rc={res_rej.returncode})")
+elif os.path.isfile("profiles/g52-v7-jm.json"):
+    with open("profiles/g52-v7-jm.json", "r", encoding="utf-8") as f:
+        prof = json.load(f)
+    arch = prof["panArch"]
+    frontend = prof["frontend"]
+    series = ["common", "android", "kbase-common", "app-loader", "wsi"]
+    series += ["csf", f"csf-v{arch}"] if frontend == "CSF" else [f"jm-v{arch}"]
+    for fam in series:
+        files_dir = f"patches/{fam}/files"
+        if os.path.isdir(files_dir):
+            subprocess.run(
+                f"(cd {files_dir} && find . -type f ! -name README -print0 | tar --null -cf - -T -) | (cd work/mesa && tar -xf -)",
+                shell=True,
+                check=True,
+            )
+        for p in sorted(glob.glob(f"patches/{fam}/*.patch")):
+            res = subprocess.run(
+                ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode != 0:
+                subprocess.run(
+                    ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+                    capture_output=True,
+                    text=True,
+                )
 PY
 
 python3 - <<'PY'
@@ -85,29 +108,6 @@ if os.path.exists(meson_opts):
         with open(meson_opts, "w", encoding="utf-8") as f:
             f.write(opts_content + kmds_opt)
 
-vk_hdr = "work/mesa/src/vulkan/runtime/vk_android.h"
-if os.path.exists(vk_hdr):
-    with open(vk_hdr, "r", encoding="utf-8", errors="replace") as f:
-        content = f.read()
-    decl = (
-        "VkResult vk_common_GetAndroidHardwareBufferPropertiesANDROID(\n"
-        "   VkDevice device_h, const struct AHardwareBuffer *buffer,\n"
-        "   VkAndroidHardwareBufferPropertiesANDROID *pProperties);\n"
-    )
-    if "vk_common_GetAndroidHardwareBufferPropertiesANDROID" not in content:
-        target = "vk_android_rp_attachment_has_external_format"
-        idx = content.find(target)
-        if idx != -1:
-            end_stmt = content.find(";", idx)
-            if end_stmt != -1:
-                content = content[: end_stmt + 1] + "\n\n" + decl + content[end_stmt + 1 :]
-            else:
-                content = content + "\n" + decl
-        else:
-            content = content + "\n" + decl
-        with open(vk_hdr, "w", encoding="utf-8") as f:
-            f.write(content)
-
 kmod_meson = "work/mesa/src/panfrost/lib/kmod/meson.build"
 kbase_block = (
     "if meson.is_cross_build() and fs.exists('kbase_kmod.c')\n"
@@ -129,38 +129,10 @@ if os.path.exists(kmod_meson):
     with open(kmod_meson, "w", encoding="utf-8") as mf:
         mf.write(mcontent)
 
-pan_kmod_hdr = "work/mesa/src/panfrost/lib/kmod/pan_kmod.h"
-if os.path.exists(pan_kmod_hdr):
-    with open(pan_kmod_hdr, "r", encoding="utf-8", errors="replace") as kh:
-        kcontent = kh.read()
-    if "bo->dev->ops->bo_munmap" in kcontent:
-        if "#include <sys/mman.h>" not in kcontent:
-            kcontent = "#include <sys/mman.h>\n" + kcontent
-        kcontent = re.sub(
-            r"if\s*\(bo->dev->ops->bo_munmap\)\s*\n\s*return\s+bo->dev->ops->bo_munmap\(bo,\s*host_addr,\s*size\);\s*\n*",
-            "",
-            kcontent,
-        )
-        if "munmap(host_addr, size)" not in kcontent:
-            kcontent = re.sub(
-                r"(pan_kmod_bo_munmap\s*\([^)]*\)\s*\{)",
-                r"\1\n   return munmap(host_addr, size);",
-                kcontent,
-                count=1,
-            )
-        with open(pan_kmod_hdr, "w", encoding="utf-8") as kh:
-            kh.write(kcontent)
-
 kbase_src = "work/mesa/src/panfrost/lib/kmod/kbase_kmod.c"
 if os.path.exists(kbase_src):
     with open(kbase_src, "r", encoding="utf-8", errors="replace") as ks:
         kbase_c = ks.read()
-
-    kbase_c = re.sub(
-        r"pan_kmod_dev_init\s*\(\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,\)]+)\s*\)",
-        r"pan_kmod_dev_init(\1, \2, \3, \4, \6, \5, NULL)",
-        kbase_c,
-    )
 
     drv_match = re.search(
         r"(?:static\s+)?(?:const\s+)?struct\s+pan_kmod_driver\s+([A-Za-z0-9_]+)\s*(?:=|;)",
@@ -170,7 +142,6 @@ if os.path.exists(kbase_src):
     if not re.search(rf"\b{re.escape(drv_name)}\s*=", kbase_c):
         kbase_c += f"\nstatic const struct pan_kmod_driver {drv_name} = {{0}};\n"
 
-    # Limpiar wrappers previos si existieran para re-aplicar de forma limpia
     kbase_c = re.sub(
         r"/\* __KBASE_OPS_SHIM_START__ \*/.*?/\* __KBASE_OPS_SHIM_END__ \*/\n?",
         "",
@@ -178,22 +149,32 @@ if os.path.exists(kbase_src):
         flags=re.DOTALL,
     )
 
-    # Ajustar designadores dentro de struct pan_kmod_ops
-    kbase_c = re.sub(r"(\.dev_create\s*=\s*)kbase_kmod_dev_create\b", r"\1kbase_kmod_dev_create_ops", kbase_c)
-    kbase_c = re.sub(r"(\.bo_import\s*=\s*)kbase_kmod_bo_import\b", r"\1kbase_kmod_bo_import_ops", kbase_c)
-    kbase_c = re.sub(r"\.bo_import_fd\s*=\s*([A-Za-z0-9_]+)", r".bo_import = \1", kbase_c)
-    kbase_c = re.sub(r"\.bo_export_fd\s*=\s*([A-Za-z0-9_]+)", r".bo_export = \1", kbase_c)
-    kbase_c = re.sub(r"\.bo_munmap\s*=\s*([A-Za-z0-9_]+)", r".bo_mmap = \1", kbase_c)
-    kbase_c = re.sub(r"^\s*\.bo_get_mmap_offset\s*=\s*[^,\n}]+,?\s*\n", "", kbase_c, flags=re.MULTILINE)
-
-    # Detectar nombres reales de funciones en el archivo para evitar errores de declaración
     has_dev_create = bool(re.search(r"\bkbase_kmod_dev_create\s*\(", kbase_c))
-    has_bo_import = bool(re.search(r"\bkbase_kmod_bo_import\s*\(", kbase_c))
     has_bo_import_fd = bool(re.search(r"\bkbase_kmod_bo_import_fd\s*\(", kbase_c))
+    has_bo_import = bool(re.search(r"\bkbase_kmod_bo_import\s*\(", kbase_c))
     has_bo_export_fd = bool(re.search(r"\bkbase_kmod_bo_export_fd\s*\(", kbase_c))
+    has_bo_get_mmap_off = bool(re.search(r"\bkbase_kmod_bo_get_mmap_offset\s*\(", kbase_c))
     has_bo_munmap = bool(re.search(r"\bkbase_kmod_bo_munmap\s*\(", kbase_c))
 
-    shim_lines = ["/* __KBASE_OPS_SHIM_START__ */", "struct pan_kmod_driver;", "struct pan_kmod_allocator;", "struct pan_kmod_dev;", "struct pan_kmod_bo;"]
+    kbase_c = re.sub(r"(\.dev_create\s*=\s*)kbase_kmod_dev_create\b", r"\1kbase_kmod_dev_create_ops", kbase_c)
+    if has_bo_import_fd:
+        kbase_c = re.sub(r"\.bo_import_fd\s*=\s*kbase_kmod_bo_import_fd\b", r".bo_import = kbase_kmod_bo_import_fd_ops", kbase_c)
+    elif has_bo_import:
+        kbase_c = re.sub(r"(\.bo_import\s*=\s*)kbase_kmod_bo_import\b", r"\1kbase_kmod_bo_import_ops", kbase_c)
+    if has_bo_export_fd:
+        kbase_c = re.sub(r"\.bo_export_fd\s*=\s*kbase_kmod_bo_export_fd\b", r".bo_export = kbase_kmod_bo_export_fd_ops", kbase_c)
+    if has_bo_munmap:
+        kbase_c = re.sub(r"\.bo_munmap\s*=\s*kbase_kmod_bo_munmap\b", r".bo_mmap = kbase_kmod_bo_munmap_ops", kbase_c)
+    if has_bo_get_mmap_off:
+        kbase_c = re.sub(r"^\s*\.bo_get_mmap_offset\s*=\s*kbase_kmod_bo_get_mmap_offset,?\s*\n", "", kbase_c, flags=re.MULTILINE)
+
+    shim_lines = [
+        "/* __KBASE_OPS_SHIM_START__ */",
+        "struct pan_kmod_driver;",
+        "struct pan_kmod_allocator;",
+        "struct pan_kmod_dev;",
+        "struct pan_kmod_bo;",
+    ]
     if has_dev_create:
         shim_lines.append(f"extern const struct pan_kmod_driver {drv_name};")
         shim_lines.append("static struct pan_kmod_dev *kbase_kmod_dev_create(int fd, uint32_t flags, const struct pan_kmod_driver *driver, const struct pan_kmod_allocator *allocator);")
@@ -213,21 +194,21 @@ if os.path.exists(kbase_src):
             "static struct pan_kmod_bo *kbase_kmod_bo_import_fd_ops(struct pan_kmod_dev *dev, int fd)\n"
             "{ return kbase_kmod_bo_import_fd(dev, fd, 0); }"
         )
-        kbase_c = re.sub(r"(\.bo_import\s*=\s*)kbase_kmod_bo_import_fd\b", r"\1kbase_kmod_bo_import_fd_ops", kbase_c)
     if has_bo_export_fd:
         shim_lines.append("static int kbase_kmod_bo_export_fd(struct pan_kmod_bo *bo);")
         shim_lines.append(
             "static int kbase_kmod_bo_export_fd_ops(struct pan_kmod_bo *bo)\n"
             "{ return kbase_kmod_bo_export_fd(bo); }"
         )
-        kbase_c = re.sub(r"(\.bo_export\s*=\s*)kbase_kmod_bo_export_fd\b", r"\1kbase_kmod_bo_export_fd_ops", kbase_c)
+    if has_bo_get_mmap_off:
+        shim_lines.append("static uint64_t kbase_kmod_bo_get_mmap_offset(struct pan_kmod_bo *bo);")
     if has_bo_munmap:
         shim_lines.append("static int kbase_kmod_bo_munmap(struct pan_kmod_bo *bo, void *host_addr, size_t size);")
+        extra_call = " (void)kbase_kmod_bo_get_mmap_offset(bo);" if has_bo_get_mmap_off else ""
         shim_lines.append(
             "static void *kbase_kmod_bo_munmap_ops(struct pan_kmod_bo *bo, int prot, int flags, void *host_addr)\n"
-            "{ (void)prot; (void)flags; kbase_kmod_bo_munmap(bo, host_addr, 0); return NULL; }"
+            f"{{ (void)prot; (void)flags;{extra_call} if (host_addr) kbase_kmod_bo_munmap(bo, host_addr, 0); return NULL; }}"
         )
-        kbase_c = re.sub(r"(\.bo_mmap\s*=\s*)kbase_kmod_bo_munmap\b", r"\1kbase_kmod_bo_munmap_ops", kbase_c)
 
     shim_lines.append("/* __KBASE_OPS_SHIM_END__ */")
     shim_code = "\n".join(shim_lines) + "\n\n"
@@ -1013,7 +994,7 @@ PLATFORMS="android"
 
 export PKG_CONFIG_LIBDIR="$WORKSPACE_DIR/shims"
 
-echo "=== [4/4] Configurando y compilando PanVK G52 ($FLAVOR) ==="
+echo "=== [4/4] Configurando y compilando PanVK G52 ($FLAVOR) sobre ${MESA_REF} ==="
 meson setup build work/mesa \
   --cross-file android-cross.txt \
   -Dbuildtype=release \
