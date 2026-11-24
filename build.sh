@@ -143,7 +143,6 @@ if os.path.exists(kbase_src):
     with open(kbase_src, "r", encoding="utf-8", errors="replace") as ks:
         kbase_c = ks.read()
 
-    # 1. Fix pan_kmod_dev_init argument order (..., allocator, ops, sync_ops) in Mesa 26.3
     def fix_dev_init_call(match):
         inner = match.group(1).strip()
 
@@ -198,7 +197,6 @@ if os.path.exists(kbase_src):
     has_bo_export_fd = bool(re.search(r"\bkbase_kmod_bo_export_fd\s*\(", kbase_c))
     has_bo_munmap = bool(re.search(r"\bkbase_kmod_bo_munmap\s*\(", kbase_c))
 
-    # Extract exact return type & params of kbase_kmod_bo_get_mmap_offset if defined
     mmap_off_def = re.search(
         r"((?:static\s+)?[A-Za-z0-9_*\s]+?)\s+kbase_kmod_bo_get_mmap_offset\s*\(([^)]*)\)",
         kbase_c,
@@ -304,7 +302,6 @@ if os.path.exists(panvk_vx_dev):
             "   return &dummy;\n"
             "}\n"
         )
-        # Insert after includes (last #include line)
         last_inc = -1
         for m in re.finditer(r"^#include[^\n]*\n", pd_c, flags=re.MULTILINE):
             last_inc = m.end()
@@ -314,6 +311,37 @@ if os.path.exists(panvk_vx_dev):
             pd_c = csif_shim + pd_c
         with open(panvk_vx_dev, "w", encoding="utf-8") as pd:
             pd.write(pd_c)
+
+panvk_android = "work/mesa/src/panfrost/vulkan/panvk_android.c"
+if os.path.exists(panvk_android):
+    with open(panvk_android, "r", encoding="utf-8", errors="replace") as pa:
+        pa_c = pa.read()
+    if "vk_common_GetAndroidHardwareBufferPropertiesANDROID" in pa_c and not re.search(
+        r"\bvk_common_GetAndroidHardwareBufferPropertiesANDROID\s*\([^)]*\)\s*\{", pa_c
+    ):
+        ahb_shim = (
+            "\n/* __VK_COMMON_AHB_SHIM__ */\n"
+            "static VkResult\n"
+            "vk_common_GetAndroidHardwareBufferPropertiesANDROID(\n"
+            "   VkDevice device,\n"
+            "   const struct AHardwareBuffer *buffer,\n"
+            "   VkAndroidHardwareBufferPropertiesANDROID *pProperties)\n"
+            "{\n"
+            "   (void)device;\n"
+            "   (void)buffer;\n"
+            "   (void)pProperties;\n"
+            "   return VK_ERROR_FORMAT_NOT_SUPPORTED;\n"
+            "}\n"
+        )
+        last_inc = -1
+        for m in re.finditer(r"^#include[^\n]*\n", pa_c, flags=re.MULTILINE):
+            last_inc = m.end()
+        if last_inc != -1:
+            pa_c = pa_c[:last_inc] + ahb_shim + pa_c[last_inc:]
+        else:
+            pa_c = ahb_shim + pa_c
+        with open(panvk_android, "w", encoding="utf-8") as pa:
+            pa.write(pa_c)
 PY
 
 phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
