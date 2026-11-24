@@ -554,6 +554,23 @@ EOF
 #define XCB_VISUAL_CLASS_PSEUDO_COLOR 3
 #define XCB_VISUAL_CLASS_TRUE_COLOR 4
 #define XCB_VISUAL_CLASS_DIRECT_COLOR 5
+#define XCB_GC_FUNCTION 1u
+#define XCB_GC_PLANE_MASK 2u
+#define XCB_GC_FOREGROUND 4u
+#define XCB_GC_BACKGROUND 8u
+#define XCB_GC_LINE_WIDTH 16u
+#define XCB_GC_LINE_STYLE 32u
+#define XCB_GC_CAP_STYLE 64u
+#define XCB_GC_JOIN_STYLE 128u
+#define XCB_GC_FILL_STYLE 256u
+#define XCB_GC_FILL_RULE 512u
+#define XCB_GC_TILE 1024u
+#define XCB_GC_STIPPLE 2048u
+#define XCB_GC_TILE_STIPPLE_ORIGIN_X 4096u
+#define XCB_GC_TILE_STIPPLE_ORIGIN_Y 8192u
+#define XCB_GC_FONT 16384u
+#define XCB_GC_SUBWINDOW_MODE 32768u
+#define XCB_GC_GRAPHICS_EXPOSURES 65536u
 typedef struct xcb_connection_t xcb_connection_t;
 typedef struct xcb_special_event_t { uint8_t pad0; } xcb_special_event_t;
 typedef struct xcb_extension_t { const char *name; int global_id; } xcb_extension_t;
@@ -652,6 +669,13 @@ static inline int xcb_flush(xcb_connection_t *c) { (void)c; return 0; }
 static inline uint32_t xcb_get_maximum_request_length(xcb_connection_t *c) { (void)c; return 65535u; }
 static inline xcb_generic_event_t *xcb_wait_for_special_event(xcb_connection_t *c, xcb_special_event_t *se) { (void)c; (void)se; return (xcb_generic_event_t *)0; }
 static inline void xcb_unregister_for_special_event(xcb_connection_t *c, xcb_special_event_t *se) { (void)c; (void)se; }
+static inline xcb_special_event_t *xcb_register_for_special_xge(xcb_connection_t *c, xcb_extension_t *ext, uint32_t eid, uint32_t *num_stamp_events) {
+  (void)c; (void)ext; (void)eid; if (num_stamp_events) *num_stamp_events = 0; return (xcb_special_event_t *)0;
+}
+static inline xcb_void_cookie_t xcb_create_gc(xcb_connection_t *c, xcb_gcontext_t cid, xcb_drawable_t drawable, uint32_t value_mask, const void *value_list) {
+  (void)c; (void)cid; (void)drawable; (void)value_mask; (void)value_list;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
 static inline xcb_intern_atom_cookie_t xcb_intern_atom(xcb_connection_t *c, uint8_t only_if_exists, uint16_t name_len, const char *name) {
   (void)c; (void)only_if_exists; (void)name_len; (void)name;
   xcb_intern_atom_cookie_t ck = {0}; return ck;
@@ -893,6 +917,11 @@ static xcb_extension_t xcb_present_id = { "Present", 0 };
 #ifndef PresentWindowDestroyed
 #define PresentWindowDestroyed 1u
 #endif
+#define XCB_PRESENT_CAPABILITY_NONE 0u
+#define XCB_PRESENT_CAPABILITY_ASYNC 1u
+#define XCB_PRESENT_CAPABILITY_FENCE 2u
+#define XCB_PRESENT_CAPABILITY_UST 4u
+#define XCB_PRESENT_CAPABILITY_SYNCOBJ 8u
 #define XCB_PRESENT_EVENT_MASK_NO_EVENT 0u
 #define XCB_PRESENT_EVENT_MASK_CONFIGURE_NOTIFY 1u
 #define XCB_PRESENT_EVENT_MASK_COMPLETE_NOTIFY 2u
@@ -968,6 +997,9 @@ static inline xcb_present_query_capabilities_reply_t *xcb_present_query_capabili
 static inline xcb_void_cookie_t xcb_present_select_input_checked(xcb_connection_t *c, xcb_present_event_t eid, xcb_window_t w, uint32_t event_mask) {
   (void)c; (void)eid; (void)w; (void)event_mask;
   xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_present_select_input(xcb_connection_t *c, xcb_present_event_t eid, xcb_window_t w, uint32_t event_mask) {
+  return xcb_present_select_input_checked(c, eid, w, event_mask);
 }
 static inline xcb_void_cookie_t xcb_present_pixmap(xcb_connection_t *c, xcb_window_t window, xcb_pixmap_t pixmap, uint32_t serial, xcb_xfixes_region_t valid, xcb_xfixes_region_t update, int16_t x_off, int16_t y_off, xcb_randr_crtc_t target_crtc, xcb_sync_fence_t wait_fence, xcb_sync_fence_t idle_fence, uint32_t options, uint64_t target_msc, uint64_t divisor, uint64_t remainder, uint32_t notifies_len, const void *notifies) {
   (void)c; (void)window; (void)pixmap; (void)serial; (void)valid; (void)update; (void)x_off; (void)y_off; (void)target_crtc; (void)wait_fence; (void)idle_fence; (void)options; (void)target_msc; (void)divisor; (void)remainder; (void)notifies_len; (void)notifies;
