@@ -264,7 +264,6 @@ def ensure_physical_device_kbase_adapted(patch_file):
     return True
 
 def apply_file_hunks_best_effort(p_text, rel_path):
-    # Nunca inyectar statements/bloques de código a nivel de archivo en .c/.h si no hay ancla exacta
     if rel_path.endswith((".c", ".h")):
         return False
     target = os.path.join("work/mesa", rel_path)
@@ -580,6 +579,7 @@ if [ ! -d "$SPIRV_ANDROID_PREFIX/lib" ]; then
 fi
 
 if [ ! -f "$ANDROID_DEPS_PREFIX/lib/pkgconfig/libdrm.pc" ]; then
+  rm -rf work/libdrm-build
   mkdir -p work/libdrm-build "$ANDROID_DEPS_PREFIX"
   if [ ! -d work/libdrm-build/drm ]; then
     git clone --depth 1 https://gitlab.freedesktop.org/mesa/drm.git work/libdrm-build/drm
@@ -603,7 +603,6 @@ EOF
     -Dbuildtype=release \
     -Dudev=false \
     -Dvalgrind=disabled \
-    -Dfreedreno=disabled \
     -Damdgpu=disabled \
     -Dradeon=disabled \
     -Dnouveau=disabled \
