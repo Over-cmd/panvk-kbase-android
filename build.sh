@@ -484,7 +484,9 @@ PY
 phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
 if [ -f "$phys_dev" ]; then
   sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$phys_dev"
+  grep -q "^#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"" "$phys_dev"
   sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$phys_dev"
+  grep -q '"PanVK G52 " PANVK_KBASE_RELEASE' "$phys_dev"
 fi
 
 echo "=== [2/4] Instalando dependencias de compilación para host ==="
@@ -535,91 +537,23 @@ ln -sf "$WORKSPACE_DIR/build-host/src/compiler/clc/mesa_clc" "$WORKSPACE_DIR/bui
 ln -sf "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn_bindgen2" "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn-bindgen2"
 export PATH="$WORKSPACE_DIR/build-host/src/compiler/clc:$WORKSPACE_DIR/build-host/src/compiler/spirv:$WORKSPACE_DIR/build-host/src/panfrost/clc:$PATH"
 
-echo "=== [3/4] Instalando librerías y cabeceras reales para Android (arm64-v8a) ==="
+echo "=== [3/4] Preparando entorno y cross-file para Android (arm64-v8a) ==="
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
 if [ -z "${ANDROID_NDK_HOME:-}" ]; then
   echo "ERROR: ANDROID_NDK_HOME / ANDROID_NDK_LATEST_HOME no está definido." >&2
   exit 1
 fi
 
+export MESON_WORKING_DIR="$WORKSPACE_DIR"
 NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
 CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
 [ -z "$CLANG_DIR" ] && CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
-export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/21/lib/linux/aarch64}"
+export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
+echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
 
 unset CPATH LIBRARY_PATH CMAKE_PREFIX_PATH PKG_CONFIG_PATH
 
-ANDROID_DEPS_PREFIX="$WORKSPACE_DIR/local-android-deps"
-SPIRV_ANDROID_PREFIX="$WORKSPACE_DIR/local-spirv-android"
-
-if [ ! -d "$SPIRV_ANDROID_PREFIX/lib" ]; then
-  mkdir -p work/spirv-android-build "$SPIRV_ANDROID_PREFIX"
-  if [ ! -d work/spirv-android-build/SPIRV-Headers ]; then
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git work/spirv-android-build/SPIRV-Headers
-  fi
-  cmake -S work/spirv-android-build/SPIRV-Headers -B work/spirv-android-build/build-headers -G Ninja \
-    -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
-    -DANDROID_ABI=arm64-v8a \
-    -DANDROID_PLATFORM=android-30 \
-    -DCMAKE_INSTALL_PREFIX="$SPIRV_ANDROID_PREFIX"
-  ninja -C work/spirv-android-build/build-headers install
-
-  if [ ! -d work/spirv-android-build/SPIRV-Tools ]; then
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git work/spirv-android-build/SPIRV-Tools
-  fi
-  cmake -S work/spirv-android-build/SPIRV-Tools -B work/spirv-android-build/build-tools -G Ninja \
-    -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
-    -DANDROID_ABI=arm64-v8a \
-    -DANDROID_PLATFORM=android-30 \
-    -DCMAKE_INSTALL_PREFIX="$SPIRV_ANDROID_PREFIX" \
-    -DSPIRV-Headers_SOURCE_DIR="$WORKSPACE_DIR/work/spirv-android-build/SPIRV-Headers" \
-    -DSPIRV_SKIP_TESTS=ON
-  ninja -C work/spirv-android-build/build-tools install
-  rm -rf work/spirv-android-build
-fi
-
-if [ ! -f "$ANDROID_DEPS_PREFIX/lib/pkgconfig/libdrm.pc" ]; then
-  rm -rf work/libdrm-build
-  mkdir -p work/libdrm-build "$ANDROID_DEPS_PREFIX"
-  if [ ! -d work/libdrm-build/drm ]; then
-    git clone --depth 1 https://gitlab.freedesktop.org/mesa/drm.git work/libdrm-build/drm
-  fi
-  cat <<EOF > work/libdrm-build/android-arm64.ini
-[binaries]
-c = '$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang'
-cpp = '$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang++'
-ar = '$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar'
-strip = '$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip'
-
-[host_machine]
-system = 'android'
-cpu_family = 'aarch64'
-cpu = 'armv8-a'
-endian = 'little'
-EOF
-  meson setup work/libdrm-build/build work/libdrm-build/drm \
-    --cross-file work/libdrm-build/android-arm64.ini \
-    --prefix="$ANDROID_DEPS_PREFIX" \
-    -Dbuildtype=release \
-    -Dudev=false \
-    -Dvalgrind=disabled \
-    -Damdgpu=disabled \
-    -Dradeon=disabled \
-    -Dnouveau=disabled \
-    -Dvmwgfx=disabled \
-    -Domap=disabled \
-    -Dexynos=disabled \
-    -Dtegra=disabled \
-    -Detnaviv=disabled \
-    -Dcairo-tests=disabled \
-    -Dman-pages=disabled
-  ninja -C work/libdrm-build/build install
-  rm -rf work/libdrm-build
-fi
-
-PKG_DIRS="$ANDROID_DEPS_PREFIX/lib/pkgconfig:$ANDROID_DEPS_PREFIX/lib/aarch64-linux-android/pkgconfig"
-[ -d "$SPIRV_ANDROID_PREFIX/lib/pkgconfig" ] && PKG_DIRS="$SPIRV_ANDROID_PREFIX/lib/pkgconfig:$PKG_DIRS"
-[ -d "$SPIRV_ANDROID_PREFIX/lib/aarch64-linux-android/pkgconfig" ] && PKG_DIRS="$SPIRV_ANDROID_PREFIX/lib/aarch64-linux-android/pkgconfig:$PKG_DIRS"
+PKG_DIRS="$WORKSPACE_DIR/shims"
 
 if [ "$FLAVOR" = "x11" ]; then
   if command -v apt-get >/dev/null 2>&1; then
@@ -636,9 +570,16 @@ fi
 
 export PKG_CONFIG_LIBDIR="$PKG_DIRS"
 
+CROSS_TEMPLATE=""
+if [ -f "android.toml" ]; then
+  CROSS_TEMPLATE="android.toml"
+elif [ -f "androidtolm" ]; then
+  CROSS_TEMPLATE="androidtolm"
+fi
+
 TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-if [ -f android.toml ]; then
-  envsubst < android.toml > android-cross.txt
+if [ -n "$CROSS_TEMPLATE" ]; then
+  envsubst < "$CROSS_TEMPLATE" > android-cross.txt
 else
   cat <<EOF > android-cross.txt
 [binaries]
@@ -647,12 +588,6 @@ cpp = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang++'
 ar = '$TOOLCHAIN_BIN/llvm-ar'
 strip = '$TOOLCHAIN_BIN/llvm-strip'
 pkg-config = 'pkg-config'
-
-[built-in options]
-c_args = ['-I$ANDROID_DEPS_PREFIX/include', '-I$ANDROID_DEPS_PREFIX/include/libdrm', '-L$CLANG_LIB_DIR', '-L$ANDROID_DEPS_PREFIX/lib']
-cpp_args = ['-I$ANDROID_DEPS_PREFIX/include', '-I$ANDROID_DEPS_PREFIX/include/libdrm', '-L$CLANG_LIB_DIR', '-L$ANDROID_DEPS_PREFIX/lib']
-c_link_args = ['-L$CLANG_LIB_DIR', '-L$ANDROID_DEPS_PREFIX/lib']
-cpp_link_args = ['-L$CLANG_LIB_DIR', '-L$ANDROID_DEPS_PREFIX/lib']
 
 [properties]
 needs_exe_wrapper = true
@@ -664,6 +599,7 @@ cpu = 'armv8-a'
 endian = 'little'
 EOF
 fi
+cat android-cross.txt
 
 PLATFORMS="android"
 [ "$FLAVOR" = "x11" ] && PLATFORMS="android,x11"
