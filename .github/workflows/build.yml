@@ -66,14 +66,14 @@ jobs:
           ./scripts/fetch-mesa.sh
           git -C work/mesa rev-parse --short HEAD || true
 
-      - name: Diagnose pan_model.c and patch context
+      - name: Diagnose jm-v7/002 in panvk_physical_device.c
         run: |
-          echo "=== Parche jm-v7/001 ==="
-          cat patches/jm-v7/001-ignore-the-gpu-variant-on-bifrost.patch || true
-          echo "=== pan_get_model en work/mesa/src/panfrost/model/pan_model.c ==="
-          grep -n -C 25 "pan_get_model(" work/mesa/src/panfrost/model/pan_model.c || true
-          echo "=== Líneas 160 a 220 de pan_model.c ==="
-          nl -ba work/mesa/src/panfrost/model/pan_model.c | sed -n '160,220p' || true
+          echo "=== panvk_physical_device_init_kbase ==="
+          grep -n -A 35 "panvk_physical_device_init_kbase(" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || true
+          echo "=== Buscando PAN_I_WANT_A_BROKEN_VULKAN_DRIVER o case 7: ==="
+          grep -n -C 15 "PAN_I_WANT_A_BROKEN_VULKAN_DRIVER" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || true
+          echo "=== Líneas 1370 a 1430 de panvk_physical_device.c ==="
+          nl -ba work/mesa/src/panfrost/vulkan/panvk_physical_device.c | sed -n '1370,1430p' || true
 
       - name: Apply patches for Mali-G52
         run: |
