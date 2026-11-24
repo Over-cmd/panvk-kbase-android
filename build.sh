@@ -95,19 +95,23 @@ def ensure_kmod_build_kbase():
         return False
     with open(mb, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
-    if "kbase_kmod.c" in content:
-        return True
-    addition = (
-        "\nif panfrost_kmds.contains('kbase')\n"
-        "  libpankmod_lib_files += files('kbase_kmod.c')\n"
-        "endif\n"
+    content = re.sub(
+        r"if\s+panfrost_kmds\.contains\('kbase'\)\s*\n\s*libpankmod_lib_files\s*\+=\s*files\('kbase_kmod\.c'\)\s*\nendif\s*\n?",
+        "",
+        content,
     )
-    marker = "libpankmod_lib = static_library("
-    idx = content.find(marker)
-    if idx != -1:
-        content = content[:idx] + addition.lstrip("\n") + "\n" + content[idx:]
-    else:
-        content = content + addition
+    if "kbase_kmod.c" not in content:
+        addition = (
+            "if get_option('panfrost-kmds').contains('kbase')\n"
+            "  libpankmod_lib_files += files('kbase_kmod.c')\n"
+            "endif\n\n"
+        )
+        marker = "libpankmod_lib = static_library("
+        idx = content.find(marker)
+        if idx != -1:
+            content = content[:idx] + addition + content[idx:]
+        else:
+            content = content + "\n" + addition
     with open(mb, "w", encoding="utf-8") as f:
         f.write(content)
     return True
@@ -381,7 +385,6 @@ def apply_patch_strict(patch_file):
         if ensure_pan_kmod_h_adapted(abs_p):
             return True, f"OK (adapted pan_kmod.h) {patch_file}"
 
-    # Fallback general: aplicar hunks limpios vía --reject, limpiar .rej y reubicar hunks rechazados por contexto
     subprocess.run(["git", "-C", "work/mesa", "reset", "--merge"], capture_output=True, text=True)
     subprocess.run(
         ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", abs_p],
@@ -458,6 +461,19 @@ elif os.path.isfile("profiles/g52-v7-jm.json"):
 else:
     print("ERROR: No se encontró panvk-driver-patch/ ni profiles/g52-v7-jm.json", file=sys.stderr)
     sys.exit(1)
+PY
+
+python3 - <<'PY'
+import os
+
+mb = "work/mesa/src/panfrost/lib/kmod/meson.build"
+if os.path.isfile(mb):
+    with open(mb, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    if "panfrost_kmds.contains('kbase')" in content:
+        content = content.replace("panfrost_kmds.contains('kbase')", "get_option('panfrost-kmds').contains('kbase')")
+        with open(mb, "w", encoding="utf-8") as f:
+            f.write(content)
 PY
 
 phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
