@@ -55,7 +55,9 @@ jobs:
       - name: Verify sources.lock and profile
         run: |
           python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
-          ls -la "profiles/${PROFILE}" || true
+          echo "=== Buscando perfil ${PROFILE} ==="
+          ls -la profiles/ 2>/dev/null || true
+          find profiles/ -maxdepth 3 -iname "*g52*" -o -iname "*v7*" 2>/dev/null || true
 
       - name: Fetch Mesa
         run: |
