@@ -397,8 +397,8 @@ CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib
 [ -z "$CLANG_DIR" ] && CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
 export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/21/lib/linux/aarch64}"
 
-# Aislar el entorno de compilación Android para que no tome .a o cabeceras x86_64 del host
-unset CPATH LIBRARY_PATH CMAKE_PREFIX_PATH
+# Aislar el entorno de compilación Android para que no tome .a, cabeceras ni .pc x86_64 del host
+unset CPATH LIBRARY_PATH CMAKE_PREFIX_PATH PKG_CONFIG_PATH
 
 SPIRV_ANDROID_PREFIX="$WORKSPACE_DIR/local-spirv-android"
 if [ ! -d "$SPIRV_ANDROID_PREFIX/lib" ]; then
@@ -425,6 +425,7 @@ fi
 
 mkdir -p shims/include/libdrm shims/include/xcb shims/include/X11/extensions
 
+rm -f shims/SPIRV-Tools*.pc
 if [ -d "$SPIRV_ANDROID_PREFIX/lib/pkgconfig" ]; then
   cp -f "$SPIRV_ANDROID_PREFIX/lib/pkgconfig/"*.pc shims/ 2>/dev/null || true
 fi
