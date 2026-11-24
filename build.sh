@@ -9,40 +9,41 @@ cd "$WORKSPACE_DIR"
 
 : "${PANVK_RELEASE:=0.0.2-alpha-G52}"
 : "${PANVK_PROFILE:=g52-v7-jm}"
-: "${MESA_REF:=mesa-26.3.0}"
 
 LOCKED_COMMIT=""
 if [ -f "sources.lock" ]; then
   LOCKED_COMMIT="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaCommit',''))" 2>/dev/null || true)"
 fi
-TARGET_REF="${LOCKED_COMMIT:-$MESA_REF}"
 
-echo "=== [1/4] Preparando work/mesa (${TARGET_REF}) y aplicando parches ==="
-NEED_FETCH=0
-if [ ! -d "work/mesa/.git" ]; then
-  NEED_FETCH=1
-elif [ -n "$LOCKED_COMMIT" ]; then
-  CUR_HEAD="$(git -C work/mesa rev-parse HEAD 2>/dev/null || true)"
-  if [ "$CUR_HEAD" != "$LOCKED_COMMIT" ]; then
-    NEED_FETCH=1
+echo "=== [1/4] Obteniendo Mesa del repositorio (${LOCKED_COMMIT:-sources.lock}) y aplicando parches ==="
+if [ -x "./scripts/fetch-mesa.sh" ] || [ -f "./scripts/fetch-mesa.sh" ]; then
+  set +e
+  if [ -x "./scripts/fetch-mesa.sh" ]; then
+    ./scripts/fetch-mesa.sh
+    FETCH_RC=$?
+  else
+    bash ./scripts/fetch-mesa.sh
+    FETCH_RC=$?
   fi
-fi
+  set -e
 
-if [ "$NEED_FETCH" -eq 1 ]; then
-  rm -rf work/mesa
-  mkdir -p work/mesa
-  curl -fSL --retry 5 --retry-delay 5 \
-    "https://gitlab.freedesktop.org/mesa/mesa/-/archive/${TARGET_REF}/mesa-${TARGET_REF}.tar.gz" \
-    | tar -xz --strip-components=1 -C work/mesa
-  git -C work/mesa init -q
-  git -C work/mesa config user.email "ci@local"
-  git -C work/mesa config user.name "CI"
-  git -C work/mesa add -A
-  git -C work/mesa commit -q -m "Mesa ${TARGET_REF}"
-  git -C work/mesa tag -f "${TARGET_REF}"
-else
-  git -C work/mesa reset --hard HEAD
+  if [ "$FETCH_RC" -ne 0 ]; then
+    if [ -d "work/mesa/.git" ] && [ -n "$LOCKED_COMMIT" ] && git -C work/mesa rev-parse --verify --quiet "${LOCKED_COMMIT}^{commit}" >/dev/null 2>&1; then
+      echo "fetch-mesa.sh falló por remoto/estado previo; sincronizando work/mesa al commit fijado ${LOCKED_COMMIT}..."
+      git -C work/mesa checkout -f "$LOCKED_COMMIT"
+      git -C work/mesa reset --hard "$LOCKED_COMMIT"
+      git -C work/mesa clean -fdx
+    else
+      exit "$FETCH_RC"
+    fi
+  fi
+elif [ -d "work/mesa/.git" ] && [ -n "$LOCKED_COMMIT" ]; then
+  git -C work/mesa checkout -f "$LOCKED_COMMIT"
+  git -C work/mesa reset --hard "$LOCKED_COMMIT"
   git -C work/mesa clean -fdx
+else
+  echo "ERROR: No se encontró ./scripts/fetch-mesa.sh ni work/mesa preparado con sources.lock." >&2
+  exit 1
 fi
 
 set +e
@@ -88,45 +89,53 @@ bifrost_block = (
 )
 
 if "(gpu_prod_id >> 16) >= 6 && (gpu_prod_id >> 16) < 9" not in src:
-    m_fn = re.search(r"pan_get_model\s*\([^)]*\)\s*\{", src)
+    m_fn = re.search(r"\bpan_get_model\s*\(", src)
     if not m_fn:
         print("ERROR: No se encontró pan_get_model en pan_model.c", file=sys.stderr)
         sys.exit(1)
-    m_ret = re.search(r"\n([ \t]*)return NULL;", src[m_fn.end():])
-    if not m_ret:
+    m_brace = re.search(r"\)\s*\{", src[m_fn.end():])
+    if not m_brace:
+        print("ERROR: No se encontró llave de apertura de pan_get_model", file=sys.stderr)
+        sys.exit(1)
+    body_start = m_fn.end() + m_brace.end()
+    ret_matches = list(re.finditer(r"\n([ \t]*)return NULL;", src[body_start:]))
+    if not ret_matches:
         print("ERROR: No se encontró return NULL; dentro de pan_get_model", file=sys.stderr)
         sys.exit(1)
-    ins_pos = m_fn.end() + m_ret.start()
+    m_ret = ret_matches[-1]
+    ins_pos = body_start + m_ret.start()
     src = src[:ins_pos] + "\n" + bifrost_block + src[ins_pos + 1:]
     with open(pan_model, "w", encoding="utf-8") as f:
         f.write(src)
-    print("OK (adapted pan_get_model) patches/jm-v7/001-ignore-the-gpu-variant-on-bifrost.patch")
+    print("OK (adapted pan_get_model) patches/jm-v7/001-ignore-the-gpu-variant-on-bifrost.patch", flush=True)
 
 for p in sorted(glob.glob("patches/jm-v7/*.patch")):
     if os.path.basename(p).startswith("001-"):
         continue
-    chk = subprocess.run(
-        ["git", "-C", "work/mesa", "apply", "--check", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
-        capture_output=True,
-        text=True,
-    )
-    if chk.returncode == 0:
-        subprocess.run(
-            ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
-            check=True,
-        )
-        print(f"OK {p}")
-    else:
-        chk3 = subprocess.run(
-            ["git", "-C", "work/mesa", "apply", "-C3", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+    abs_p = os.path.abspath(p)
+    applied_ok = False
+    last_err = ""
+    for args in [
+        ["--recount", "--whitespace=nowarn"],
+        ["-C3", "--recount", "--whitespace=nowarn"],
+        ["-C1", "--recount", "--whitespace=nowarn"],
+        ["--3way", "--recount", "--whitespace=nowarn"],
+    ]:
+        res = subprocess.run(
+            ["git", "-C", "work/mesa", "apply", *args, abs_p],
             capture_output=True,
             text=True,
         )
-        if chk3.returncode == 0:
-            print(f"OK (-C3) {p}")
-        else:
-            print(f"ERROR aplicando {p}:\n{chk3.stderr}", file=sys.stderr)
-            sys.exit(1)
+        if res.returncode == 0:
+            print(f"OK ({' '.join(args)}) {p}", flush=True)
+            applied_ok = True
+            break
+        last_err = res.stderr.strip()
+        subprocess.run(["git", "-C", "work/mesa", "reset", "--merge"], capture_output=True, text=True)
+
+    if not applied_ok:
+        print(f"ERROR aplicando {p}: {last_err}", file=sys.stderr)
+        sys.exit(1)
 PY
 fi
 
