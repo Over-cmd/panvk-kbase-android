@@ -45,13 +45,89 @@ else
   git -C work/mesa clean -fdx
 fi
 
+set +e
 if [ -x "./scripts/apply-patches.sh" ]; then
   ./scripts/apply-patches.sh --profile "$PANVK_PROFILE"
+  PATCH_RC=$?
 elif [ -f "./scripts/apply-patches.sh" ]; then
   bash ./scripts/apply-patches.sh --profile "$PANVK_PROFILE"
+  PATCH_RC=$?
 else
   echo "ERROR: No se encontró ./scripts/apply-patches.sh" >&2
   exit 1
+fi
+set -e
+
+if [ "$PATCH_RC" -ne 0 ]; then
+  echo "Adaptando pan_model.c y continuando serie jm-v7..."
+  python3 - <<'PY'
+import glob
+import os
+import re
+import subprocess
+import sys
+
+pan_model = "work/mesa/src/panfrost/model/pan_model.c"
+if not os.path.isfile(pan_model):
+    print("ERROR: No existe work/mesa/src/panfrost/model/pan_model.c", file=sys.stderr)
+    sys.exit(1)
+
+with open(pan_model, "r", encoding="utf-8", errors="replace") as f:
+    src = f.read()
+
+bifrost_block = (
+    "   /* Bifrost (v6/v7) rows carry no variant, but some kbase kernels report\n"
+    "    * one anyway (G52 r1 0x74021000 says variant 0x2), so match on the\n"
+    "    * product id alone there. */\n"
+    "   if ((gpu_prod_id >> 16) >= 6 && (gpu_prod_id >> 16) < 9) {\n"
+    "      for (unsigned i = 0; i < ARRAY_SIZE(pan_model_list); ++i) {\n"
+    "         if (pan_model_list[i].gpu_prod_id == gpu_prod_id)\n"
+    "            return &pan_model_list[i];\n"
+    "      }\n"
+    "   }\n\n"
+)
+
+if "(gpu_prod_id >> 16) >= 6 && (gpu_prod_id >> 16) < 9" not in src:
+    m_fn = re.search(r"pan_get_model\s*\([^)]*\)\s*\{", src)
+    if not m_fn:
+        print("ERROR: No se encontró pan_get_model en pan_model.c", file=sys.stderr)
+        sys.exit(1)
+    m_ret = re.search(r"\n([ \t]*)return NULL;", src[m_fn.end():])
+    if not m_ret:
+        print("ERROR: No se encontró return NULL; dentro de pan_get_model", file=sys.stderr)
+        sys.exit(1)
+    ins_pos = m_fn.end() + m_ret.start()
+    src = src[:ins_pos] + "\n" + bifrost_block + src[ins_pos + 1:]
+    with open(pan_model, "w", encoding="utf-8") as f:
+        f.write(src)
+    print("OK (adapted pan_get_model) patches/jm-v7/001-ignore-the-gpu-variant-on-bifrost.patch")
+
+for p in sorted(glob.glob("patches/jm-v7/*.patch")):
+    if os.path.basename(p).startswith("001-"):
+        continue
+    chk = subprocess.run(
+        ["git", "-C", "work/mesa", "apply", "--check", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+        capture_output=True,
+        text=True,
+    )
+    if chk.returncode == 0:
+        subprocess.run(
+            ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+            check=True,
+        )
+        print(f"OK {p}")
+    else:
+        chk3 = subprocess.run(
+            ["git", "-C", "work/mesa", "apply", "-C3", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+            capture_output=True,
+            text=True,
+        )
+        if chk3.returncode == 0:
+            print(f"OK (-C3) {p}")
+        else:
+            print(f"ERROR aplicando {p}:\n{chk3.stderr}", file=sys.stderr)
+            sys.exit(1)
+PY
 fi
 
 phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
