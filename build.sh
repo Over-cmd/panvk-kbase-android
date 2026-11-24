@@ -11,22 +11,38 @@ cd "$WORKSPACE_DIR"
 : "${PANVK_PROFILE:=g52-v7-jm}"
 : "${MESA_REF:=mesa-26.3.0}"
 
-echo "=== [1/4] Preparando work/mesa y aplicando parches ==="
-if [ -d "work/mesa/.git" ]; then
-  git -C work/mesa reset --hard HEAD
-  git -C work/mesa clean -fdx
-else
+LOCKED_COMMIT=""
+if [ -f "sources.lock" ]; then
+  LOCKED_COMMIT="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaCommit',''))" 2>/dev/null || true)"
+fi
+TARGET_REF="${LOCKED_COMMIT:-$MESA_REF}"
+
+echo "=== [1/4] Preparando work/mesa (${TARGET_REF}) y aplicando parches ==="
+NEED_FETCH=0
+if [ ! -d "work/mesa/.git" ]; then
+  NEED_FETCH=1
+elif [ -n "$LOCKED_COMMIT" ]; then
+  CUR_HEAD="$(git -C work/mesa rev-parse HEAD 2>/dev/null || true)"
+  if [ "$CUR_HEAD" != "$LOCKED_COMMIT" ]; then
+    NEED_FETCH=1
+  fi
+fi
+
+if [ "$NEED_FETCH" -eq 1 ]; then
   rm -rf work/mesa
   mkdir -p work/mesa
   curl -fSL --retry 5 --retry-delay 5 \
-    "https://gitlab.freedesktop.org/mesa/mesa/-/archive/${MESA_REF}/mesa-${MESA_REF}.tar.gz" \
+    "https://gitlab.freedesktop.org/mesa/mesa/-/archive/${TARGET_REF}/mesa-${TARGET_REF}.tar.gz" \
     | tar -xz --strip-components=1 -C work/mesa
   git -C work/mesa init -q
   git -C work/mesa config user.email "ci@local"
   git -C work/mesa config user.name "CI"
   git -C work/mesa add -A
-  git -C work/mesa commit -q -m "Mesa ${MESA_REF}"
-  git -C work/mesa tag -f "${MESA_REF}"
+  git -C work/mesa commit -q -m "Mesa ${TARGET_REF}"
+  git -C work/mesa tag -f "${TARGET_REF}"
+else
+  git -C work/mesa reset --hard HEAD
+  git -C work/mesa clean -fdx
 fi
 
 if [ -x "./scripts/apply-patches.sh" ]; then
