@@ -1,136 +1,174 @@
-#!/usr/bin/env bash
-set -euo pipefail
+name: Build PanVK Mali-G52
 
-trap 'echo "ERROR en línea $LINENO (comando: $BASH_COMMAND)" >&2' ERR
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
 
-FLAVOR="${1:-${FLAVOR:-adrenotools}}"
-WORKSPACE_DIR="${GITHUB_WORKSPACE:-$(pwd)}"
-cd "$WORKSPACE_DIR"
+env:
+  # Versión del paquete; también se muestra como el nombre del controlador en DXVK HUD / MangoHud.
+  PANVK_RELEASE: "26.3.0-devel-G52"
+  LLVM_VER: "21"
 
-: "${PANVK_RELEASE:=0.0.2-alpha-G52}"
-: "${PANVK_PROFILE:=g52-v7-jm}"
+jobs:
+  build-panvk-android:
+    name: Build PanVK G52 (${{ matrix.flavor }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        flavor: [adrenotools, x11]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-MESA_COMMIT=""
-MESA_REPO="https://gitlab.freedesktop.org/mesa/mesa.git"
-if [ -f "sources.lock" ]; then
-  MESA_COMMIT="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaCommit',''))" 2>/dev/null || true)"
-  PARSED_REPO="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaRepo',''))" 2>/dev/null || true)"
-  [ -n "$PARSED_REPO" ] && MESA_REPO="${PARSED_REPO%.git}"
-fi
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-if [ -z "$MESA_COMMIT" ]; then
-  echo "ERROR: No se encontró mesaCommit en sources.lock" >&2
-  exit 1
-fi
+      - name: Install build dependencies (Clang/LLVM 21)
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold" \
+            build-essential \
+            clang-${LLVM_VER} \
+            lld-${LLVM_VER} \
+            llvm-${LLVM_VER}-dev \
+            libclang-${LLVM_VER}-dev \
+            libclc-${LLVM_VER}-dev \
+            libllvmspirvlib-${LLVM_VER}-dev \
+            libelf-dev \
+            spirv-tools \
+            bison \
+            flex \
+            libdrm-dev \
+            pkg-config \
+            gettext-base \
+            gettext
+          python -m pip install --upgrade pip
+          pip install mako PyYAML meson ninja packaging
 
-echo "=== [1/4] Preparando Mesa (${MESA_COMMIT}) y aplicando parches del repo ==="
-rm -rf work/mesa
-mkdir -p work/mesa
-curl -fSL --retry 5 --retry-delay 5 \
-  "${MESA_REPO}/-/archive/${MESA_COMMIT}/mesa-${MESA_COMMIT}.tar.gz" \
-  | tar -xz --strip-components=1 -C work/mesa
+      - name: Verify sources.lock and Mesa 26.3.0-devel
+        run: |
+          python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
 
-git -C work/mesa init -q
-git -C work/mesa config user.email "ci@local"
-git -C work/mesa config user.name "CI"
-git -C work/mesa add -A
-git -C work/mesa commit -q -m "Mesa ${MESA_COMMIT}"
-git -C work/mesa tag -f "${MESA_COMMIT}"
+      - name: Fetch pinned Mesa (26.3.0-devel)
+        run: ./scripts/fetch-mesa.sh
 
-if [ -x "./scripts/apply-patches.sh" ]; then
-  ./scripts/apply-patches.sh --profile "$PANVK_PROFILE"
-else
-  bash ./scripts/apply-patches.sh --profile "$PANVK_PROFILE"
-fi
+      - name: Apply PanVK G52 Patches
+        run: ./scripts/apply-patches.sh --profile g52-v7-jm
 
-phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
-if [ -f "$phys_dev" ]; then
-  sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$phys_dev" || true
-  sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$phys_dev" || true
-fi
+      - name: Stamp driver version
+        run: |
+          f="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
+          if [ -f "$f" ]; then
+            sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$f"
+            grep -q "^#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"" "$f"
+            sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$f"
+            grep -q '"PanVK G52 " PANVK_KBASE_RELEASE' "$f"
+          fi
 
-echo "=== [2/4] Compilando herramientas de host ==="
-if [ -x /usr/bin/llvm-config-21 ]; then
-  export LLVM_CONFIG=/usr/bin/llvm-config-21
-elif [ -x /usr/bin/llvm-config-20 ]; then
-  export LLVM_CONFIG=/usr/bin/llvm-config-20
-fi
+      - name: Generate Host Tools (LLVM 21)
+        env:
+          CC: "clang-${LLVM_VER}"
+          CXX: "clang++-${LLVM_VER}"
+          LD: "ld.lld-${LLVM_VER}"
+        run: |
+          meson setup build-host work/mesa \
+            -Dbuildtype=release \
+            -Db_ndebug=true \
+            -Dplatforms=[] \
+            -Dgallium-drivers=[] \
+            -Dvulkan-drivers=[] \
+            -Dtools=panfrost \
+            -Dprecomp-compiler=enabled \
+            -Dinstall-precomp-compiler=true \
+            -Dllvm=enabled \
+            -Dmesa-clc=enabled \
+            -Dinstall-mesa-clc=true
+          ninja -C build-host \
+            src/compiler/clc/mesa_clc \
+            src/compiler/spirv/vtn_bindgen2 \
+            src/panfrost/clc/panfrost_compile
+          ln -sf "$GITHUB_WORKSPACE/build-host/src/compiler/clc/mesa_clc" "$GITHUB_WORKSPACE/build-host/src/compiler/clc/mesa-clc"
+          ln -sf "$GITHUB_WORKSPACE/build-host/src/compiler/spirv/vtn_bindgen2" "$GITHUB_WORKSPACE/build-host/src/compiler/spirv/vtn-bindgen2"
+          echo "$GITHUB_WORKSPACE/build-host/src/compiler/clc" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/build-host/src/compiler/spirv" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/build-host/src/panfrost/clc" >> "$GITHUB_PATH"
 
-rm -rf build-host
-meson setup build-host work/mesa \
-  -Dbuildtype=release -Db_ndebug=true \
-  -Dplatforms=[] -Dgallium-drivers=[] -Dvulkan-drivers=[] \
-  -Dtools=panfrost -Dprecomp-compiler=enabled -Dinstall-precomp-compiler=true \
-  -Dllvm=enabled -Dmesa-clc=enabled -Dinstall-mesa-clc=true
+      - name: Configure Meson for PanVK G52 (AArch64)
+        env:
+          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/shims
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
+          export MESON_WORKING_DIR="$GITHUB_WORKSPACE"
+          CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
+          if [ -z "$CLANG_DIR" ]; then
+            CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
+          fi
+          export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
+          echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
+          envsubst < android.toml > android-cross.txt
+          cat android-cross.txt
 
-ninja -C build-host \
-  src/compiler/clc/mesa_clc \
-  src/compiler/spirv/vtn_bindgen2 \
-  src/panfrost/clc/panfrost_compile
+          PLATFORMS="android"
+          if [ "${{ matrix.flavor }}" = "x11" ]; then
+            PLATFORMS="android,x11"
+          fi
 
-ln -sf "$WORKSPACE_DIR/build-host/src/compiler/clc/mesa_clc" "$WORKSPACE_DIR/build-host/src/compiler/clc/mesa-clc"
-ln -sf "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn_bindgen2" "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn-bindgen2"
-export PATH="$WORKSPACE_DIR/build-host/src/compiler/clc:$WORKSPACE_DIR/build-host/src/compiler/spirv:$WORKSPACE_DIR/build-host/src/panfrost/clc:$PATH"
+          meson setup build work/mesa \
+            --cross-file android-cross.txt \
+            -Dbuildtype=release \
+            -Dplatforms="$PLATFORMS" \
+            -Dandroid-stub=true \
+            -Dandroid-strict=false \
+            -Dandroid-libbacktrace=disabled \
+            -Dplatform-sdk-version=30 \
+            -Dglx=disabled \
+            -Dgbm=disabled \
+            -Degl=disabled \
+            -Dopengl=false \
+            -Dgles1=disabled \
+            -Dgles2=disabled \
+            -Dglvnd=disabled \
+            -Dvalgrind=disabled \
+            -Dgallium-drivers= \
+            -Dshared-glapi=disabled \
+            -Dzstd=disabled \
+            -Dmesa-clc=system \
+            -Dprecomp-compiler=system \
+            -Dvulkan-drivers=panfrost \
+            -Dllvm=disabled \
+            -Dpanfrost-kmds=kbase
 
-echo "=== [3/4] Configurando entorno Android (arm64-v8a) ==="
-export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
-if [ -z "${ANDROID_NDK_HOME:-}" ]; then
-  echo "ERROR: ANDROID_NDK_HOME / ANDROID_NDK_LATEST_HOME no está definido." >&2
-  exit 1
-fi
+      - name: Build PanVK G52 Driver
+        run: |
+          meson compile -C build
 
-export MESON_WORKING_DIR="$WORKSPACE_DIR"
-CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
-[ -z "$CLANG_DIR" ] && CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
-export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/21/lib/linux/aarch64}"
+      - name: Package Driver
+        run: |
+          ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
 
-unset CPATH LIBRARY_PATH CMAKE_PREFIX_PATH PKG_CONFIG_PATH
-PKG_DIRS="$WORKSPACE_DIR/shims"
+      - name: Upload Packaged Driver ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: PanVK-G52-${{ matrix.flavor }}-release
+          path: |
+            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}.zip
+            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}-MANIFEST.txt
+            SHA256SUMS.txt
+          if-no-files-found: error
 
-if [ "$FLAVOR" = "x11" ]; then
-  if command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq \
-      libx11-dev libx11-xcb-dev libxrandr-dev libxshmfence-dev \
-      libxcb1-dev libxcb-randr0-dev libxcb-keysyms1-dev libxcb-dri3-dev \
-      libxcb-present-dev libxcb-sync1 libxcb-sync-dev libxcb-shm0-dev libxcb-xfixes0-dev
-  fi
-  for arch_pc_dir in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/lib/aarch64-linux-gnu/pkgconfig /usr/share/pkgconfig; do
-    [ -d "$arch_pc_dir" ] && PKG_DIRS="$PKG_DIRS:$arch_pc_dir"
-  done
-fi
-
-export PKG_CONFIG_LIBDIR="$PKG_DIRS"
-envsubst < android.toml > android-cross.txt
-
-PLATFORMS="android"
-[ "$FLAVOR" = "x11" ] && PLATFORMS="android,x11"
-
-echo "=== [4/4] Compilando PanVK G52 ($FLAVOR) ==="
-rm -rf build
-meson setup build work/mesa \
-  --cross-file android-cross.txt \
-  -Dbuildtype=release \
-  -Dplatforms="$PLATFORMS" \
-  -Dandroid-stub=true \
-  -Dandroid-strict=false \
-  -Dandroid-libbacktrace=disabled \
-  -Dplatform-sdk-version=30 \
-  -Dglx=disabled \
-  -Dgbm=disabled \
-  -Degl=disabled \
-  -Dopengl=false \
-  -Dgles1=disabled \
-  -Dgles2=disabled \
-  -Dglvnd=disabled \
-  -Dvalgrind=disabled \
-  -Dgallium-drivers= \
-  -Dshared-glapi=disabled \
-  -Dzstd=disabled \
-  -Dmesa-clc=system \
-  -Dprecomp-compiler=system \
-  -Dvulkan-drivers=panfrost \
-  -Dllvm=disabled \
-  -Dpanfrost-kmds=kbase
-
-meson compile -C build
+      - name: Upload Raw Driver Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvulkan_panfrost-g52-aarch64-${{ matrix.flavor }}
+          path: build/src/panfrost/vulkan/libvulkan_panfrost.so
+          if-no-files-found: error
