@@ -55,23 +55,11 @@ jobs:
       - name: Verify sources.lock and profile
         run: |
           python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
-          echo "=== sources.lock ==="
-          cat sources.lock
-          echo "=== Perfil ${PROFILE} ==="
           ls -la "profiles/${PROFILE}" || true
-          cat "profiles/${PROFILE}"/* 2>/dev/null || true
 
       - name: Fetch Mesa
         run: |
           ./scripts/fetch-mesa.sh
-          git -C work/mesa rev-parse --short HEAD || true
-
-      - name: Diagnose jm-v7/002 in panvk_physical_device.c
-        run: |
-          echo "=== Buscando not well-tested o case 7 o kbase init ==="
-          grep -n -C 15 -E "not well-tested|case 7:|init_kbase|kbase" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || true
-          echo "=== Líneas 380 a 450 de panvk_physical_device.c ==="
-          nl -ba work/mesa/src/panfrost/vulkan/panvk_physical_device.c | sed -n '380,450p' || true
 
       - name: Apply patches for Mali-G52
         run: |
