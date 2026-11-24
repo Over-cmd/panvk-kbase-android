@@ -9,7 +9,7 @@ on:
 env:
   # Versión del paquete; también se muestra como el nombre del controlador en DXVK HUD / MangoHud.
   PANVK_RELEASE: "0.0.2-alpha-G52"
-  MESA_REF: "mesa-26.3.0"
+  MESA_REF: "5a07217f034b3e50d8c7c7794f97a2df1742613b"
 
 jobs:
   build-panvk-android:
@@ -44,19 +44,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install mako PyYAML meson ninja packaging
 
-      - name: Fetch Mesa 26.3.0
+      - name: Fetch pinned Mesa from sources.lock
         run: |
+          set -euo pipefail
+          LOCKED_COMMIT="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d['mesaCommit'])")"
+          LOCKED_REPO="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaRepo','https://gitlab.freedesktop.org/mesa/mesa.git').removesuffix('.git'))")"
+          echo "MESA_REF=${LOCKED_COMMIT}" >> "$GITHUB_ENV"
+
           rm -rf work/mesa
           mkdir -p work/mesa
           curl -fSL --retry 5 --retry-delay 5 \
-            "https://gitlab.freedesktop.org/mesa/mesa/-/archive/${MESA_REF}/mesa-${MESA_REF}.tar.gz" \
+            "${LOCKED_REPO}/-/archive/${LOCKED_COMMIT}/mesa-${LOCKED_COMMIT}.tar.gz" \
             | tar -xz --strip-components=1 -C work/mesa
           git -C work/mesa init -q
           git -C work/mesa config user.email "ci@local"
           git -C work/mesa config user.name "CI"
           git -C work/mesa add -A
-          git -C work/mesa commit -q -m "Mesa ${MESA_REF}"
-          git -C work/mesa tag -f "${MESA_REF}"
+          git -C work/mesa commit -q -m "Mesa ${LOCKED_COMMIT}"
+          git -C work/mesa tag -f "${LOCKED_COMMIT}"
 
       - name: Build PanVK G52
         env:
