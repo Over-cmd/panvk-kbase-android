@@ -61,6 +61,13 @@ jobs:
         run: |
           ./scripts/fetch-mesa.sh
 
+      - name: Diagnose jm-v7/003 in kbase_kmod.c
+        run: |
+          echo "=== KBASE_IOCTL_MEM_JIT_INIT en kbase_kmod.c ==="
+          grep -n -C 15 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
+          echo "=== KBASE_JM_MEM_TILER_ALIGN_TOP o kbase_kmod_bo_alloc en kbase_kmod.c ==="
+          grep -n -C 15 "KBASE_JM_MEM_TILER_ALIGN_TOP" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
+
       - name: Apply patches for Mali-G52
         run: |
           ./scripts/apply-patches.sh --profile "${PROFILE}"
