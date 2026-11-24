@@ -143,7 +143,7 @@ if os.path.exists(kbase_src):
     with open(kbase_src, "r", encoding="utf-8", errors="replace") as ks:
         kbase_c = ks.read()
 
-    # 1. Fix pan_kmod_dev_init argument order (allocator, ops, ...) and 7th arg (sync_ops) in Mesa 26.3
+    # 1. Fix pan_kmod_dev_init argument order (..., allocator, ops, sync_ops) in Mesa 26.3
     def fix_dev_init_call(match):
         inner = match.group(1).strip()
 
@@ -160,7 +160,9 @@ if os.path.exists(kbase_src):
                 start = idx + 1
         args.append(inner[start:].strip())
 
-        if len(args) >= 2 and "ops" in args[0] and "allocator" in args[1]:
+        if len(args) >= 6 and "ops" in args[4] and "allocator" in args[5]:
+            args[4], args[5] = args[5], args[4]
+        elif len(args) >= 2 and "ops" in args[0] and "allocator" in args[1]:
             args[0], args[1] = args[1], args[0]
 
         if len(args) == 6:
