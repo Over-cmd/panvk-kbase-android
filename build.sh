@@ -358,11 +358,11 @@ fi
 if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
   SPIRV_PREFIX="$WORKSPACE_DIR/local-spirv"
   mkdir -p work/spirv-build "$SPIRV_PREFIX" && cd work/spirv-build
-  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git
+  [ -d SPIRV-Headers ] || git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git
   cmake -S SPIRV-Headers -B build-headers -G Ninja -DCMAKE_INSTALL_PREFIX="$SPIRV_PREFIX"
   ninja -C build-headers install
 
-  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git
+  [ -d SPIRV-Tools ] || git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git
   cmake -S SPIRV-Tools -B build-tools -G Ninja \
     -DCMAKE_INSTALL_PREFIX="$SPIRV_PREFIX" \
     -DSPIRV-Headers_SOURCE_DIR="$PWD/SPIRV-Headers" \
@@ -390,14 +390,45 @@ ln -sf "$WORKSPACE_DIR/build-host/src/compiler/clc/mesa_clc" "$WORKSPACE_DIR/bui
 ln -sf "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn_bindgen2" "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn-bindgen2"
 export PATH="$WORKSPACE_DIR/build-host/src/compiler/clc:$WORKSPACE_DIR/build-host/src/compiler/spirv:$WORKSPACE_DIR/build-host/src/panfrost/clc:$PATH"
 
-echo "=== [3/4] Preparando shims y cross-file Android ==="
+echo "=== [3/4] Preparando shims, SPIRV-Tools Android y cross-file ==="
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
 NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
 CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
 [ -z "$CLANG_DIR" ] && CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
 export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/21/lib/linux/aarch64}"
 
+# Evitar que las rutas x86_64 del host contaminen el enlazado aarch64
+unset CPATH LIBRARY_PATH CMAKE_PREFIX_PATH
+
+SPIRV_ANDROID_PREFIX="$WORKSPACE_DIR/local-spirv-android"
+if [ ! -d "$SPIRV_ANDROID_PREFIX/lib" ]; then
+  mkdir -p work/spirv-android-build "$SPIRV_ANDROID_PREFIX" && cd work/spirv-android-build
+  [ -d SPIRV-Headers ] || git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git
+  cmake -S SPIRV-Headers -B build-headers -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI=arm64-v8a \
+    -DANDROID_PLATFORM=android-30 \
+    -DCMAKE_INSTALL_PREFIX="$SPIRV_ANDROID_PREFIX"
+  ninja -C build-headers install
+
+  [ -d SPIRV-Tools ] || git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git
+  cmake -S SPIRV-Tools -B build-tools -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI=arm64-v8a \
+    -DANDROID_PLATFORM=android-30 \
+    -DCMAKE_INSTALL_PREFIX="$SPIRV_ANDROID_PREFIX" \
+    -DSPIRV-Headers_SOURCE_DIR="$PWD/SPIRV-Headers" \
+    -DSPIRV_SKIP_TESTS=ON
+  ninja -C build-tools install
+  cd "$WORKSPACE_DIR"
+fi
+
 mkdir -p shims/include/libdrm shims/include/xcb shims/include/X11/extensions
+
+# Copiar .pc de SPIRV-Tools (aarch64) a shims/ para que PKG_CONFIG_LIBDIR los use en el cross-build
+if [ -d "$SPIRV_ANDROID_PREFIX/lib/pkgconfig" ]; then
+  cp -f "$SPIRV_ANDROID_PREFIX/lib/pkgconfig/"*.pc shims/ 2>/dev/null || true
+fi
 
 cat <<'EOF' > shims/include/libdrm/drm.h
 #ifndef __SHIM_DRM_H__
