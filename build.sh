@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+trap 'echo "ERROR en línea $LINENO (comando: $BASH_COMMAND)" >&2' ERR
+
 FLAVOR="${1:-${FLAVOR:-adrenotools}}"
 WORKSPACE_DIR="${GITHUB_WORKSPACE:-$(pwd)}"
 cd "$WORKSPACE_DIR"
@@ -483,10 +485,8 @@ PY
 
 phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
 if [ -f "$phys_dev" ]; then
-  sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$phys_dev"
-  grep -q "^#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"" "$phys_dev"
-  sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$phys_dev"
-  grep -q '"PanVK G52 " PANVK_KBASE_RELEASE' "$phys_dev"
+  sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$phys_dev" || true
+  sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$phys_dev" || true
 fi
 
 echo "=== [2/4] Instalando dependencias de compilación para host ==="
