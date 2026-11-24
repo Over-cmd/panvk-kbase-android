@@ -29,10 +29,15 @@ index bb7eaee86fa..9830f5d3efe 100644
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
 @@ -1196,9 +1196,19 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+    struct kbase_ioctl_mem_jit_init jit_init = {
+       .va_pages = 1ull << 25,
        .max_allocations = 255,
        .phys_pages = (1ull << 25),
     };
 -   if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
+-      mesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
+-                "(tiler heap creation will not work)", strerror(errno));
+-   }
 +   /* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA
 +    * (the tiler heap is a SAME_VA GROW_ON_GPF BO), and JIT_INIT fails with
 +    * ENOMEM on G52 r1 kernels, so skip it (as JimVulkan/mali-panvk, MIT). */
@@ -46,10 +51,11 @@ index bb7eaee86fa..9830f5d3efe 100644
 +                "heap is a GROW_ON_GPF region",
 +                pan_arch(raw_id & 0xffffffffu));
 +   } else if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
-       mesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
-                 "(tiler heap creation will not work)", strerror(errno));
-    }
-@@ -1611,6 +1621,16 @@ kbase_kmod_bo_alloc(struct pan_kmod_dev *dev,
++      mesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
++                "(tiler heap creation will not work)", strerror(errno));
++   }
+@@ -1611,7 +1621,17 @@ kbase_kmod_bo_alloc(struct pan_kmod_dev *dev,
+    if (kmod_flags & PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT) {
        /* Growable region: nothing committed up-front, grown in 2 MB
         * increments on GPU page fault (matches panfork's heap setup). */
        commit_pages = 0;
@@ -66,4 +72,3 @@ index bb7eaee86fa..9830f5d3efe 100644
 +                pan_arch(dev->props.gpu_id), commit_pages, va_pages);
 +   }
  
-    if (kbase_dev->is_csf &&
