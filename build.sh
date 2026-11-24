@@ -91,18 +91,24 @@ bifrost_block = (
 )
 
 if "(gpu_prod_id >> 16) >= 6 && (gpu_prod_id >> 16) < 9" not in src:
-    m_fn = re.search(r"\bpan_get_model\s*\(", src)
+    m_fn = re.search(r"(?m)^[^\s].*\bpan_get_model\s*\(", src) or re.search(r"\bpan_get_model\s*\(", src)
     if not m_fn:
         print("ERROR: No se encontró pan_get_model en pan_model.c", file=sys.stderr)
         sys.exit(1)
     m_brace = re.search(r"\)\s*\{", src[m_fn.end():])
     if not m_brace:
         print("ERROR: No se encontró llave de apertura de pan_get_model", file=sys.stderr)
+        print("Contexto tras pan_get_model:\n" + src[m_fn.start():m_fn.end() + 300], file=sys.stderr)
         sys.exit(1)
     body_start = m_fn.end() + m_brace.end()
-    ret_matches = list(re.finditer(r"\n([ \t]*)return NULL;", src[body_start:]))
+    # Limitar la búsqueda al cuerpo de pan_get_model hasta la siguiente función de nivel superior
+    m_next_fn = re.search(r"(?m)^[a-zA-Z_][a-zA-Z0-9_*\s]+\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\([^;]*\)\s*\{", src[body_start:])
+    body_end = body_start + m_next_fn.start() if m_next_fn else len(src)
+    body = src[body_start:body_end]
+    ret_matches = list(re.finditer(r"\n([ \t]*)return NULL;", body))
     if not ret_matches:
         print("ERROR: No se encontró return NULL; dentro de pan_get_model", file=sys.stderr)
+        print("Final del cuerpo de pan_get_model:\n" + body[-600:], file=sys.stderr)
         sys.exit(1)
     m_ret = ret_matches[-1]
     ins_pos = body_start + m_ret.start()
@@ -132,7 +138,7 @@ for p in sorted(glob.glob("patches/jm-v7/*.patch")):
             print(f"OK ({' '.join(args)}) {p}", flush=True)
             applied_ok = True
             break
-        last_err = res.stderr.strip()
+        last_err = (res.stderr or res.stdout).strip()
         subprocess.run(["git", "-C", "work/mesa", "reset", "--merge"], capture_output=True, text=True)
 
     if not applied_ok:
