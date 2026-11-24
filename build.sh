@@ -121,7 +121,6 @@ def ensure_pan_kmod_h_adapted(patch_file):
     with open(patch_file, "r", encoding="utf-8", errors="replace") as pf:
         p_text = pf.read()
 
-    # Extraer definiciones/macros/protos añadidos en secciones de pan_kmod.h del parche
     in_kmod_h = False
     added_lines = []
     for line in p_text.splitlines():
@@ -181,6 +180,83 @@ def ensure_pan_kmod_h_adapted(patch_file):
         f.write(content)
     return True
 
+def extract_hunks_for_target(p_text, target_suffix):
+    hunks = []
+    cur_file = None
+    cur_hunk = None
+    for line in p_text.splitlines():
+        if line.startswith("diff --git "):
+            if cur_hunk:
+                hunks.append(cur_hunk)
+                cur_hunk = None
+            cur_file = line
+            continue
+        if not cur_file or target_suffix not in cur_file:
+            continue
+        if line.startswith("@@ "):
+            if cur_hunk:
+                hunks.append(cur_hunk)
+            cur_hunk = {"context": [], "added": []}
+        elif cur_hunk is not None:
+            if line.startswith("+") and not line.startswith("+++"):
+                cur_hunk["added"].append(line[1:])
+            elif line.startswith(" "):
+                cur_hunk["context"].append(line[1:])
+    if cur_hunk:
+        hunks.append(cur_hunk)
+    return hunks
+
+def ensure_physical_device_kbase_adapted(patch_file):
+    with open(patch_file, "r", encoding="utf-8", errors="replace") as pf:
+        p_text = pf.read()
+
+    hdr_path = "work/mesa/src/panfrost/vulkan/panvk_physical_device.h"
+    if os.path.isfile(hdr_path):
+        with open(hdr_path, "r", encoding="utf-8", errors="replace") as f:
+            h_content = f.read()
+        h_hunks = extract_hunks_for_target(p_text, "src/panfrost/vulkan/panvk_physical_device.h")
+        new_h_lines = []
+        for hk in h_hunks:
+            for ln in hk["added"]:
+                s = ln.strip()
+                if s and s not in h_content:
+                    new_h_lines.append(ln)
+        if new_h_lines:
+            guard_end = h_content.rfind("#endif")
+            ins = "\n/* Adapted from 004-physical-device-kbase.patch */\n" + "\n".join(new_h_lines) + "\n"
+            if guard_end != -1:
+                h_content = h_content[:guard_end] + ins + h_content[guard_end:]
+            else:
+                h_content = h_content + ins
+            with open(hdr_path, "w", encoding="utf-8") as f:
+                f.write(h_content)
+
+    src_path = "work/mesa/src/panfrost/vulkan/panvk_physical_device.c"
+    if os.path.isfile(src_path):
+        with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+            s_content = f.read()
+        s_hunks = extract_hunks_for_target(p_text, "src/panfrost/vulkan/panvk_physical_device.c")
+        for hk in s_hunks:
+            added = [ln for ln in hk["added"] if ln.strip() and ln not in s_content]
+            if not added:
+                continue
+            placed = False
+            for ctx in reversed(hk["context"]):
+                c_strip = ctx.strip()
+                if c_strip and c_strip in s_content:
+                    idx = s_content.find(c_strip)
+                    nl = s_content.find("\n", idx)
+                    if nl != -1:
+                        s_content = s_content[:nl + 1] + "\n".join(added) + "\n" + s_content[nl + 1:]
+                        placed = True
+                        break
+            if not placed:
+                s_content = s_content + "\n" + "\n".join(added) + "\n"
+        with open(src_path, "w", encoding="utf-8") as f:
+            f.write(s_content)
+
+    return True
+
 def apply_patch_strict(patch_file):
     abs_p = os.path.abspath(patch_file)
     for extra_args in [["-C3"], ["--3way"]]:
@@ -230,6 +306,20 @@ def apply_patch_strict(patch_file):
         )
         if res_excl.returncode == 0 and ensure_kmod_build_kbase():
             return True, f"OK (adapted kmod/meson.build) {patch_file}"
+
+    if base_name == "004-physical-device-kbase.patch":
+        res_excl = subprocess.run(
+            [
+                "git", "-C", "work/mesa", "apply", "-C3", "--recount", "--whitespace=nowarn",
+                "--exclude=src/panfrost/vulkan/panvk_physical_device.h",
+                "--exclude=src/panfrost/vulkan/panvk_physical_device.c",
+                abs_p,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if res_excl.returncode == 0 and ensure_physical_device_kbase_adapted(abs_p):
+            return True, f"OK (adapted panvk_physical_device) {patch_file}"
 
     res_check = subprocess.run(
         ["git", "-C", "work/mesa", "apply", "-C3", "--recount", "--whitespace=nowarn", "--exclude=src/panfrost/lib/kmod/pan_kmod.h", abs_p],
