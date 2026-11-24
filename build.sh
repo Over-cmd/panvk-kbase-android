@@ -89,6 +89,29 @@ def ensure_panfrost_kmds_option():
         f.write(content)
     return True
 
+def ensure_kmod_build_kbase():
+    mb = "work/mesa/src/panfrost/lib/kmod/meson.build"
+    if not os.path.isfile(mb):
+        return False
+    with open(mb, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    if "kbase_kmod.c" in content:
+        return True
+    addition = (
+        "\nif panfrost_kmds.contains('kbase')\n"
+        "  libpankmod_lib_files += files('kbase_kmod.c')\n"
+        "endif\n"
+    )
+    marker = "libpankmod_lib = static_library("
+    idx = content.find(marker)
+    if idx != -1:
+        content = content[:idx] + addition.lstrip("\n") + "\n" + content[idx:]
+    else:
+        content = content + addition
+    with open(mb, "w", encoding="utf-8") as f:
+        f.write(content)
+    return True
+
 def apply_patch_strict(patch_file):
     abs_p = os.path.abspath(patch_file)
     for extra_args in [["-C3"], ["--3way"]]:
@@ -126,6 +149,18 @@ def apply_patch_strict(patch_file):
         )
         if res_excl.returncode == 0 and ensure_panfrost_kmds_option():
             return True, f"OK (adapted meson.options) {patch_file}"
+
+    if base_name == "002-kmod-build-kbase.patch":
+        res_excl = subprocess.run(
+            [
+                "git", "-C", "work/mesa", "apply", "-C3", "--recount", "--whitespace=nowarn",
+                "--exclude=src/panfrost/lib/kmod/meson.build", abs_p,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if res_excl.returncode == 0 and ensure_kmod_build_kbase():
+            return True, f"OK (adapted kmod/meson.build) {patch_file}"
 
     res_rej = subprocess.run(
         ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", abs_p],
