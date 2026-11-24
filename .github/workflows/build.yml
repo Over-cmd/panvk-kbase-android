@@ -55,11 +55,25 @@ jobs:
       - name: Verify sources.lock and profile
         run: |
           python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
+          echo "=== sources.lock ==="
+          cat sources.lock
+          echo "=== Perfil ${PROFILE} ==="
           ls -la "profiles/${PROFILE}" || true
+          cat "profiles/${PROFILE}"/* 2>/dev/null || true
 
       - name: Fetch Mesa
         run: |
           ./scripts/fetch-mesa.sh
+          git -C work/mesa rev-parse --short HEAD || true
+
+      - name: Diagnose pan_model.c and patch context
+        run: |
+          echo "=== Parche jm-v7/001 ==="
+          cat patches/jm-v7/001-ignore-the-gpu-variant-on-bifrost.patch || true
+          echo "=== pan_get_model en work/mesa/src/panfrost/model/pan_model.c ==="
+          grep -n -C 25 "pan_get_model(" work/mesa/src/panfrost/model/pan_model.c || true
+          echo "=== Líneas 160 a 220 de pan_model.c ==="
+          nl -ba work/mesa/src/panfrost/model/pan_model.c | sed -n '160,220p' || true
 
       - name: Apply patches for Mali-G52
         run: |
