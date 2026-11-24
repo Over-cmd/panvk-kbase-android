@@ -62,6 +62,33 @@ def ensure_vk_android_h_decl():
         return True
     return False
 
+def ensure_panfrost_kmds_option():
+    opts = "work/mesa/meson.options"
+    if not os.path.isfile(opts):
+        return False
+    with open(opts, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    if "'panfrost-kmds'" in content:
+        return True
+    block = (
+        "option(\n"
+        "  'panfrost-kmds',\n"
+        "  type : 'array',\n"
+        "  value : ['panthor'],\n"
+        "  choices : ['panfrost', 'panthor', 'kbase'],\n"
+        "  description : 'KMDs to support in panfrost driver.'\n"
+        ")\n\n"
+    )
+    m = re.search(r"\noption\(\s*'amdgpu-virtio'[\s\S]*?\n\)\s*\n", content)
+    if m:
+        pos = m.end()
+        content = content[:pos] + block + content[pos:]
+    else:
+        content = content + "\n" + block
+    with open(opts, "w", encoding="utf-8") as f:
+        f.write(content)
+    return True
+
 def apply_patch_strict(patch_file):
     abs_p = os.path.abspath(patch_file)
     for extra_args in [["-C3"], ["--3way"]]:
@@ -75,7 +102,8 @@ def apply_patch_strict(patch_file):
 
     subprocess.run(["git", "-C", "work/mesa", "reset", "--merge"], capture_output=True, text=True)
 
-    if os.path.basename(patch_file) == "008-ahb-dma-buf-finder.patch":
+    base_name = os.path.basename(patch_file)
+    if base_name == "008-ahb-dma-buf-finder.patch":
         res_excl = subprocess.run(
             [
                 "git", "-C", "work/mesa", "apply", "-C3", "--recount", "--whitespace=nowarn",
@@ -86,6 +114,18 @@ def apply_patch_strict(patch_file):
         )
         if res_excl.returncode == 0 and ensure_vk_android_h_decl():
             return True, f"OK (adapted vk_android.h) {patch_file}"
+
+    if base_name == "001-meson-kmds-option.patch":
+        res_excl = subprocess.run(
+            [
+                "git", "-C", "work/mesa", "apply", "-C3", "--recount", "--whitespace=nowarn",
+                "--exclude=meson.options", abs_p,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if res_excl.returncode == 0 and ensure_panfrost_kmds_option():
+            return True, f"OK (adapted meson.options) {patch_file}"
 
     res_rej = subprocess.run(
         ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", abs_p],
