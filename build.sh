@@ -112,6 +112,75 @@ def ensure_kmod_build_kbase():
         f.write(content)
     return True
 
+def ensure_pan_kmod_h_adapted(patch_file):
+    hdr = "work/mesa/src/panfrost/lib/kmod/pan_kmod.h"
+    if not os.path.isfile(hdr):
+        return False
+    with open(hdr, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    with open(patch_file, "r", encoding="utf-8", errors="replace") as pf:
+        p_text = pf.read()
+
+    # Extraer definiciones/macros/protos añadidos en secciones de pan_kmod.h del parche
+    in_kmod_h = False
+    added_lines = []
+    for line in p_text.splitlines():
+        if line.startswith("diff --git "):
+            in_kmod_h = "src/panfrost/lib/kmod/pan_kmod.h" in line
+            continue
+        if in_kmod_h and line.startswith("+") and not line.startswith("+++"):
+            added_lines.append(line[1:])
+
+    extra_decls = []
+    for ln in added_lines:
+        s = ln.strip()
+        if not s:
+            continue
+        if s.startswith("#define PAN_KMOD_") and s not in content:
+            extra_decls.append(ln)
+        elif ("kbase" in s or "KBASE" in s) and s not in content:
+            extra_decls.append(ln)
+
+    if "struct pan_kmod_ops" in content:
+        ops_m = re.search(r"struct pan_kmod_ops\s*\{[\s\S]*?\n\};", content)
+        if ops_m:
+            ops_block = ops_m.group(0)
+            needed_ops = []
+            for ln in added_lines:
+                if "(*" in ln and ln.strip() not in ops_block:
+                    fn_m = re.search(r"\(\*([A-Za-z0-9_]+)\)", ln)
+                    if fn_m and fn_m.group(1) not in ops_block:
+                        needed_ops.append(ln)
+            if needed_ops:
+                new_ops = ops_block[:-2] + "\n" + "\n".join(needed_ops) + "\n};"
+                content = content[:ops_m.start()] + new_ops + content[ops_m.end():]
+
+    if "struct pan_kmod_dev" in content:
+        dev_m = re.search(r"struct pan_kmod_dev\s*\{[\s\S]*?\n\};", content)
+        if dev_m:
+            dev_block = dev_m.group(0)
+            needed_dev = []
+            for ln in added_lines:
+                if ("kbase" in ln or "KBASE" in ln) and ";" in ln and "(*" not in ln:
+                    fld_m = re.search(r"\b([A-Za-z0-9_]+)\s*(?:\[[^\]]*\])?\s*;", ln)
+                    if fld_m and fld_m.group(1) not in dev_block:
+                        needed_dev.append(ln)
+            if needed_dev:
+                new_dev = dev_block[:-2] + "\n" + "\n".join(needed_dev) + "\n};"
+                content = content[:dev_m.start()] + new_dev + content[dev_m.end():]
+
+    if extra_decls:
+        guard_end = content.rfind("#endif")
+        block = "\n/* Adapted from kbase pan_kmod.h patch */\n" + "\n".join(extra_decls) + "\n"
+        if guard_end != -1:
+            content = content[:guard_end] + block + content[guard_end:]
+        else:
+            content = content + block
+
+    with open(hdr, "w", encoding="utf-8") as f:
+        f.write(content)
+    return True
+
 def apply_patch_strict(patch_file):
     abs_p = os.path.abspath(patch_file)
     for extra_args in [["-C3"], ["--3way"]]:
@@ -161,6 +230,15 @@ def apply_patch_strict(patch_file):
         )
         if res_excl.returncode == 0 and ensure_kmod_build_kbase():
             return True, f"OK (adapted kmod/meson.build) {patch_file}"
+
+    res_check = subprocess.run(
+        ["git", "-C", "work/mesa", "apply", "-C3", "--recount", "--whitespace=nowarn", "--exclude=src/panfrost/lib/kmod/pan_kmod.h", abs_p],
+        capture_output=True,
+        text=True,
+    )
+    if res_check.returncode == 0 and "src/panfrost/lib/kmod/pan_kmod.h" in open(abs_p, "r", encoding="utf-8", errors="replace").read():
+        if ensure_pan_kmod_h_adapted(abs_p):
+            return True, f"OK (adapted pan_kmod.h) {patch_file}"
 
     res_rej = subprocess.run(
         ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", abs_p],
