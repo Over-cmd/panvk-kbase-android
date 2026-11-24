@@ -286,6 +286,34 @@ if os.path.exists(kmod_h):
             )
             with open(kmod_h, "w", encoding="utf-8") as kh:
                 kh.write(hcontent)
+
+panvk_vx_dev = "work/mesa/src/panfrost/vulkan/panvk_vX_device.c"
+if os.path.exists(panvk_vx_dev):
+    with open(panvk_vx_dev, "r", encoding="utf-8", errors="replace") as pd:
+        pd_c = pd.read()
+    if "panvk_get_csif_props" in pd_c and not re.search(r"\bpanvk_get_csif_props\s*\([^)]*\)\s*\{", pd_c):
+        csif_shim = (
+            "\n/* __PANVK_CSIF_PROPS_SHIM__ */\n"
+            "struct drm_panthor_csif_info;\n"
+            "struct panvk_device;\n"
+            "static inline const struct drm_panthor_csif_info *\n"
+            "panvk_get_csif_props(const struct panvk_device *dev)\n"
+            "{\n"
+            "   static const struct drm_panthor_csif_info dummy = {0};\n"
+            "   (void)dev;\n"
+            "   return &dummy;\n"
+            "}\n"
+        )
+        # Insert after includes (last #include line)
+        last_inc = -1
+        for m in re.finditer(r"^#include[^\n]*\n", pd_c, flags=re.MULTILINE):
+            last_inc = m.end()
+        if last_inc != -1:
+            pd_c = pd_c[:last_inc] + csif_shim + pd_c[last_inc:]
+        else:
+            pd_c = csif_shim + pd_c
+        with open(panvk_vx_dev, "w", encoding="utf-8") as pd:
+            pd.write(pd_c)
 PY
 
 phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
