@@ -9,8 +9,17 @@ cd "$WORKSPACE_DIR"
 : "${MESA_REF:=mesa-26.3.0}"
 
 echo "=== [1/4] Preparando work/mesa limpio en ${MESA_REF} ==="
+if [ ! -d "work/mesa/.git" ]; then
+  echo "ERROR: work/mesa no está inicializado como repositorio git." >&2
+  exit 1
+fi
+
 git -C work/mesa fetch --tags --force || true
-git -C work/mesa checkout -f "$MESA_REF"
+if git -C work/mesa rev-parse --verify --quiet "refs/tags/${MESA_REF}" >/dev/null || \
+   git -C work/mesa rev-parse --verify --quiet "$MESA_REF" >/dev/null; then
+  git -C work/mesa checkout -f "$MESA_REF"
+fi
+git -C work/mesa reset --hard HEAD
 git -C work/mesa clean -fdx
 
 python3 - <<'PY'
