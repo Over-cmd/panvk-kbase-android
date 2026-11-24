@@ -63,16 +63,18 @@ jobs:
         run: |
           ./scripts/fetch-mesa.sh
 
-      - name: Diagnose jm-v7/003 in kbase_kmod.c
-        run: |
-          echo "=== KBASE_IOCTL_MEM_JIT_INIT en kbase_kmod.c ==="
-          grep -n -C 15 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
-          echo "=== KBASE_JM_MEM_TILER_ALIGN_TOP o kbase_kmod_bo_alloc en kbase_kmod.c ==="
-          grep -n -C 15 "KBASE_JM_MEM_TILER_ALIGN_TOP" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
-
       - name: Apply patches for Mali-G52
         run: |
-          ./scripts/apply-patches.sh --profile "${PROFILE}"
+          ./scripts/apply-patches.sh --profile "${PROFILE}" || true
+
+      - name: Diagnose jm-v7/003 in kbase_kmod.c
+        run: |
+          echo "=== Buscando kbase_kmod.c ==="
+          find work/mesa -name "kbase_kmod.c" 2>/dev/null || true
+          echo "=== KBASE_IOCTL_MEM_JIT_INIT ==="
+          grep -n -C 15 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c 2>/dev/null || true
+          echo "=== KBASE_JM_MEM_TILER_ALIGN_TOP ==="
+          grep -n -C 15 "KBASE_JM_MEM_TILER_ALIGN_TOP" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c 2>/dev/null || true
 
       - name: Build Android driver for AArch64 (LLVM 21)
         env:
