@@ -28,7 +28,7 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
 index bb7eaee86fa..9830f5d3efe 100644
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
-@@ -1196,7 +1196,19 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+@@ -1196,9 +1196,19 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
        .max_allocations = 255,
        .phys_pages = (1ull << 25),
     };
