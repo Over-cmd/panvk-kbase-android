@@ -244,19 +244,23 @@ if [ -x /usr/bin/llvm-config-21 ]; then
 fi
 
 if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
-  mkdir -p work/spirv-build && cd work/spirv-build
+  SPIRV_PREFIX="$WORKSPACE_DIR/local-spirv"
+  mkdir -p work/spirv-build "$SPIRV_PREFIX" && cd work/spirv-build
   git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git
-  cmake -S SPIRV-Headers -B build-headers -G Ninja -DCMAKE_INSTALL_PREFIX=/usr/local
+  cmake -S SPIRV-Headers -B build-headers -G Ninja -DCMAKE_INSTALL_PREFIX="$SPIRV_PREFIX"
   ninja -C build-headers install
 
   git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git
   cmake -S SPIRV-Tools -B build-tools -G Ninja \
-    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_INSTALL_PREFIX="$SPIRV_PREFIX" \
     -DSPIRV-Headers_SOURCE_DIR="$PWD/SPIRV-Headers" \
     -DSPIRV_SKIP_TESTS=ON
   ninja -C build-tools install
   cd "$WORKSPACE_DIR"
-  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export PKG_CONFIG_PATH="$SPIRV_PREFIX/lib/pkgconfig:$SPIRV_PREFIX/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export CMAKE_PREFIX_PATH="$SPIRV_PREFIX:${CMAKE_PREFIX_PATH:-}"
+  export CPATH="$SPIRV_PREFIX/include:${CPATH:-}"
+  export LIBRARY_PATH="$SPIRV_PREFIX/lib:$SPIRV_PREFIX/lib/x86_64-linux-gnu:${LIBRARY_PATH:-}"
 fi
 
 meson setup build-host work/mesa \
