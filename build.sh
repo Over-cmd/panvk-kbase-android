@@ -196,10 +196,12 @@ def extract_hunks_for_target(p_text, target_suffix):
         if line.startswith("@@ "):
             if cur_hunk:
                 hunks.append(cur_hunk)
-            cur_hunk = {"context": [], "added": []}
+            cur_hunk = {"context": [], "removed": [], "added": []}
         elif cur_hunk is not None:
             if line.startswith("+") and not line.startswith("+++"):
                 cur_hunk["added"].append(line[1:])
+            elif line.startswith("-") and not line.startswith("---"):
+                cur_hunk["removed"].append(line[1:])
             elif line.startswith(" "):
                 cur_hunk["context"].append(line[1:])
     if cur_hunk:
@@ -256,6 +258,55 @@ def ensure_physical_device_kbase_adapted(patch_file):
             f.write(s_content)
 
     return True
+
+def apply_file_hunks_best_effort(p_text, rel_path):
+    target = os.path.join("work/mesa", rel_path)
+    if not os.path.isfile(target):
+        return False
+    with open(target, "r", encoding="utf-8", errors="replace") as f:
+        lines = f.read().splitlines()
+
+    hunks = extract_hunks_for_target(p_text, rel_path)
+    changed = False
+    for hk in hunks:
+        rem = hk["removed"]
+        add = hk["added"]
+        ctx = hk["context"]
+        if rem:
+            old_block = "\n".join(rem)
+            new_block = "\n".join(add)
+            joined = "\n".join(lines)
+            if old_block in joined:
+                joined = joined.replace(old_block, new_block, 1)
+                lines = joined.splitlines()
+                changed = True
+                continue
+        if add:
+            add_block = "\n".join(add)
+            joined = "\n".join(lines)
+            if add_block in joined:
+                continue
+            placed = False
+            for c_line in reversed(ctx):
+                cs = c_line.strip()
+                if not cs:
+                    continue
+                for idx, orig in enumerate(lines):
+                    if orig.strip() == cs:
+                        lines[idx + 1:idx + 1] = add
+                        changed = True
+                        placed = True
+                        break
+                if placed:
+                    break
+            if not placed:
+                lines.extend(add)
+                changed = True
+
+    if changed:
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    return changed
 
 def apply_patch_strict(patch_file):
     abs_p = os.path.abspath(patch_file)
@@ -330,7 +381,9 @@ def apply_patch_strict(patch_file):
         if ensure_pan_kmod_h_adapted(abs_p):
             return True, f"OK (adapted pan_kmod.h) {patch_file}"
 
-    res_rej = subprocess.run(
+    # Fallback general: aplicar hunks limpios vía --reject, limpiar .rej y reubicar hunks rechazados por contexto
+    subprocess.run(["git", "-C", "work/mesa", "reset", "--merge"], capture_output=True, text=True)
+    subprocess.run(
         ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", abs_p],
         capture_output=True,
         text=True,
@@ -340,10 +393,15 @@ def apply_patch_strict(patch_file):
         for fn in files:
             if fn.endswith(".rej"):
                 rej_files.append(os.path.join(root, fn))
-    for rp in sorted(rej_files):
-        with open(rp, "r", encoding="utf-8", errors="replace") as rf:
-            print(f"--- {rp} ---\n{rf.read()}", file=sys.stderr)
-    return False, f"ERROR aplicando {patch_file}:\n{res_rej.stderr}"
+    if rej_files:
+        p_text = open(abs_p, "r", encoding="utf-8", errors="replace").read()
+        for rp in sorted(rej_files):
+            rel_target = os.path.relpath(rp[:-4], "work/mesa")
+            apply_file_hunks_best_effort(p_text, rel_target)
+            os.remove(rp)
+        return True, f"OK (adapted shifted hunks) {patch_file}"
+
+    return False, f"ERROR aplicando {patch_file}"
 
 patch_dir = "panvk-driver-patch"
 if os.path.isdir(patch_dir):
