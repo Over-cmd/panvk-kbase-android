@@ -1,0 +1,1257 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+FLAVOR="${1:-${FLAVOR:-adrenotools}}"
+WORKSPACE_DIR="${GITHUB_WORKSPACE:-$(pwd)}"
+cd "$WORKSPACE_DIR"
+
+: "${PANVK_RELEASE:=0.0.2-alpha-G52}"
+: "${MESA_REF:=mesa-26.3.0}"
+
+echo "=== [1/4] Preparando work/mesa limpio en ${MESA_REF} ==="
+if [ ! -d "work/mesa/.git" ]; then
+  echo "ERROR: work/mesa no está inicializado como repositorio git." >&2
+  exit 1
+fi
+
+git -C work/mesa fetch --tags --force || true
+if git -C work/mesa rev-parse --verify --quiet "refs/tags/${MESA_REF}" >/dev/null || \
+   git -C work/mesa rev-parse --verify --quiet "$MESA_REF" >/dev/null; then
+  git -C work/mesa checkout -f "$MESA_REF"
+fi
+git -C work/mesa reset --hard HEAD
+git -C work/mesa clean -fdx
+
+echo "=== [1b/4] Aplicando parches obligatorios ==="
+python3 - <<'PY'
+import glob
+import json
+import os
+import subprocess
+import sys
+
+patch_dir = "panvk-driver-patch"
+if os.path.isdir(patch_dir):
+    print("Aplicando scripts y parches desde panvk-driver-patch/...")
+    for py_script in ["apply_kbase_patch.py", "fix_kbase_patch.py"]:
+        sp = os.path.join(patch_dir, py_script)
+        if os.path.isfile(sp):
+            print(f"RUN   {sp}")
+            subprocess.run(["python3", os.path.abspath(sp), os.path.abspath("work/mesa")], check=True)
+
+    ordered_patches = [
+        "gpu_variant_fix.patch",
+        "gpu_queue_kbase.patch",
+        "exec_init_order_fix.patch",
+        "wsi_present_sync_fix.patch",
+        "winlator_wsi_sync_fixes.patch",
+        "android_wsi_ahb_fixes.patch",
+    ]
+    applied = set()
+    for p_name in ordered_patches + sorted(os.path.basename(x) for x in glob.glob(os.path.join(patch_dir, "*.patch"))):
+        if p_name in applied:
+            continue
+        applied.add(p_name)
+        p_path = os.path.join(patch_dir, p_name)
+        if not os.path.isfile(p_path):
+            continue
+        res = subprocess.run(
+            ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p_path)],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode != 0:
+            print(f"ERROR aplicando {p_name}:\n{res.stderr}", file=sys.stderr)
+            sys.exit(1)
+        print(f"OK    {p_name}")
+elif os.path.isfile("profiles/g52-v7-jm.json"):
+    with open("profiles/g52-v7-jm.json", "r", encoding="utf-8") as f:
+        prof = json.load(f)
+    arch = prof["panArch"]
+    frontend = prof["frontend"]
+    series = ["common", "android", "kbase-common", "app-loader", "wsi"]
+    series += ["csf", f"csf-v{arch}"] if frontend == "CSF" else [f"jm-v{arch}"]
+    for fam in series:
+        files_dir = f"patches/{fam}/files"
+        if os.path.isdir(files_dir):
+            subprocess.run(
+                f"(cd {files_dir} && find . -type f ! -name README -print0 | tar --null -cf - -T -) | (cd work/mesa && tar -xf -)",
+                shell=True,
+                check=True,
+            )
+            print(f"FILES {fam}")
+        for p in sorted(glob.glob(f"patches/{fam}/*.patch")):
+            res = subprocess.run(
+                ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode != 0:
+                print(f"ERROR aplicando {p}:\n{res.stderr}", file=sys.stderr)
+                sys.exit(1)
+            print(f"OK    {p}")
+else:
+    print("ERROR: No se encontró panvk-driver-patch/ ni profiles/g52-v7-jm.json", file=sys.stderr)
+    sys.exit(1)
+PY
+
+python3 - <<'PY'
+import os
+import re
+
+meson_opts = "work/mesa/meson.options"
+if os.path.exists(meson_opts):
+    with open(meson_opts, "r", encoding="utf-8", errors="replace") as f:
+        opts_content = f.read()
+    if "'panfrost-kmds'" not in opts_content:
+        kmds_opt = (
+            "\noption(\n"
+            "  'panfrost-kmds',\n"
+            "  type : 'array',\n"
+            "  value : ['panthor'],\n"
+            "  choices : ['panthor', 'kbase'],\n"
+            "  description : 'KMDs to support in panfrost driver.'\n"
+            ")\n"
+        )
+        with open(meson_opts, "w", encoding="utf-8") as f:
+            f.write(opts_content + kmds_opt)
+
+kmod_meson = "work/mesa/src/panfrost/lib/kmod/meson.build"
+kbase_block = (
+    "if meson.is_cross_build() and fs.exists('kbase_kmod.c')\n"
+    "  libpankmod_lib_files += files('kbase_kmod.c')\n"
+    "endif\n\n"
+)
+if os.path.exists(kmod_meson):
+    with open(kmod_meson, "r", encoding="utf-8", errors="replace") as mf:
+        mcontent = mf.read()
+    mcontent = re.sub(
+        r"if\s+(?:get_option\('panfrost-kmds'\)|panfrost_kmds)\.contains\('kbase'\)\s*\n\s*libpankmod_lib_files\s*\+=\s*files\('kbase_kmod\.c'\)\s*\nendif\s*\n*",
+        "",
+        mcontent,
+    )
+    if "fs.exists('kbase_kmod.c')" not in mcontent:
+        marker = "libpankmod_lib = static_library("
+        idx = mcontent.find(marker)
+        mcontent = (mcontent[:idx] + kbase_block + mcontent[idx:]) if idx != -1 else (mcontent + "\n" + kbase_block)
+    with open(kmod_meson, "w", encoding="utf-8") as mf:
+        mf.write(mcontent)
+
+kbase_src = "work/mesa/src/panfrost/lib/kmod/kbase_kmod.c"
+if os.path.exists(kbase_src):
+    with open(kbase_src, "r", encoding="utf-8", errors="replace") as ks:
+        kbase_c = ks.read()
+
+    def fix_dev_init_call(match):
+        inner = match.group(1).strip()
+        args = []
+        depth = 0
+        start = 0
+        for idx, ch in enumerate(inner):
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                args.append(inner[start:idx].strip())
+                start = idx + 1
+        args.append(inner[start:].strip())
+        if len(args) >= 6 and "ops" in args[4] and "allocator" in args[5]:
+            args[4], args[5] = args[5], args[4]
+        elif len(args) >= 2 and "ops" in args[0] and "allocator" in args[1]:
+            args[0], args[1] = args[1], args[0]
+        if len(args) == 6:
+            args.append("NULL")
+        return f"pan_kmod_dev_init({', '.join(args)})"
+
+    kbase_c = re.sub(
+        r"pan_kmod_dev_init\s*\(([^;]+?)\)\s*;",
+        lambda m: fix_dev_init_call(m) + ";",
+        kbase_c,
+        flags=re.DOTALL,
+    )
+
+    drv_match = re.search(
+        r"(?:static\s+)?(?:const\s+)?struct\s+pan_kmod_driver\s+([A-Za-z0-9_]+)\s*(?:=|;)",
+        kbase_c,
+    )
+    drv_name = drv_match.group(1) if drv_match else "kbase_drv"
+    if not re.search(rf"\b{re.escape(drv_name)}\s*=", kbase_c):
+        kbase_c += f"\nstatic const struct pan_kmod_driver {drv_name} = {{0}};\n"
+
+    kbase_c = re.sub(
+        r"/\* __KBASE_OPS_SHIM_START__ \*/.*?/\* __KBASE_OPS_SHIM_END__ \*/\n?",
+        "",
+        kbase_c,
+        flags=re.DOTALL,
+    )
+
+    has_dev_create = bool(re.search(r"\bkbase_kmod_dev_create\s*\(", kbase_c))
+    has_bo_import_fd = bool(re.search(r"\bkbase_kmod_bo_import_fd\s*\(", kbase_c))
+    has_bo_import = bool(re.search(r"\bkbase_kmod_bo_import\s*\(", kbase_c))
+    has_bo_export_fd = bool(re.search(r"\bkbase_kmod_bo_export_fd\s*\(", kbase_c))
+    has_bo_munmap = bool(re.search(r"\bkbase_kmod_bo_munmap\s*\(", kbase_c))
+
+    mmap_off_def = re.search(
+        r"((?:static\s+)?[A-Za-z0-9_*\s]+?)\s+kbase_kmod_bo_get_mmap_offset\s*\(([^)]*)\)",
+        kbase_c,
+    )
+
+    kbase_c = re.sub(r"(\.dev_create\s*=\s*)kbase_kmod_dev_create\b", r"\1kbase_kmod_dev_create_ops", kbase_c)
+    if has_bo_import_fd:
+        kbase_c = re.sub(r"\.bo_import_fd\s*=\s*kbase_kmod_bo_import_fd\b", r".bo_import = kbase_kmod_bo_import_fd_ops", kbase_c)
+    if has_bo_import:
+        kbase_c = re.sub(r"(\.bo_import\s*=\s*)kbase_kmod_bo_import\b", r"\1kbase_kmod_bo_import_ops", kbase_c)
+    if has_bo_export_fd:
+        kbase_c = re.sub(r"\.bo_export_fd\s*=\s*kbase_kmod_bo_export_fd\b", r".bo_export = kbase_kmod_bo_export_fd_ops", kbase_c)
+    if has_bo_munmap:
+        kbase_c = re.sub(r"(\.bo_munmap\s*=\s*)kbase_kmod_bo_munmap\b", r"\1kbase_kmod_bo_munmap_ops", kbase_c)
+    kbase_c = re.sub(r"^\s*\.bo_get_mmap_offset\s*=\s*kbase_kmod_bo_get_mmap_offset,?\s*\n", "", kbase_c, flags=re.MULTILINE)
+
+    shim_lines = [
+        "/* __KBASE_OPS_SHIM_START__ */",
+        "struct pan_kmod_driver;",
+        "struct pan_kmod_allocator;",
+        "struct pan_kmod_dev;",
+        "struct pan_kmod_bo;",
+    ]
+    if has_dev_create:
+        shim_lines.append(f"extern const struct pan_kmod_driver {drv_name};")
+        shim_lines.append("static struct pan_kmod_dev *kbase_kmod_dev_create(int fd, uint32_t flags, const struct pan_kmod_driver *driver, const struct pan_kmod_allocator *allocator);")
+        shim_lines.append(
+            f"static struct pan_kmod_dev *kbase_kmod_dev_create_ops(int fd, uint32_t flags, const struct pan_kmod_allocator *allocator)\n"
+            f"{{ return kbase_kmod_dev_create(fd, flags, &{drv_name}, allocator); }}"
+        )
+    if has_bo_import:
+        shim_lines.append("static struct pan_kmod_bo *kbase_kmod_bo_import(struct pan_kmod_dev *dev, uint32_t handle, uint64_t size);")
+        shim_lines.append(
+            "static struct pan_kmod_bo *kbase_kmod_bo_import_ops(struct pan_kmod_dev *dev, int fd)\n"
+            "{ return kbase_kmod_bo_import(dev, (uint32_t)fd, 0); }"
+        )
+    if has_bo_import_fd:
+        shim_lines.append("static struct pan_kmod_bo *kbase_kmod_bo_import_fd(struct pan_kmod_dev *dev, int fd, uint64_t size);")
+        shim_lines.append(
+            "static struct pan_kmod_bo *kbase_kmod_bo_import_fd_ops(struct pan_kmod_dev *dev, int fd)\n"
+            "{ return kbase_kmod_bo_import_fd(dev, fd, 0); }"
+        )
+    if has_bo_export_fd:
+        shim_lines.append("static int kbase_kmod_bo_export_fd(struct pan_kmod_bo *bo);")
+        shim_lines.append(
+            "static int kbase_kmod_bo_export_fd_ops(struct pan_kmod_bo *bo)\n"
+            "{ return kbase_kmod_bo_export_fd(bo); }"
+        )
+    if mmap_off_def:
+        ret_t = mmap_off_def.group(1).strip()
+        if not ret_t.startswith("static"):
+            ret_t = "static " + ret_t
+        shim_lines.append(f"{ret_t} kbase_kmod_bo_get_mmap_offset({mmap_off_def.group(2)});")
+    if has_bo_munmap:
+        shim_lines.append("static int kbase_kmod_bo_munmap(struct pan_kmod_bo *bo, void *host_addr, size_t size);")
+        shim_lines.append(
+            "static int kbase_kmod_bo_munmap_ops(struct pan_kmod_bo *bo, void *host_addr, size_t size)\n"
+            "{ return kbase_kmod_bo_munmap(bo, host_addr, size); }"
+        )
+
+    shim_lines.append("/* __KBASE_OPS_SHIM_END__ */")
+    shim_code = "\n".join(shim_lines) + "\n\n"
+
+    ops_struct_pos = kbase_c.rfind("struct pan_kmod_ops")
+    if ops_struct_pos != -1:
+        line_start = kbase_c.rfind("\n", 0, ops_struct_pos)
+        insert_at = line_start + 1 if line_start != -1 else ops_struct_pos
+        kbase_c = kbase_c[:insert_at] + shim_code + kbase_c[insert_at:]
+
+    with open(kbase_src, "w", encoding="utf-8") as ks:
+        ks.write(kbase_c)
+
+kmod_h = "work/mesa/src/panfrost/lib/kmod/pan_kmod.h"
+if os.path.exists(kmod_h):
+    with open(kmod_h, "r", encoding="utf-8", errors="replace") as kh:
+        hcontent = kh.read()
+    if "struct pan_kmod_ops" in hcontent:
+        ops_body = hcontent.split("struct pan_kmod_ops", 1)[1].split("};", 1)[0]
+        if "bo_munmap" not in ops_body:
+            hcontent = re.sub(
+                r"(struct pan_kmod_ops\s*\{)",
+                r"\1\n\tint (*bo_munmap)(struct pan_kmod_bo *bo, void *host_addr, size_t size);",
+                hcontent,
+                count=1,
+            )
+            with open(kmod_h, "w", encoding="utf-8") as kh:
+                kh.write(hcontent)
+
+panvk_vx_dev = "work/mesa/src/panfrost/vulkan/panvk_vX_device.c"
+if os.path.exists(panvk_vx_dev):
+    with open(panvk_vx_dev, "r", encoding="utf-8", errors="replace") as pd:
+        pd_c = pd.read()
+    if "panvk_get_csif_props" in pd_c and not re.search(r"\bpanvk_get_csif_props\s*\([^)]*\)\s*\{", pd_c):
+        csif_shim = (
+            "\n/* __PANVK_CSIF_PROPS_SHIM__ */\n"
+            "struct drm_panthor_csif_info;\n"
+            "struct panvk_device;\n"
+            "static inline const struct drm_panthor_csif_info *\n"
+            "panvk_get_csif_props(const struct panvk_device *dev)\n"
+            "{\n"
+            "   static const struct drm_panthor_csif_info dummy = {0};\n"
+            "   (void)dev;\n"
+            "   return &dummy;\n"
+            "}\n"
+        )
+        last_inc = -1
+        for m in re.finditer(r"^#include[^\n]*\n", pd_c, flags=re.MULTILINE):
+            last_inc = m.end()
+        pd_c = (pd_c[:last_inc] + csif_shim + pd_c[last_inc:]) if last_inc != -1 else (csif_shim + pd_c)
+        with open(panvk_vx_dev, "w", encoding="utf-8") as pd:
+            pd.write(pd_c)
+
+panvk_android = "work/mesa/src/panfrost/vulkan/panvk_android.c"
+if os.path.exists(panvk_android):
+    with open(panvk_android, "r", encoding="utf-8", errors="replace") as pa:
+        pa_c = pa.read()
+    if "vk_common_GetAndroidHardwareBufferPropertiesANDROID" in pa_c and not re.search(
+        r"\bvk_common_GetAndroidHardwareBufferPropertiesANDROID\s*\([^)]*\)\s*\{", pa_c
+    ):
+        ahb_shim = (
+            "\n/* __VK_COMMON_AHB_SHIM__ */\n"
+            "static VkResult\n"
+            "vk_common_GetAndroidHardwareBufferPropertiesANDROID(\n"
+            "   VkDevice device,\n"
+            "   const struct AHardwareBuffer *buffer,\n"
+            "   VkAndroidHardwareBufferPropertiesANDROID *pProperties)\n"
+            "{\n"
+            "   (void)device;\n"
+            "   (void)buffer;\n"
+            "   (void)pProperties;\n"
+            "   return VK_ERROR_FORMAT_NOT_SUPPORTED;\n"
+            "}\n"
+        )
+        last_inc = -1
+        for m in re.finditer(r"^#include[^\n]*\n", pa_c, flags=re.MULTILINE):
+            last_inc = m.end()
+        pa_c = (pa_c[:last_inc] + ahb_shim + pa_c[last_inc:]) if last_inc != -1 else (ahb_shim + pa_c)
+        with open(panvk_android, "w", encoding="utf-8") as pa:
+            pa.write(pa_c)
+PY
+
+phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
+if [ -f "$phys_dev" ]; then
+  sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$phys_dev"
+  sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$phys_dev"
+fi
+
+echo "=== [2/4] Compilando herramientas de host ==="
+if [ -x /usr/bin/llvm-config-21 ]; then
+  export LLVM_CONFIG=/usr/bin/llvm-config-21
+fi
+
+SPIRV_PREFIX="$WORKSPACE_DIR/local-spirv"
+if ! pkg-config --exists SPIRV-Tools 2>/dev/null && [ ! -d "$SPIRV_PREFIX/lib" ]; then
+  mkdir -p work/spirv-build "$SPIRV_PREFIX"
+  if [ ! -d work/spirv-build/SPIRV-Headers ]; then
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git work/spirv-build/SPIRV-Headers
+  fi
+  cmake -S work/spirv-build/SPIRV-Headers -B work/spirv-build/build-headers -G Ninja -DCMAKE_INSTALL_PREFIX="$SPIRV_PREFIX"
+  ninja -C work/spirv-build/build-headers install
+
+  if [ ! -d work/spirv-build/SPIRV-Tools ]; then
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git work/spirv-build/SPIRV-Tools
+  fi
+  cmake -S work/spirv-build/SPIRV-Tools -B work/spirv-build/build-tools -G Ninja \
+    -DCMAKE_INSTALL_PREFIX="$SPIRV_PREFIX" \
+    -DSPIRV-Headers_SOURCE_DIR="$WORKSPACE_DIR/work/spirv-build/SPIRV-Headers" \
+    -DSPIRV_SKIP_TESTS=ON
+  ninja -C work/spirv-build/build-tools install
+  rm -rf work/spirv-build
+fi
+
+if [ -d "$SPIRV_PREFIX/lib" ] || [ -d "$SPIRV_PREFIX/lib/x86_64-linux-gnu" ]; then
+  export PKG_CONFIG_PATH="$SPIRV_PREFIX/lib/pkgconfig:$SPIRV_PREFIX/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export CMAKE_PREFIX_PATH="$SPIRV_PREFIX:${CMAKE_PREFIX_PATH:-}"
+  export CPATH="$SPIRV_PREFIX/include:${CPATH:-}"
+  export LIBRARY_PATH="$SPIRV_PREFIX/lib:$SPIRV_PREFIX/lib/x86_64-linux-gnu:${LIBRARY_PATH:-}"
+fi
+
+rm -rf build-host
+meson setup build-host work/mesa \
+  -Dbuildtype=release -Db_ndebug=true \
+  -Dplatforms=[] -Dgallium-drivers=[] -Dvulkan-drivers=[] \
+  -Dtools=panfrost -Dprecomp-compiler=enabled -Dinstall-precomp-compiler=true \
+  -Dllvm=enabled -Dmesa-clc=enabled -Dinstall-mesa-clc=true
+
+ninja -C build-host \
+  src/compiler/clc/mesa_clc \
+  src/compiler/spirv/vtn_bindgen2 \
+  src/panfrost/clc/panfrost_compile
+
+ln -sf "$WORKSPACE_DIR/build-host/src/compiler/clc/mesa_clc" "$WORKSPACE_DIR/build-host/src/compiler/clc/mesa-clc"
+ln -sf "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn_bindgen2" "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn-bindgen2"
+export PATH="$WORKSPACE_DIR/build-host/src/compiler/clc:$WORKSPACE_DIR/build-host/src/compiler/spirv:$WORKSPACE_DIR/build-host/src/panfrost/clc:$PATH"
+
+echo "=== [3/4] Preparando shims, SPIRV-Tools Android y cross-file ==="
+export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+if [ -z "${ANDROID_NDK_HOME:-}" ]; then
+  echo "ERROR: ANDROID_NDK_HOME / ANDROID_NDK_LATEST_HOME no está definido." >&2
+  exit 1
+fi
+
+NDK_SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
+[ -z "$CLANG_DIR" ] && CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
+export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/21/lib/linux/aarch64}"
+
+unset CPATH LIBRARY_PATH CMAKE_PREFIX_PATH PKG_CONFIG_PATH
+
+SPIRV_ANDROID_PREFIX="$WORKSPACE_DIR/local-spirv-android"
+if [ ! -d "$SPIRV_ANDROID_PREFIX/lib" ]; then
+  mkdir -p work/spirv-android-build "$SPIRV_ANDROID_PREFIX"
+  if [ ! -d work/spirv-android-build/SPIRV-Headers ]; then
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git work/spirv-android-build/SPIRV-Headers
+  fi
+  cmake -S work/spirv-android-build/SPIRV-Headers -B work/spirv-android-build/build-headers -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI=arm64-v8a \
+    -DANDROID_PLATFORM=android-30 \
+    -DCMAKE_INSTALL_PREFIX="$SPIRV_ANDROID_PREFIX"
+  ninja -C work/spirv-android-build/build-headers install
+
+  if [ ! -d work/spirv-android-build/SPIRV-Tools ]; then
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git work/spirv-android-build/SPIRV-Tools
+  fi
+  cmake -S work/spirv-android-build/SPIRV-Tools -B work/spirv-android-build/build-tools -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI=arm64-v8a \
+    -DANDROID_PLATFORM=android-30 \
+    -DCMAKE_INSTALL_PREFIX="$SPIRV_ANDROID_PREFIX" \
+    -DSPIRV-Headers_SOURCE_DIR="$WORKSPACE_DIR/work/spirv-android-build/SPIRV-Headers" \
+    -DSPIRV_SKIP_TESTS=ON
+  ninja -C work/spirv-android-build/build-tools install
+  rm -rf work/spirv-android-build
+fi
+
+mkdir -p shims/include/libdrm shims/include/xcb shims/include/X11/extensions
+
+rm -f shims/SPIRV-Tools*.pc
+if [ -d "$SPIRV_ANDROID_PREFIX/lib/pkgconfig" ]; then
+  cp -f "$SPIRV_ANDROID_PREFIX/lib/pkgconfig/"*.pc shims/ 2>/dev/null || true
+fi
+
+cat <<'EOF' > shims/include/libdrm/drm.h
+#ifndef __SHIM_DRM_H__
+#define __SHIM_DRM_H__
+#include <drm-uapi/drm.h>
+#include <fcntl.h>
+#include <stdint.h>
+#ifndef DRM_CAP_SYNCOBJ_TIMELINE
+#define DRM_CAP_SYNCOBJ_TIMELINE 0x14
+#endif
+#ifndef DRM_RDWR
+#define DRM_RDWR O_RDWR
+#endif
+#endif
+EOF
+
+cat <<'EOF' > shims/include/libdrm/xf86drm.h
+#ifndef __SHIM_XF86DRM_H__
+#define __SHIM_XF86DRM_H__
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <sys/ioctl.h>
+#include <drm.h>
+#define DRM_NODE_PRIMARY 0
+#define DRM_NODE_RENDER 2
+#define DRM_BUS_PCI 0
+#define DRM_BUS_PLATFORM 1
+#define DRM_BUS_HOST1X 2
+struct drmPciBusInfo { uint16_t domain; uint8_t bus; uint8_t dev; uint8_t func; };
+struct drmPlatformBusInfo { char *fullname; };
+struct drmHost1xBusInfo { char *fullname; };
+struct drmPciDeviceInfo { uint16_t vendor_id; uint16_t device_id; uint16_t subvendor_id; uint16_t subdevice_id; };
+typedef struct _drmDevice {
+  int available_nodes;
+  char **nodes;
+  int bustype;
+  union { struct drmPciBusInfo *pci; struct drmPlatformBusInfo *platform; struct drmHost1xBusInfo *host1x; } businfo;
+  union { struct drmPciDeviceInfo *pci; } deviceinfo;
+} drmDevice, *drmDevicePtr;
+typedef struct _drmVersion {
+  int version_major; int version_minor; int version_patchlevel;
+  size_t name_len; char *name; size_t date_len; char *date; size_t desc_len; char *desc;
+} drmVersion, *drmVersionPtr;
+static inline int drmCommandWriteRead(int fd, unsigned long cmd, void *data, unsigned long sz) { (void)fd; (void)cmd; (void)data; (void)sz; return -1; }
+static inline drmVersionPtr drmGetVersion(int fd) { (void)fd; return (drmVersionPtr)calloc(1, sizeof(drmVersion)); }
+static inline void drmFreeVersion(drmVersionPtr v) { free(v); }
+static inline char *drmGetDeviceNameFromFd2(int fd) { (void)fd; return (char *)0; }
+static inline int drmIoctl(int fd, unsigned long req, void *arg) { return ioctl(fd, req, arg); }
+static inline int drmCloseBufferHandle(int fd, uint32_t h) { (void)fd; (void)h; return 0; }
+static inline int drmPrimeFDToHandle(int fd, int pfd, uint32_t *h) { (void)fd; (void)pfd; if (h) *h = 0; return -1; }
+static inline int drmPrimeHandleToFD(int fd, uint32_t h, uint32_t fl, int *pfd) { (void)fd; (void)h; (void)fl; if (pfd) *pfd = -1; return -1; }
+static inline int drmGetDeviceFromDevId(dev_t d, uint32_t fl, drmDevicePtr *dev) { (void)d; (void)fl; if (dev) *dev = (drmDevicePtr)0; return -1; }
+static inline int drmGetDevice2(int fd, uint32_t fl, drmDevicePtr *dev) { (void)fd; (void)fl; if (dev) *dev = (drmDevicePtr)0; return -1; }
+static inline void drmFreeDevice(drmDevicePtr *dev) { if (dev) *dev = (drmDevicePtr)0; }
+static inline bool drmDevicesEqual(drmDevicePtr a, drmDevicePtr b) { (void)a; (void)b; return false; }
+static inline int drmGetDevices2(uint32_t fl, drmDevicePtr *devs, int max_d) { (void)fl; (void)devs; (void)max_d; return 0; }
+static inline void drmFreeDevices(drmDevicePtr *devs, int cnt) { (void)devs; (void)cnt; }
+static inline int drmGetCap(int fd, uint64_t cap, uint64_t *val) { (void)fd; (void)cap; if (val) *val = 0; return -1; }
+static inline int drmSyncobjCreate(int fd, uint32_t fl, uint32_t *h) { (void)fd; (void)fl; if (h) *h = 0; return -1; }
+static inline int drmSyncobjDestroy(int fd, uint32_t h) { (void)fd; (void)h; return -1; }
+static inline int drmSyncobjHandleToFD(int fd, uint32_t h, int *ofd) { (void)fd; (void)h; if (ofd) *ofd = -1; return -1; }
+static inline int drmSyncobjFDToHandle(int fd, int ofd, uint32_t *h) { (void)fd; (void)ofd; if (h) *h = 0; return -1; }
+static inline int drmSyncobjWait(int fd, uint32_t *h, uint32_t n, int64_t t, uint32_t fl, uint32_t *fs) { (void)fd; (void)h; (void)n; (void)t; (void)fl; if (fs) *fs = 0; return -1; }
+static inline int drmSyncobjSignal(int fd, const uint32_t *h, uint32_t n) { (void)fd; (void)h; (void)n; return -1; }
+static inline int drmSyncobjReset(int fd, const uint32_t *h, uint32_t n) { (void)fd; (void)h; (void)n; return -1; }
+static inline int drmSyncobjImportSyncFile(int fd, uint32_t h, int sfd) { (void)fd; (void)h; (void)sfd; return -1; }
+static inline int drmSyncobjExportSyncFile(int fd, uint32_t h, int *osfd) { (void)fd; (void)h; if (osfd) *osfd = -1; return -1; }
+static inline int drmSyncobjTimelineSignal(int fd, const uint32_t *h, uint64_t *pts, uint32_t n) { (void)fd; (void)h; (void)pts; (void)n; return -1; }
+static inline int drmSyncobjTimelineWait(int fd, uint32_t *h, uint64_t *pts, unsigned n, int64_t t, unsigned fl, uint32_t *fs) { (void)fd; (void)h; (void)pts; (void)n; (void)t; (void)fl; if (fs) *fs = 0; return -1; }
+static inline int drmSyncobjQuery2(int fd, uint32_t *h, uint64_t *pts, uint32_t n, uint32_t fl) { (void)fd; (void)h; (void)pts; (void)n; (void)fl; return -1; }
+static inline int drmSyncobjTransfer(int fd, uint32_t dh, uint64_t dp, uint32_t sh, uint64_t sp, uint32_t fl) { (void)fd; (void)dh; (void)dp; (void)sh; (void)sp; (void)fl; return -1; }
+#endif
+EOF
+
+cat <<EOF > shims/libdrm.pc
+prefix=$WORKSPACE_DIR/shims
+exec_prefix=\${prefix}
+libdir=$NDK_SYSROOT/usr/lib/aarch64-linux-android/30
+includedir=\${prefix}/include
+
+Name: libdrm
+Description: Userspace interface to kernel DRM services (Android shim)
+Version: 2.4.131
+Libs: -L\${libdir}
+Cflags: -I\${includedir} -I\${includedir}/libdrm
+EOF
+
+if [ "$FLAVOR" = "x11" ]; then
+  for pc_name in xcb xcb-randr x11-xcb xcb-keysyms xcb-dri3 xcb-present xcb-sync xcb-shm xcb-xfixes xshmfence xrandr x11; do
+    cat <<EOF > "shims/${pc_name}.pc"
+prefix=$WORKSPACE_DIR/shims
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: ${pc_name}
+Description: ${pc_name} shim for cross-build
+Version: 1.17.0
+Cflags: -I\${includedir}
+EOF
+  done
+
+  cat <<'EOF' > shims/include/xshmfence.h
+#ifndef __SHIM_XSHMFENCE_H__
+#define __SHIM_XSHMFENCE_H__
+#include <errno.h>
+struct xshmfence;
+static inline int xshmfence_trigger(struct xshmfence *f) { (void)f; return -1; }
+static inline int xshmfence_await(struct xshmfence *f) { (void)f; return -1; }
+static inline void xshmfence_reset(struct xshmfence *f) { (void)f; }
+static inline int xshmfence_alloc_shm(void) { return -1; }
+static inline struct xshmfence *xshmfence_map_shm(int fd) { (void)fd; return (struct xshmfence *)0; }
+static inline void xshmfence_unmap_shm(struct xshmfence *f) { (void)f; }
+#endif
+EOF
+  cp shims/include/xshmfence.h shims/include/X11/xshmfence.h
+
+  cat <<'EOF' > shims/include/X11/keysymdef.h
+#ifndef __SHIM_X11_KEYSYMDEF_H__
+#define __SHIM_X11_KEYSYMDEF_H__
+#define XK_VoidSymbol 0xffffff
+#define XK_BackSpace 0xff08
+#define XK_Tab 0xff09
+#define XK_Linefeed 0xff0a
+#define XK_Clear 0xff0b
+#define XK_Return 0xff0d
+#define XK_Pause 0xff13
+#define XK_Scroll_Lock 0xff14
+#define XK_Sys_Req 0xff15
+#define XK_Escape 0xff1b
+#define XK_Delete 0xffff
+#define XK_Home 0xff50
+#define XK_Left 0xff51
+#define XK_Up 0xff52
+#define XK_Right 0xff53
+#define XK_Down 0xff54
+#define XK_Page_Up 0xff55
+#define XK_Prior 0xff55
+#define XK_Page_Down 0xff56
+#define XK_Next 0xff56
+#define XK_End 0xff57
+#define XK_Begin 0xff58
+#define XK_Select 0xff60
+#define XK_Print 0xff61
+#define XK_Execute 0xff62
+#define XK_Insert 0xff63
+#define XK_Undo 0xff65
+#define XK_Redo 0xff66
+#define XK_Menu 0xff67
+#define XK_Find 0xff68
+#define XK_Cancel 0xff69
+#define XK_Help 0xff6a
+#define XK_Break 0xff6b
+#define XK_Mode_switch 0xff7e
+#define XK_script_switch 0xff7e
+#define XK_Num_Lock 0xff7f
+#define XK_F1 0xffbe
+#define XK_F2 0xffbf
+#define XK_F3 0xffc0
+#define XK_F4 0xffc1
+#define XK_F5 0xffc2
+#define XK_F6 0xffc3
+#define XK_F7 0xffc4
+#define XK_F8 0xffc5
+#define XK_F9 0xffc6
+#define XK_F10 0xffc7
+#define XK_F11 0xffc8
+#define XK_F12 0xffc9
+#define XK_Shift_L 0xffe1
+#define XK_Shift_R 0xffe2
+#define XK_Control_L 0xffe3
+#define XK_Control_R 0xffe4
+#define XK_Caps_Lock 0xffe5
+#define XK_Shift_Lock 0xffe6
+#define XK_Meta_L 0xffe7
+#define XK_Meta_R 0xffe8
+#define XK_Alt_L 0xffe9
+#define XK_Alt_R 0xffea
+#define XK_Super_L 0xffeb
+#define XK_Super_R 0xffec
+#define XK_Hyper_L 0xffed
+#define XK_Hyper_R 0xffee
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/xcb/xcb.h
+#ifndef __SHIM_XCB_H__
+#define __SHIM_XCB_H__
+#include <errno.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#ifndef XCB_NONE
+#define XCB_NONE 0u
+#endif
+#ifndef XCB_ATOM_CARDINAL
+#define XCB_ATOM_CARDINAL 6u
+#endif
+#define XCB_PROP_MODE_REPLACE 0
+#define XCB_PROP_MODE_PREPEND 1
+#define XCB_PROP_MODE_APPEND 2
+#define XCB_IMAGE_FORMAT_XY_BITMAP 0
+#define XCB_IMAGE_FORMAT_XY_PIXMAP 1
+#define XCB_IMAGE_FORMAT_Z_PIXMAP 2
+#define XCB_VISUAL_CLASS_STATIC_GRAY 0
+#define XCB_VISUAL_CLASS_GRAY_SCALE 1
+#define XCB_VISUAL_CLASS_STATIC_COLOR 2
+#define XCB_VISUAL_CLASS_PSEUDO_COLOR 3
+#define XCB_VISUAL_CLASS_TRUE_COLOR 4
+#define XCB_VISUAL_CLASS_DIRECT_COLOR 5
+#define XCB_GC_FUNCTION 1u
+#define XCB_GC_PLANE_MASK 2u
+#define XCB_GC_FOREGROUND 4u
+#define XCB_GC_BACKGROUND 8u
+#define XCB_GC_LINE_WIDTH 16u
+#define XCB_GC_LINE_STYLE 32u
+#define XCB_GC_CAP_STYLE 64u
+#define XCB_GC_JOIN_STYLE 128u
+#define XCB_GC_FILL_STYLE 256u
+#define XCB_GC_FILL_RULE 512u
+#define XCB_GC_TILE 1024u
+#define XCB_GC_STIPPLE 2048u
+#define XCB_GC_TILE_STIPPLE_ORIGIN_X 4096u
+#define XCB_GC_TILE_STIPPLE_ORIGIN_Y 8192u
+#define XCB_GC_FONT 16384u
+#define XCB_GC_SUBWINDOW_MODE 32768u
+#define XCB_GC_GRAPHICS_EXPOSURES 65536u
+typedef struct xcb_connection_t xcb_connection_t;
+typedef struct xcb_special_event_t { uint8_t pad0; } xcb_special_event_t;
+typedef struct xcb_extension_t { const char *name; int global_id; } xcb_extension_t;
+typedef uint32_t xcb_window_t, xcb_drawable_t, xcb_pixmap_t, xcb_gc_t, xcb_visualid_t, xcb_colormap_t, xcb_gcontext_t, xcb_keycode_t, xcb_timestamp_t, xcb_atom_t;
+typedef struct {
+  int16_t x;
+  int16_t y;
+  uint16_t width;
+  uint16_t height;
+} xcb_rectangle_t;
+typedef struct {
+  uint8_t major_opcode;
+  uint8_t format;
+  uint16_t length;
+  xcb_drawable_t drawable;
+  xcb_gcontext_t gc;
+  uint16_t width;
+  uint16_t height;
+  int16_t dst_x;
+  int16_t dst_y;
+  uint8_t left_pad;
+  uint8_t depth;
+  uint8_t pad[2];
+} xcb_put_image_request_t;
+typedef struct {
+  xcb_visualid_t visual_id;
+  uint8_t _class;
+  uint8_t bits_per_rgb_value;
+  uint16_t colormap_entries;
+  uint32_t red_mask;
+  uint32_t green_mask;
+  uint32_t blue_mask;
+  uint8_t pad0[4];
+} xcb_visualtype_t;
+typedef struct { xcb_visualtype_t *data; int rem; int index; } xcb_visualtype_iterator_t;
+typedef struct {
+  uint8_t depth;
+  uint8_t pad0;
+  uint16_t visuals_len;
+  uint8_t pad1[4];
+} xcb_depth_t;
+typedef struct { xcb_depth_t *data; int rem; int index; } xcb_depth_iterator_t;
+typedef struct {
+  xcb_window_t root; xcb_colormap_t default_colormap; uint32_t white_pixel, black_pixel, current_input_masks;
+  uint16_t width_in_pixels, height_in_pixels, width_in_millimeters, height_in_millimeters, min_installed_maps, max_installed_maps;
+  xcb_visualid_t root_visual; uint8_t backing_stores, save_unders, root_depth, allowed_depths_len;
+} xcb_screen_t;
+typedef struct { xcb_screen_t *data; int rem; int index; } xcb_screen_iterator_t;
+typedef struct {
+  uint8_t status, pad0; uint16_t protocol_major_version, protocol_minor_version, length;
+  uint32_t release_number, resource_id_base, resource_id_mask, motion_buffer_size;
+  uint16_t vendor_len, maximum_request_length;
+  uint8_t roots_len, pixmap_formats_len, image_byte_order, bitmap_format_bit_order, bitmap_format_scanline_unit, bitmap_format_scanline_pad;
+  xcb_keycode_t min_keycode, max_keycode; uint32_t pad1;
+} xcb_setup_t;
+typedef struct { uint8_t response_type; uint8_t pad0; uint16_t sequence; uint32_t length; } xcb_generic_event_t;
+typedef struct xcb_generic_error_t { uint8_t response_type, pad0; uint16_t sequence; uint32_t length; int32_t error_code; } xcb_generic_error_t;
+typedef struct { uint32_t sequence; } xcb_void_cookie_t, xcb_query_extension_cookie_t, xcb_get_geometry_cookie_t, xcb_query_tree_cookie_t, xcb_get_window_attributes_cookie_t, xcb_translate_coordinates_cookie_t, xcb_query_keymap_cookie_t, xcb_intern_atom_cookie_t;
+typedef struct {
+  uint8_t response_type;
+  uint8_t pad0;
+  uint16_t sequence;
+  uint32_t length;
+  xcb_atom_t atom;
+} xcb_intern_atom_reply_t;
+typedef struct {
+  uint8_t response_type;
+  uint8_t pad0;
+  uint16_t sequence;
+  uint32_t length;
+  uint8_t keys[32];
+} xcb_query_keymap_reply_t;
+typedef struct {
+  uint8_t response_type, pad0; uint16_t sequence; uint32_t length;
+  uint8_t present, major_opcode, first_event, first_error;
+} xcb_query_extension_reply_t;
+typedef struct {
+  uint8_t response_type, depth; uint16_t sequence; uint32_t length;
+  xcb_window_t root; int16_t x, y; uint16_t width, height, border_width; uint8_t pad0[2];
+} xcb_get_geometry_reply_t;
+typedef struct {
+  uint8_t response_type, pad0; uint16_t sequence; uint32_t length;
+  xcb_window_t root; xcb_window_t parent; uint16_t children_len; uint8_t pad1[14];
+} xcb_query_tree_reply_t;
+typedef struct {
+  uint8_t response_type, backing_store; uint16_t sequence; uint32_t length;
+  xcb_visualid_t visual; uint16_t _class; uint8_t bit_gravity, win_gravity;
+  uint32_t backing_planes, backing_pixel; uint8_t save_under, map_is_installed, map_state, override_redirect;
+  xcb_colormap_t colormap; uint32_t all_event_masks, your_event_mask; uint16_t do_not_propagate_mask, pad0;
+} xcb_get_window_attributes_reply_t;
+typedef struct {
+  uint8_t response_type, same_screen; uint16_t sequence; uint32_t length;
+  xcb_window_t child; int16_t dst_x; int16_t dst_y;
+} xcb_translate_coordinates_reply_t;
+static inline int xcb_flush(xcb_connection_t *c) { (void)c; return 0; }
+static inline uint32_t xcb_get_maximum_request_length(xcb_connection_t *c) { (void)c; return 65535u; }
+static inline xcb_generic_event_t *xcb_wait_for_special_event(xcb_connection_t *c, xcb_special_event_t *se) { (void)c; (void)se; return (xcb_generic_event_t *)0; }
+static inline void xcb_unregister_for_special_event(xcb_connection_t *c, xcb_special_event_t *se) { (void)c; (void)se; }
+static inline xcb_special_event_t *xcb_register_for_special_xge(xcb_connection_t *c, xcb_extension_t *ext, uint32_t eid, uint32_t *num_stamp_events) {
+  (void)c; (void)ext; (void)eid; if (num_stamp_events) *num_stamp_events = 0; return (xcb_special_event_t *)0;
+}
+static inline xcb_void_cookie_t xcb_create_gc(xcb_connection_t *c, xcb_gcontext_t cid, xcb_drawable_t drawable, uint32_t value_mask, const void *value_list) {
+  (void)c; (void)cid; (void)drawable; (void)value_mask; (void)value_list;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_intern_atom_cookie_t xcb_intern_atom(xcb_connection_t *c, uint8_t only_if_exists, uint16_t name_len, const char *name) {
+  (void)c; (void)only_if_exists; (void)name_len; (void)name;
+  xcb_intern_atom_cookie_t ck = {0}; return ck;
+}
+static inline xcb_intern_atom_reply_t *xcb_intern_atom_reply(xcb_connection_t *c, xcb_intern_atom_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_intern_atom_reply_t *)0;
+}
+static inline xcb_void_cookie_t xcb_change_property_checked(xcb_connection_t *c, uint8_t mode, xcb_window_t window, xcb_atom_t property, xcb_atom_t type, uint8_t format, uint32_t data_len, const void *data) {
+  (void)c; (void)mode; (void)window; (void)property; (void)type; (void)format; (void)data_len; (void)data;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_delete_property_checked(xcb_connection_t *c, xcb_window_t window, xcb_atom_t property) {
+  (void)c; (void)window; (void)property;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_query_keymap_cookie_t xcb_query_keymap(xcb_connection_t *c) { (void)c; xcb_query_keymap_cookie_t ck = {0}; return ck; }
+static inline xcb_query_keymap_reply_t *xcb_query_keymap_reply(xcb_connection_t *c, xcb_query_keymap_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_query_keymap_reply_t *)0; }
+static inline xcb_void_cookie_t xcb_free_pixmap(xcb_connection_t *c, xcb_pixmap_t pixmap) { (void)c; (void)pixmap; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_put_image(xcb_connection_t *c, uint8_t format, xcb_drawable_t drawable, xcb_gcontext_t gc, uint16_t width, uint16_t height, int16_t dst_x, int16_t dst_y, uint8_t left_pad, uint8_t depth, uint32_t data_len, const uint8_t *data) {
+  (void)c; (void)format; (void)drawable; (void)gc; (void)width; (void)height; (void)dst_x; (void)dst_y; (void)left_pad; (void)depth; (void)data_len; (void)data;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline const xcb_setup_t *xcb_get_setup(xcb_connection_t *c) { (void)c; static const xcb_setup_t s = {0}; return &s; }
+static inline xcb_screen_iterator_t xcb_setup_roots_iterator(const xcb_setup_t *R) {
+  (void)R; static xcb_screen_t ds = {0}; xcb_screen_iterator_t it = { &ds, 1, 0 }; return it;
+}
+static inline void xcb_screen_next(xcb_screen_iterator_t *i) {
+  if (i && i->rem > 0) { i->rem--; i->index++; }
+}
+static inline xcb_depth_iterator_t xcb_screen_allowed_depths_iterator(const xcb_screen_t *R) {
+  (void)R; static xcb_depth_t dd = {0}; xcb_depth_iterator_t it = { &dd, 0, 0 }; return it;
+}
+static inline void xcb_depth_next(xcb_depth_iterator_t *i) {
+  if (i && i->rem > 0) { i->rem--; i->index++; }
+}
+static inline xcb_visualtype_iterator_t xcb_depth_visuals_iterator(const xcb_depth_t *R) {
+  (void)R; xcb_visualtype_iterator_t it = { (xcb_visualtype_t *)0, 0, 0 }; return it;
+}
+static inline void xcb_visualtype_next(xcb_visualtype_iterator_t *i) {
+  if (i && i->rem > 0) { i->rem--; i->index++; }
+}
+static inline void xcb_discard_reply(xcb_connection_t *c, unsigned int sequence) { (void)c; (void)sequence; }
+static inline void xcb_prefetch_extension_data(xcb_connection_t *c, xcb_extension_t *ext) { (void)c; (void)ext; }
+static inline const xcb_query_extension_reply_t *xcb_get_extension_data(xcb_connection_t *c, xcb_extension_t *ext) {
+  (void)c; (void)ext; static const xcb_query_extension_reply_t r = {0}; return &r;
+}
+static inline uint32_t xcb_generate_id(xcb_connection_t *c) { (void)c; return 0; }
+static inline xcb_generic_error_t *xcb_request_check(xcb_connection_t *c, xcb_void_cookie_t ck) { (void)c; (void)ck; return (xcb_generic_error_t *)0; }
+static inline xcb_query_extension_cookie_t xcb_query_extension(xcb_connection_t *c, uint16_t nl, const char *n) {
+  (void)c; (void)nl; (void)n; xcb_query_extension_cookie_t ck = {0}; return ck;
+}
+static inline xcb_query_extension_reply_t *xcb_query_extension_reply(xcb_connection_t *c, xcb_query_extension_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_query_extension_reply_t *)0;
+}
+static inline xcb_get_geometry_cookie_t xcb_get_geometry(xcb_connection_t *c, xcb_drawable_t d) {
+  (void)c; (void)d; xcb_get_geometry_cookie_t ck = {0}; return ck;
+}
+static inline xcb_get_geometry_cookie_t xcb_get_geometry_unchecked(xcb_connection_t *c, xcb_drawable_t d) {
+  (void)c; (void)d; xcb_get_geometry_cookie_t ck = {0}; return ck;
+}
+static inline xcb_get_geometry_reply_t *xcb_get_geometry_reply(xcb_connection_t *c, xcb_get_geometry_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_get_geometry_reply_t *)0;
+}
+static inline xcb_query_tree_cookie_t xcb_query_tree(xcb_connection_t *c, xcb_window_t w) {
+  (void)c; (void)w; xcb_query_tree_cookie_t ck = {0}; return ck;
+}
+static inline xcb_query_tree_reply_t *xcb_query_tree_reply(xcb_connection_t *c, xcb_query_tree_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_query_tree_reply_t *)0;
+}
+static inline xcb_window_t *xcb_query_tree_children(const xcb_query_tree_reply_t *r) {
+  (void)r; return (xcb_window_t *)0;
+}
+static inline xcb_get_window_attributes_cookie_t xcb_get_window_attributes(xcb_connection_t *c, xcb_window_t w) {
+  (void)c; (void)w; xcb_get_window_attributes_cookie_t ck = {0}; return ck;
+}
+static inline xcb_get_window_attributes_reply_t *xcb_get_window_attributes_reply(xcb_connection_t *c, xcb_get_window_attributes_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_get_window_attributes_reply_t *)0;
+}
+static inline xcb_translate_coordinates_cookie_t xcb_translate_coordinates(xcb_connection_t *c, xcb_window_t sw, xcb_window_t dw, int16_t sx, int16_t sy) {
+  (void)c; (void)sw; (void)dw; (void)sx; (void)sy; xcb_translate_coordinates_cookie_t ck = {0}; return ck;
+}
+static inline xcb_translate_coordinates_cookie_t xcb_translate_coordinates_unchecked(xcb_connection_t *c, xcb_window_t sw, xcb_window_t dw, int16_t sx, int16_t sy) {
+  (void)c; (void)sw; (void)dw; (void)sx; (void)sy; xcb_translate_coordinates_cookie_t ck = {0}; return ck;
+}
+static inline xcb_translate_coordinates_reply_t *xcb_translate_coordinates_reply(xcb_connection_t *c, xcb_translate_coordinates_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_translate_coordinates_reply_t *)0;
+}
+#include <xcb/randr.h>
+#include <xcb/xfixes.h>
+#include <xcb/dri3.h>
+#include <xcb/present.h>
+#include <xcb/sync.h>
+#include <xcb/shm.h>
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/xcb/randr.h
+#ifndef __SHIM_XCB_RANDR_H__
+#define __SHIM_XCB_RANDR_H__
+#include <stdint.h>
+#ifndef XCB_NONE
+#define XCB_NONE 0u
+#endif
+#define XCB_RANDR_SET_CONFIG_SUCCESS 0
+#define XCB_RANDR_SET_CONFIG_INVALID_CONFIG_TIME 2
+#define XCB_RANDR_MODE_FLAG_HSYNC_POSITIVE 1
+#define XCB_RANDR_MODE_FLAG_HSYNC_NEGATIVE 2
+#define XCB_RANDR_MODE_FLAG_VSYNC_POSITIVE 4
+#define XCB_RANDR_MODE_FLAG_VSYNC_NEGATIVE 8
+#define XCB_RANDR_MODE_FLAG_INTERLACE 16
+#define XCB_RANDR_MODE_FLAG_DOUBLE_SCAN 32
+#define XCB_RANDR_MODE_FLAG_CSYNC 64
+#define XCB_RANDR_MODE_FLAG_CSYNC_POSITIVE 128
+#define XCB_RANDR_MODE_FLAG_CSYNC_NEGATIVE 256
+#define XCB_RANDR_MODE_FLAG_HMIX_POSITIVE 512
+#define XCB_RANDR_MODE_FLAG_HMIX_NEGATIVE 1024
+#define XCB_RANDR_MODE_FLAG_VMIX_POSITIVE 2048
+#define XCB_RANDR_MODE_FLAG_VMIX_NEGATIVE 4096
+typedef uint32_t xcb_window_t, xcb_randr_output_t, xcb_randr_crtc_t, xcb_randr_mode_t;
+typedef struct { uint32_t sequence; } xcb_randr_query_version_cookie_t, xcb_randr_get_crtc_info_cookie_t, xcb_randr_get_screen_resources_current_cookie_t, xcb_randr_get_output_info_cookie_t;
+typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_randr_query_version_reply_t;
+typedef struct {
+  uint32_t id; uint16_t width, height; uint32_t dot_clock;
+  uint16_t hsync_start, hsync_end, htotal, hskew, vsync_start, vsync_end, vtotal, name_len; uint32_t mode_flags;
+} xcb_randr_mode_info_t;
+typedef struct {
+  uint8_t response_type, status; uint16_t sequence; uint32_t length, timestamp; int16_t x, y; uint16_t width, height;
+  xcb_randr_mode_t mode; uint16_t rotation, rotations, num_outputs, num_possible_outputs;
+} xcb_randr_get_crtc_info_reply_t;
+typedef struct {
+  uint8_t response_type, pad0; uint16_t sequence; uint32_t length, timestamp, config_timestamp;
+  uint16_t num_crtcs, num_outputs, num_modes, num_names; uint8_t pad1[8];
+} xcb_randr_get_screen_resources_current_reply_t;
+typedef struct {
+  uint8_t response_type, status; uint16_t sequence; uint32_t length, timestamp; xcb_randr_crtc_t crtc;
+  uint32_t mm_width, mm_height; uint8_t connection, subpixel_order; uint16_t num_crtcs, num_modes, num_preferred, num_clones, name_len;
+} xcb_randr_get_output_info_reply_t;
+struct xcb_connection_t;
+typedef struct xcb_generic_error_t xcb_generic_error_t;
+static inline xcb_randr_query_version_cookie_t xcb_randr_query_version_unchecked(struct xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_randr_query_version_cookie_t ck = {0}; return ck; }
+static inline xcb_randr_query_version_reply_t *xcb_randr_query_version_reply(struct xcb_connection_t *c, xcb_randr_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_randr_query_version_reply_t *)0; }
+static inline xcb_randr_get_crtc_info_cookie_t xcb_randr_get_crtc_info_unchecked(struct xcb_connection_t *c, xcb_randr_crtc_t crtc, uint32_t ts) { (void)c; (void)crtc; (void)ts; xcb_randr_get_crtc_info_cookie_t ck = {0}; return ck; }
+static inline xcb_randr_get_crtc_info_reply_t *xcb_randr_get_crtc_info_reply(struct xcb_connection_t *c, xcb_randr_get_crtc_info_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_randr_get_crtc_info_reply_t *)0; }
+static inline xcb_randr_get_screen_resources_current_cookie_t xcb_randr_get_screen_resources_current_unchecked(struct xcb_connection_t *c, xcb_window_t w) { (void)c; (void)w; xcb_randr_get_screen_resources_current_cookie_t ck = {0}; return ck; }
+static inline xcb_randr_get_screen_resources_current_reply_t *xcb_randr_get_screen_resources_current_reply(struct xcb_connection_t *c, xcb_randr_get_screen_resources_current_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_randr_get_screen_resources_current_reply_t *)0; }
+static inline xcb_randr_crtc_t *xcb_randr_get_screen_resources_current_crtcs(const xcb_randr_get_screen_resources_current_reply_t *r) { (void)r; return (xcb_randr_crtc_t *)0; }
+static inline xcb_randr_output_t *xcb_randr_get_screen_resources_current_outputs(const xcb_randr_get_screen_resources_current_reply_t *r) { (void)r; return (xcb_randr_output_t *)0; }
+static inline xcb_randr_mode_info_t *xcb_randr_get_screen_resources_current_modes(const xcb_randr_get_screen_resources_current_reply_t *r) { (void)r; return (xcb_randr_mode_info_t *)0; }
+static inline xcb_randr_get_output_info_cookie_t xcb_randr_get_output_info(struct xcb_connection_t *c, xcb_randr_output_t o, uint32_t ts) { (void)c; (void)o; (void)ts; xcb_randr_get_output_info_cookie_t ck = {0}; return ck; }
+static inline xcb_randr_get_output_info_reply_t *xcb_randr_get_output_info_reply(struct xcb_connection_t *c, xcb_randr_get_output_info_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_randr_get_output_info_reply_t *)0; }
+static inline uint8_t *xcb_randr_get_output_info_name(const xcb_randr_get_output_info_reply_t *r) { (void)r; return (uint8_t *)0; }
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/xcb/xcb_keysyms.h
+#ifndef __SHIM_XCB_KEYSYMS_H__
+#define __SHIM_XCB_KEYSYMS_H__
+#include <xcb/xcb.h>
+typedef struct _xcb_key_symbols { int dummy; } xcb_key_symbols_t;
+static inline xcb_key_symbols_t *xcb_key_symbols_alloc(xcb_connection_t *c) { (void)c; return (xcb_key_symbols_t *)0; }
+static inline xcb_keycode_t *xcb_key_symbols_get_keycode(xcb_key_symbols_t *syms, uint32_t keysym) { (void)syms; (void)keysym; return (xcb_keycode_t *)0; }
+static inline void xcb_key_symbols_free(xcb_key_symbols_t *syms) { (void)syms; }
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/xcb/dri3.h
+#ifndef __SHIM_XCB_DRI3_H__
+#define __SHIM_XCB_DRI3_H__
+#include <stdint.h>
+#include <xcb/xcb.h>
+typedef struct xcb_connection_t xcb_connection_t;
+typedef struct xcb_extension_t xcb_extension_t;
+typedef uint32_t xcb_drawable_t, xcb_pixmap_t, xcb_window_t;
+typedef struct xcb_generic_error_t xcb_generic_error_t;
+static xcb_extension_t xcb_dri3_id = { "DRI3", 0 };
+typedef struct { uint32_t sequence; } xcb_dri3_open_cookie_t, xcb_dri3_query_version_cookie_t, xcb_dri3_get_supported_modifiers_cookie_t;
+typedef struct { uint8_t response_type, nfd; uint16_t sequence; uint32_t length; int32_t fd; } xcb_dri3_open_reply_t;
+typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_dri3_query_version_reply_t;
+typedef struct { uint8_t response_type, nfd; uint16_t sequence; uint32_t length, pixmap_size; int32_t fd; } xcb_dri3_buffer_from_pixmap_reply_t;
+typedef struct {
+  uint8_t response_type, pad0;
+  uint16_t sequence;
+  uint32_t length;
+  uint32_t num_window_modifiers;
+  uint32_t num_screen_modifiers;
+  uint8_t pad1[16];
+} xcb_dri3_get_supported_modifiers_reply_t;
+static inline xcb_dri3_open_cookie_t xcb_dri3_open(xcb_connection_t *c, xcb_drawable_t d, uint32_t p) { (void)c; (void)d; (void)p; xcb_dri3_open_cookie_t ck = {0}; return ck; }
+static inline xcb_dri3_open_reply_t *xcb_dri3_open_reply(xcb_connection_t *c, xcb_dri3_open_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_open_reply_t *)0; }
+static inline int *xcb_dri3_open_reply_fds(xcb_connection_t *c, xcb_dri3_open_reply_t *r) { (void)c; (void)r; static int fds[1] = {-1}; return fds; }
+static inline xcb_dri3_query_version_cookie_t xcb_dri3_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_dri3_query_version_cookie_t ck = {0}; return ck; }
+static inline xcb_dri3_query_version_reply_t *xcb_dri3_query_version_reply(xcb_connection_t *c, xcb_dri3_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_query_version_reply_t *)0; }
+static inline xcb_void_cookie_t xcb_dri3_pixmap_from_buffer_checked(xcb_connection_t *c, xcb_pixmap_t pixmap, xcb_drawable_t drawable, uint32_t size, uint16_t width, uint16_t height, uint16_t stride, uint8_t depth, uint8_t bpp, int32_t fd) {
+  (void)c; (void)pixmap; (void)drawable; (void)size; (void)width; (void)height; (void)stride; (void)depth; (void)bpp; (void)fd;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_dri3_pixmap_from_buffers_checked(xcb_connection_t *c, xcb_pixmap_t pixmap, xcb_window_t window, uint8_t num_buffers, uint16_t width, uint16_t height, uint32_t stride0, uint32_t offset0, uint32_t stride1, uint32_t offset1, uint32_t stride2, uint32_t offset2, uint32_t stride3, uint32_t offset3, uint8_t depth, uint8_t bpp, uint64_t modifier, const int32_t *fds) {
+  (void)c; (void)pixmap; (void)window; (void)num_buffers; (void)width; (void)height; (void)stride0; (void)offset0; (void)stride1; (void)offset1; (void)stride2; (void)offset2; (void)stride3; (void)offset3; (void)depth; (void)bpp; (void)modifier; (void)fds;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_dri3_import_syncobj_checked(xcb_connection_t *c, uint32_t syncobj, xcb_drawable_t drawable, int32_t fd) {
+  (void)c; (void)syncobj; (void)drawable; (void)fd;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_dri3_fence_from_fd(xcb_connection_t *c, xcb_drawable_t drawable, uint32_t fence, uint8_t initially_triggered, int32_t fd) {
+  (void)c; (void)drawable; (void)fence; (void)initially_triggered; (void)fd;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_dri3_free_syncobj(xcb_connection_t *c, uint32_t syncobj) {
+  (void)c; (void)syncobj;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_dri3_get_supported_modifiers_cookie_t xcb_dri3_get_supported_modifiers(xcb_connection_t *c, uint32_t window, uint8_t depth, uint8_t bpp) {
+  (void)c; (void)window; (void)depth; (void)bpp;
+  xcb_dri3_get_supported_modifiers_cookie_t ck = {0}; return ck;
+}
+static inline xcb_dri3_get_supported_modifiers_reply_t *xcb_dri3_get_supported_modifiers_reply(xcb_connection_t *c, xcb_dri3_get_supported_modifiers_cookie_t ck, xcb_generic_error_t **e) {
+  (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_dri3_get_supported_modifiers_reply_t *)0;
+}
+static inline uint64_t *xcb_dri3_get_supported_modifiers_window_modifiers(const xcb_dri3_get_supported_modifiers_reply_t *r) { (void)r; return (uint64_t *)0; }
+static inline uint64_t *xcb_dri3_get_supported_modifiers_screen_modifiers(const xcb_dri3_get_supported_modifiers_reply_t *r) { (void)r; return (uint64_t *)0; }
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/xcb/present.h
+#ifndef __SHIM_XCB_PRESENT_H__
+#define __SHIM_XCB_PRESENT_H__
+#include <stddef.h>
+#include <stdint.h>
+#include <xcb/xcb.h>
+typedef struct xcb_connection_t xcb_connection_t;
+typedef struct xcb_extension_t xcb_extension_t;
+typedef struct xcb_generic_error_t xcb_generic_error_t;
+typedef uint32_t xcb_present_event_t, xcb_present_window_t;
+typedef uint32_t xcb_randr_crtc_t;
+typedef uint32_t xcb_xfixes_region_t;
+typedef uint32_t xcb_sync_fence_t;
+static xcb_extension_t xcb_present_id = { "Present", 0 };
+#ifndef PresentWindowDestroyed
+#define PresentWindowDestroyed 1u
+#endif
+#define XCB_PRESENT_CAPABILITY_NONE 0u
+#define XCB_PRESENT_CAPABILITY_ASYNC 1u
+#define XCB_PRESENT_CAPABILITY_FENCE 2u
+#define XCB_PRESENT_CAPABILITY_UST 4u
+#define XCB_PRESENT_CAPABILITY_SYNCOBJ 8u
+#define XCB_PRESENT_EVENT_MASK_NO_EVENT 0u
+#define XCB_PRESENT_EVENT_MASK_CONFIGURE_NOTIFY 1u
+#define XCB_PRESENT_EVENT_MASK_COMPLETE_NOTIFY 2u
+#define XCB_PRESENT_EVENT_MASK_IDLE_NOTIFY 4u
+#define XCB_PRESENT_CONFIGURE_NOTIFY 0
+#define XCB_PRESENT_EVENT_COMPLETE_NOTIFY 1
+#define XCB_PRESENT_EVENT_IDLE_NOTIFY 2
+#define XCB_PRESENT_COMPLETE_KIND_PIXMAP 0
+#define XCB_PRESENT_COMPLETE_KIND_NOTIFY_MSC 1
+#define XCB_PRESENT_COMPLETE_MODE_COPY 0
+#define XCB_PRESENT_COMPLETE_MODE_FLIP 1
+#define XCB_PRESENT_COMPLETE_MODE_SKIP 2
+#define XCB_PRESENT_COMPLETE_MODE_SUBOPTIMAL_COPY 3
+#define XCB_PRESENT_OPTION_NONE 0u
+#define XCB_PRESENT_OPTION_ASYNC 1u
+#define XCB_PRESENT_OPTION_COPY 2u
+#define XCB_PRESENT_OPTION_UST 4u
+#define XCB_PRESENT_OPTION_SUBOPTIMAL 8u
+typedef struct {
+  uint8_t response_type, extension;
+  uint16_t sequence;
+  uint32_t length;
+  uint16_t event_type;
+  uint16_t evtype;
+  xcb_present_event_t event;
+} xcb_present_generic_event_t;
+typedef struct {
+  uint8_t response_type, extension;
+  uint16_t sequence;
+  uint32_t length;
+  uint16_t event_type;
+  uint16_t pad0;
+  xcb_present_event_t event;
+  uint32_t window;
+  int16_t x, y;
+  uint16_t width, height;
+  int16_t off_x, off_y;
+  uint16_t pixmap_width, pixmap_height;
+  int32_t pixmap_flags;
+} xcb_present_configure_notify_event_t;
+typedef struct {
+  uint8_t response_type, extension;
+  uint16_t sequence;
+  uint32_t length;
+  uint16_t event_type;
+  uint16_t pad0;
+  xcb_present_event_t event;
+  uint32_t window;
+  uint32_t serial;
+  uint32_t pixmap;
+  uint32_t idle_fence;
+} xcb_present_idle_notify_event_t;
+typedef struct {
+  uint8_t response_type, extension;
+  uint16_t sequence;
+  uint32_t length;
+  uint16_t event_type;
+  uint8_t kind, mode;
+  xcb_present_event_t event;
+  uint32_t window;
+  uint32_t serial;
+  uint64_t ust;
+  uint64_t msc;
+  uint64_t sbc;
+} xcb_present_complete_notify_event_t;
+typedef struct { uint32_t sequence; } xcb_present_query_version_cookie_t, xcb_present_query_capabilities_cookie_t;
+typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_present_query_version_reply_t;
+typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, capabilities; } xcb_present_query_capabilities_reply_t;
+static inline xcb_present_query_version_cookie_t xcb_present_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_present_query_version_cookie_t ck = {0}; return ck; }
+static inline xcb_present_query_version_reply_t *xcb_present_query_version_reply(xcb_connection_t *c, xcb_present_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_present_query_version_reply_t *)0; }
+static inline xcb_present_query_capabilities_cookie_t xcb_present_query_capabilities(xcb_connection_t *c, uint32_t target) { (void)c; (void)target; xcb_present_query_capabilities_cookie_t ck = {0}; return ck; }
+static inline xcb_present_query_capabilities_reply_t *xcb_present_query_capabilities_reply(xcb_connection_t *c, xcb_present_query_capabilities_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_present_query_capabilities_reply_t *)0; }
+static inline xcb_void_cookie_t xcb_present_select_input_checked(xcb_connection_t *c, xcb_present_event_t eid, xcb_window_t w, uint32_t event_mask) {
+  (void)c; (void)eid; (void)w; (void)event_mask;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_present_select_input(xcb_connection_t *c, xcb_present_event_t eid, xcb_window_t w, uint32_t event_mask) {
+  return xcb_present_select_input_checked(c, eid, w, event_mask);
+}
+static inline xcb_void_cookie_t xcb_present_pixmap(xcb_connection_t *c, xcb_window_t window, xcb_pixmap_t pixmap, uint32_t serial, xcb_xfixes_region_t valid, xcb_xfixes_region_t update, int16_t x_off, int16_t y_off, xcb_randr_crtc_t target_crtc, xcb_sync_fence_t wait_fence, xcb_sync_fence_t idle_fence, uint32_t options, uint64_t target_msc, uint64_t divisor, uint64_t remainder, uint32_t notifies_len, const void *notifies) {
+  (void)c; (void)window; (void)pixmap; (void)serial; (void)valid; (void)update; (void)x_off; (void)y_off; (void)target_crtc; (void)wait_fence; (void)idle_fence; (void)options; (void)target_msc; (void)divisor; (void)remainder; (void)notifies_len; (void)notifies;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+static inline xcb_void_cookie_t xcb_present_pixmap_synced(xcb_connection_t *c, xcb_window_t window, xcb_pixmap_t pixmap, uint32_t serial, xcb_xfixes_region_t valid, xcb_xfixes_region_t update, int16_t x_off, int16_t y_off, xcb_randr_crtc_t target_crtc, uint32_t acquire_syncobj, uint32_t release_syncobj, uint64_t acquire_point, uint64_t release_point, uint32_t options, uint64_t target_msc, uint64_t divisor, uint64_t remainder, uint32_t notifies_len, const void *notifies) {
+  (void)c; (void)window; (void)pixmap; (void)serial; (void)valid; (void)update; (void)x_off; (void)y_off; (void)target_crtc; (void)acquire_syncobj; (void)release_syncobj; (void)acquire_point; (void)release_point; (void)options; (void)target_msc; (void)divisor; (void)remainder; (void)notifies_len; (void)notifies;
+  xcb_void_cookie_t ck = {0}; return ck;
+}
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/xcb/sync.h
+#ifndef __SHIM_XCB_SYNC_H__
+#define __SHIM_XCB_SYNC_H__
+#include <stdint.h>
+#include <xcb/xcb.h>
+typedef uint32_t xcb_sync_fence_t, xcb_sync_counter_t;
+static inline xcb_void_cookie_t xcb_sync_destroy_fence(xcb_connection_t *c, xcb_sync_fence_t fence) { (void)c; (void)fence; xcb_void_cookie_t ck = {0}; return ck; }
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/xcb/shm.h
+#ifndef __SHIM_XCB_SHM_H__
+#define __SHIM_XCB_SHM_H__
+#include <errno.h>
+#include <stdint.h>
+#include <xcb/xcb.h>
+typedef uint32_t xcb_shm_seg_t;
+static inline xcb_void_cookie_t xcb_shm_attach(xcb_connection_t *c, xcb_shm_seg_t s, uint32_t id, uint8_t ro) { (void)c; (void)s; (void)id; (void)ro; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_shm_attach_checked(xcb_connection_t *c, xcb_shm_seg_t s, uint32_t id, uint8_t ro) { (void)c; (void)s; (void)id; (void)ro; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_shm_create_pixmap_checked(xcb_connection_t *c, xcb_pixmap_t pid, xcb_drawable_t d, uint16_t w, uint16_t h, uint8_t depth, xcb_shm_seg_t s, uint32_t offset) { (void)c; (void)pid; (void)d; (void)w; (void)h; (void)depth; (void)s; (void)offset; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_shm_detach_checked(xcb_connection_t *c, xcb_shm_seg_t s) { (void)c; (void)s; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_shm_detach(xcb_connection_t *c, xcb_shm_seg_t s) { (void)c; (void)s; xcb_void_cookie_t ck = {0}; return ck; }
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/xcb/xfixes.h
+#ifndef __SHIM_XCB_XFIXES_H__
+#define __SHIM_XCB_XFIXES_H__
+#include <stdint.h>
+#include <xcb/xcb.h>
+typedef struct xcb_connection_t xcb_connection_t;
+typedef struct xcb_generic_error_t xcb_generic_error_t;
+#define XCB_XFIXES_MAJOR_VERSION 4
+#define XCB_XFIXES_MINOR_VERSION 0
+typedef uint32_t xcb_xfixes_region_t;
+typedef struct { uint32_t sequence; } xcb_xfixes_query_version_cookie_t;
+typedef struct { uint8_t response_type, pad0; uint16_t sequence; uint32_t length, major_version, minor_version; } xcb_xfixes_query_version_reply_t;
+static inline xcb_xfixes_query_version_cookie_t xcb_xfixes_query_version(xcb_connection_t *c, uint32_t ma, uint32_t mi) { (void)c; (void)ma; (void)mi; xcb_xfixes_query_version_cookie_t ck = {0}; return ck; }
+static inline xcb_xfixes_query_version_reply_t *xcb_xfixes_query_version_reply(xcb_connection_t *c, xcb_xfixes_query_version_cookie_t ck, xcb_generic_error_t **e) { (void)c; (void)ck; if (e) *e = (xcb_generic_error_t *)0; return (xcb_xfixes_query_version_reply_t *)0; }
+static inline xcb_void_cookie_t xcb_xfixes_create_region(xcb_connection_t *c, xcb_xfixes_region_t r, uint32_t rects_len, const xcb_rectangle_t *rects) { (void)c; (void)r; (void)rects_len; (void)rects; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_xfixes_set_region(xcb_connection_t *c, xcb_xfixes_region_t r, uint32_t rects_len, const xcb_rectangle_t *rects) { (void)c; (void)r; (void)rects_len; (void)rects; xcb_void_cookie_t ck = {0}; return ck; }
+static inline xcb_void_cookie_t xcb_xfixes_destroy_region(xcb_connection_t *c, xcb_xfixes_region_t r) { (void)c; (void)r; xcb_void_cookie_t ck = {0}; return ck; }
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/X11/Xlib.h
+#ifndef __SHIM_XLIB_H__
+#define __SHIM_XLIB_H__
+#include <stdint.h>
+#ifndef None
+#define None 0L
+#endif
+typedef struct _XDisplay Display;
+typedef unsigned long XID, Window, Drawable, VisualID;
+typedef int Status, Bool;
+#define True 1
+#define False 0
+#define BadRequest 1
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/X11/Xlibint.h
+#ifndef __SHIM_XLIBINT_H__
+#define __SHIM_XLIBINT_H__
+#include <X11/Xlib.h>
+typedef struct _XExtData { int number; struct _XExtData *next; int (*free_private)(struct _XExtData *extension); char *private_data; } _XExtData, XExtData;
+typedef struct _XLockPtrs { void (*lock_display)(Display *dpy); void (*unlock_display)(Display *dpy); } *_XLockPtrs;
+struct _XDisplay { XExtData *ext_data; int fd; _XLockPtrs lock_fns; };
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/X11/extensions/Xrandr.h
+#ifndef __SHIM_XRANDR_H__
+#define __SHIM_XRANDR_H__
+#include <X11/Xlib.h>
+typedef XID RROutput, RRCrtc, RRMode;
+#endif
+EOF
+
+  cat <<'EOF' > shims/include/X11/Xlib-xcb.h
+#ifndef __SHIM_XLIB_XCB_H__
+#define __SHIM_XLIB_XCB_H__
+#include <xcb/xcb.h>
+#include <X11/Xlib.h>
+static inline xcb_connection_t *XGetXCBConnection(Display *dpy) { (void)dpy; return (xcb_connection_t *)0; }
+#endif
+EOF
+fi
+
+TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+if [ -f android.toml ]; then
+  envsubst < android.toml > android-cross.txt
+else
+  cat <<EOF > android-cross.txt
+[binaries]
+c = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang'
+cpp = '$TOOLCHAIN_BIN/aarch64-linux-android30-clang++'
+ar = '$TOOLCHAIN_BIN/llvm-ar'
+strip = '$TOOLCHAIN_BIN/llvm-strip'
+pkg-config = 'pkg-config'
+
+[built-in options]
+c_args = ['-L$CLANG_LIB_DIR']
+cpp_args = ['-L$CLANG_LIB_DIR']
+c_link_args = ['-L$CLANG_LIB_DIR']
+cpp_link_args = ['-L$CLANG_LIB_DIR']
+
+[properties]
+needs_exe_wrapper = true
+
+[host_machine]
+system = 'android'
+cpu_family = 'aarch64'
+cpu = 'armv8-a'
+endian = 'little'
+EOF
+fi
+
+PLATFORMS="android"
+[ "$FLAVOR" = "x11" ] && PLATFORMS="android,x11"
+
+export PKG_CONFIG_LIBDIR="$WORKSPACE_DIR/shims"
+
+echo "=== [4/4] Configurando y compilando PanVK G52 ($FLAVOR) sobre ${MESA_REF} ==="
+rm -rf build
+meson setup build work/mesa \
+  --cross-file android-cross.txt \
+  -Dbuildtype=release \
+  -Dplatforms="$PLATFORMS" \
+  -Dandroid-stub=true \
+  -Dandroid-strict=false \
+  -Dandroid-libbacktrace=disabled \
+  -Dplatform-sdk-version=30 \
+  -Dglx=disabled \
+  -Dgbm=disabled \
+  -Degl=disabled \
+  -Dopengl=false \
+  -Dgles1=disabled \
+  -Dgles2=disabled \
+  -Dglvnd=disabled \
+  -Dvalgrind=disabled \
+  -Dgallium-drivers= \
+  -Dshared-glapi=disabled \
+  -Dzstd=disabled \
+  -Dmesa-clc=system \
+  -Dprecomp-compiler=system \
+  -Dvulkan-drivers=panfrost \
+  -Dllvm=disabled \
+  -Dpanfrost-kmds=kbase
+
+meson compile -C build
