@@ -71,39 +71,41 @@ jobs:
         run: |
           set -euo pipefail
 
-          ROOT_DIR="$PWD"
-          SO_PATH="$(find "$ROOT_DIR/build" -name 'libvulkan_panfrost.so' -type f | head -n 1)"
+          SO_PATH="$(find build -name 'libvulkan_panfrost.so' -type f | head -n 1)"
           if [ -z "$SO_PATH" ]; then
-            echo "ERROR: No se encontró libvulkan_panfrost.so en build/" >&2
+            echo "ERROR: No se encontro libvulkan_panfrost.so en build/" >&2
             exit 1
           fi
 
-          PKG_DIR="$ROOT_DIR/pkg_out_${FLAVOR}"
+          PKG_DIR="pkg_out_${FLAVOR}"
           ZIP_NAME="PanVK-G52-${PANVK_RELEASE}-${FLAVOR}.zip"
           MANIFEST_NAME="PanVK-G52-${PANVK_RELEASE}-${FLAVOR}-MANIFEST.txt"
 
-          rm -rf "$PKG_DIR" "$ROOT_DIR/$ZIP_NAME" "$ROOT_DIR/$MANIFEST_NAME" "$ROOT_DIR/SHA256SUMS.txt"
+          rm -rf "$PKG_DIR" "$ZIP_NAME" "$MANIFEST_NAME" SHA256SUMS.txt
           mkdir -p "$PKG_DIR"
 
           cp -f "$SO_PATH" "$PKG_DIR/libvulkan_panfrost.so"
           SO_SHA256="$(sha256sum "$PKG_DIR/libvulkan_panfrost.so" | awk '{print $1}')"
 
-          cat <<EOF > "$PKG_DIR/meta.json"
-          {
-            "schemaVersion": 1,
-            "name": "PanVK G52 (${FLAVOR})",
-            "description": "PanVK Mali-G52 (kbase) Vulkan driver (${FLAVOR}) built on ${MESA_REF}.",
-            "author": "PanVK / Mesa",
-            "packageVersion": "${PANVK_RELEASE}",
-            "vendor": "ARM Mali",
-            "driverVersion": "Mesa ${MESA_REF} / PanVK G52 ${PANVK_RELEASE}",
-            "minApi": 30,
-            "libraryName": "libvulkan_panfrost.so",
-            "sanitizedArtifactSha256": "${SO_SHA256}"
-          }
-          EOF
+          python3 -c '
+import json, os, sys
+meta = {
+    "schemaVersion": 1,
+    "name": f"PanVK G52 ({sys.argv[1]})",
+    "description": f"PanVK Mali-G52 (kbase) Vulkan driver ({sys.argv[1]}) built on {sys.argv[2]}.",
+    "author": "PanVK / Mesa",
+    "packageVersion": sys.argv[3],
+    "vendor": "ARM Mali",
+    "driverVersion": f"Mesa {sys.argv[2]} / PanVK G52 {sys.argv[3]}",
+    "minApi": 30,
+    "libraryName": "libvulkan_panfrost.so",
+    "sanitizedArtifactSha256": sys.argv[4],
+}
+with open(os.path.join(sys.argv[5], "meta.json"), "w", encoding="utf-8") as f:
+    json.dump(meta, f, indent=2)
+' "$FLAVOR" "$MESA_REF" "$PANVK_RELEASE" "$SO_SHA256" "$PKG_DIR"
 
-          (cd "$PKG_DIR" && zip -j "$ROOT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+          zip -j "$ZIP_NAME" "$PKG_DIR/libvulkan_panfrost.so" "$PKG_DIR/meta.json"
 
           {
             echo "Package: ${ZIP_NAME}"
@@ -113,14 +115,14 @@ jobs:
             echo "Source SO: ${SO_PATH}"
             echo "SO SHA256: ${SO_SHA256}"
             echo "--- ZIP Contents ---"
-            unzip -l "$ROOT_DIR/$ZIP_NAME"
-          } > "$ROOT_DIR/$MANIFEST_NAME"
+            unzip -l "$ZIP_NAME"
+          } > "$MANIFEST_NAME"
 
-          (cd "$ROOT_DIR" && sha256sum "$ZIP_NAME" "$MANIFEST_NAME" > SHA256SUMS.txt)
+          sha256sum "$ZIP_NAME" "$MANIFEST_NAME" > SHA256SUMS.txt
 
-          echo "=== Contenido exacto del ZIP ==="
-          unzip -l "$ROOT_DIR/$ZIP_NAME"
-          ls -lh "$ROOT_DIR/$ZIP_NAME" "$ROOT_DIR/$MANIFEST_NAME" "$ROOT_DIR/SHA256SUMS.txt"
+          echo "=== Contenido final del ZIP ==="
+          unzip -l "$ZIP_NAME"
+          ls -lh "$ZIP_NAME" "$MANIFEST_NAME" SHA256SUMS.txt
 
       - name: Upload packaged ZIP driver
         uses: actions/upload-artifact@v4
