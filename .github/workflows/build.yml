@@ -87,23 +87,27 @@ jobs:
           cp -f "$SO_PATH" "$PKG_DIR/libvulkan_panfrost.so"
           SO_SHA256="$(sha256sum "$PKG_DIR/libvulkan_panfrost.so" | awk '{print $1}')"
 
-          python3 -c '
-import json, os, sys
-meta = {
-    "schemaVersion": 1,
-    "name": f"PanVK G52 ({sys.argv[1]})",
-    "description": f"PanVK Mali-G52 (kbase) Vulkan driver ({sys.argv[1]}) built on {sys.argv[2]}.",
-    "author": "PanVK / Mesa",
-    "packageVersion": sys.argv[3],
-    "vendor": "ARM Mali",
-    "driverVersion": f"Mesa {sys.argv[2]} / PanVK G52 {sys.argv[3]}",
-    "minApi": 30,
-    "libraryName": "libvulkan_panfrost.so",
-    "sanitizedArtifactSha256": sys.argv[4],
-}
-with open(os.path.join(sys.argv[5], "meta.json"), "w", encoding="utf-8") as f:
-    json.dump(meta, f, indent=2)
-' "$FLAVOR" "$MESA_REF" "$PANVK_RELEASE" "$SO_SHA256" "$PKG_DIR"
+          python3 - <<'PY' "$FLAVOR" "$MESA_REF" "$PANVK_RELEASE" "$SO_SHA256" "$PKG_DIR"
+          import json
+          import os
+          import sys
+
+          flavor, mesa_ref, release, sha256, pkg_dir = sys.argv[1:6]
+          meta = {
+              "schemaVersion": 1,
+              "name": f"PanVK G52 ({flavor})",
+              "description": f"PanVK Mali-G52 (kbase) Vulkan driver ({flavor}) built on {mesa_ref}.",
+              "author": "PanVK / Mesa",
+              "packageVersion": release,
+              "vendor": "ARM Mali",
+              "driverVersion": f"Mesa {mesa_ref} / PanVK G52 {release}",
+              "minApi": 30,
+              "libraryName": "libvulkan_panfrost.so",
+              "sanitizedArtifactSha256": sha256,
+          }
+          with open(os.path.join(pkg_dir, "meta.json"), "w", encoding="utf-8") as f:
+              json.dump(meta, f, indent=2)
+          PY
 
           zip -j "$ZIP_NAME" "$PKG_DIR/libvulkan_panfrost.so" "$PKG_DIR/meta.json"
 
