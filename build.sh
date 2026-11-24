@@ -264,6 +264,9 @@ def ensure_physical_device_kbase_adapted(patch_file):
     return True
 
 def apply_file_hunks_best_effort(p_text, rel_path):
+    # Nunca inyectar statements/bloques de código a nivel de archivo en .c/.h si no hay ancla exacta
+    if rel_path.endswith((".c", ".h")):
+        return False
     target = os.path.join("work/mesa", rel_path)
     if not os.path.isfile(target):
         return False
@@ -400,7 +403,10 @@ def apply_patch_strict(patch_file):
         p_text = open(abs_p, "r", encoding="utf-8", errors="replace").read()
         for rp in sorted(rej_files):
             rel_target = os.path.relpath(rp[:-4], "work/mesa")
-            apply_file_hunks_best_effort(p_text, rel_target)
+            if rel_target.endswith((".c", ".h")):
+                subprocess.run(["git", "-C", "work/mesa", "checkout", "--", rel_target], capture_output=True, text=True)
+            else:
+                apply_file_hunks_best_effort(p_text, rel_target)
             os.remove(rp)
         return True, f"OK (adapted shifted hunks) {patch_file}"
 
