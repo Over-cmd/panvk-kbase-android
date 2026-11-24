@@ -30,6 +30,33 @@ import os
 import subprocess
 import sys
 
+def apply_patch_strict(patch_file):
+    abs_p = os.path.abspath(patch_file)
+    for extra_args in [["-C3"], ["--3way"]]:
+        res = subprocess.run(
+            ["git", "-C", "work/mesa", "apply", *extra_args, "--recount", "--whitespace=nowarn", abs_p],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode == 0:
+            return True, f"OK ({' '.join(extra_args)}) {patch_file}"
+
+    subprocess.run(["git", "-C", "work/mesa", "reset", "--merge"], capture_output=True, text=True)
+    res_rej = subprocess.run(
+        ["git", "-C", "work/mesa", "apply", "--reject", "--recount", "--whitespace=nowarn", abs_p],
+        capture_output=True,
+        text=True,
+    )
+    rej_files = []
+    for root, _, files in os.walk("work/mesa"):
+        for fn in files:
+            if fn.endswith(".rej"):
+                rej_files.append(os.path.join(root, fn))
+    for rp in sorted(rej_files):
+        with open(rp, "r", encoding="utf-8", errors="replace") as rf:
+            print(f"--- {rp} ---\n{rf.read()}", file=sys.stderr)
+    return False, f"ERROR aplicando {patch_file}:\n{res_rej.stderr}"
+
 patch_dir = "panvk-driver-patch"
 if os.path.isdir(patch_dir):
     print("Aplicando scripts y parches desde panvk-driver-patch/...")
@@ -55,15 +82,11 @@ if os.path.isdir(patch_dir):
         p_path = os.path.join(patch_dir, p_name)
         if not os.path.isfile(p_path):
             continue
-        res = subprocess.run(
-            ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p_path)],
-            capture_output=True,
-            text=True,
-        )
-        if res.returncode != 0:
-            print(f"ERROR aplicando {p_name}:\n{res.stderr}", file=sys.stderr)
+        ok, msg = apply_patch_strict(p_path)
+        if not ok:
+            print(msg, file=sys.stderr)
             sys.exit(1)
-        print(f"OK    {p_name}")
+        print(msg)
 elif os.path.isfile("profiles/g52-v7-jm.json"):
     with open("profiles/g52-v7-jm.json", "r", encoding="utf-8") as f:
         prof = json.load(f)
@@ -81,15 +104,11 @@ elif os.path.isfile("profiles/g52-v7-jm.json"):
             )
             print(f"FILES {fam}")
         for p in sorted(glob.glob(f"patches/{fam}/*.patch")):
-            res = subprocess.run(
-                ["git", "-C", "work/mesa", "apply", "--recount", "--whitespace=nowarn", os.path.abspath(p)],
-                capture_output=True,
-                text=True,
-            )
-            if res.returncode != 0:
-                print(f"ERROR aplicando {p}:\n{res.stderr}", file=sys.stderr)
+            ok, msg = apply_patch_strict(p)
+            if not ok:
+                print(msg, file=sys.stderr)
                 sys.exit(1)
-            print(f"OK    {p}")
+            print(msg)
 else:
     print("ERROR: No se encontró panvk-driver-patch/ ni profiles/g52-v7-jm.json", file=sys.stderr)
     sys.exit(1)
