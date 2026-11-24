@@ -39,12 +39,14 @@ jobs:
             build-essential cmake ninja-build llvm-21-dev libclang-21-dev \
             libclc-21-dev libllvmspirvlib-21-dev libelf-dev spirv-tools \
             bison flex libdrm-dev pkg-config gettext
-          SPIRV_PKGS=$(apt-cache search --names-only '^(lib)?spirv-(tools|headers)(-dev)?$' | awk '{print $1}' | tr '\n' ' ')
+          SPIRV_PKGS=$(apt-cache search --names-only '^(lib)?spirv-(tools\vert{}headers)(-dev)?$' | awk '{print $1}' | tr '\n' ' ')
           [ -n "$SPIRV_PKGS" ] && sudo apt-get install -y --no-install-recommends $SPIRV_PKGS || true
           python -m pip install --upgrade pip
           pip install mako PyYAML meson ninja packaging
+
       - name: Fetch Mesa 26.3.0
         run: |
+          rm -rf work/mesa
           mkdir -p work/mesa
           curl -fSL --retry 5 --retry-delay 5 \
             "https://gitlab.freedesktop.org/mesa/mesa/-/archive/${MESA_REF}/mesa-${MESA_REF}.tar.gz" \
@@ -54,15 +56,19 @@ jobs:
           git -C work/mesa config user.name "CI"
           git -C work/mesa add -A
           git -C work/mesa commit -q -m "Mesa ${MESA_REF}"
+          git -C work/mesa tag -f "${MESA_REF}"
+
       - name: Build PanVK G52
         env:
           FLAVOR: ${{ matrix.flavor }}
         run: |
           chmod +x build.sh
           ./build.sh "$FLAVOR"
+
       - name: Package driver
         run: |
           ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
+
       - name: Upload packaged ZIP driver
         uses: actions/upload-artifact@v4
         with:
