@@ -9,41 +9,43 @@ cd "$WORKSPACE_DIR"
 
 : "${PANVK_RELEASE:=0.0.2-alpha-G52}"
 : "${PANVK_PROFILE:=g52-v7-jm}"
+: "${MESA_REF:=mesa-26.3.0}"
 
 LOCKED_COMMIT=""
+LOCKED_REPO="https://gitlab.freedesktop.org/mesa/mesa.git"
 if [ -f "sources.lock" ]; then
   LOCKED_COMMIT="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaCommit',''))" 2>/dev/null || true)"
+  PARSED_REPO="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaRepo',''))" 2>/dev/null || true)"
+  [ -n "$PARSED_REPO" ] && LOCKED_REPO="${PARSED_REPO%.git}"
+fi
+TARGET_REF="${LOCKED_COMMIT:-$MESA_REF}"
+
+echo "=== [1/4] Preparando work/mesa (${TARGET_REF}) y aplicando parches ==="
+NEED_FETCH=0
+if [ ! -d "work/mesa/.git" ]; then
+  NEED_FETCH=1
+elif [ -n "$LOCKED_COMMIT" ]; then
+  CUR_HEAD="$(git -C work/mesa rev-parse HEAD 2>/dev/null || true)"
+  if [ "$CUR_HEAD" != "$LOCKED_COMMIT" ]; then
+    NEED_FETCH=1
+  fi
 fi
 
-echo "=== [1/4] Obteniendo Mesa del repositorio (${LOCKED_COMMIT:-sources.lock}) y aplicando parches ==="
-if [ -x "./scripts/fetch-mesa.sh" ] || [ -f "./scripts/fetch-mesa.sh" ]; then
-  set +e
-  if [ -x "./scripts/fetch-mesa.sh" ]; then
-    ./scripts/fetch-mesa.sh
-    FETCH_RC=$?
-  else
-    bash ./scripts/fetch-mesa.sh
-    FETCH_RC=$?
-  fi
-  set -e
-
-  if [ "$FETCH_RC" -ne 0 ]; then
-    if [ -d "work/mesa/.git" ] && [ -n "$LOCKED_COMMIT" ] && git -C work/mesa rev-parse --verify --quiet "${LOCKED_COMMIT}^{commit}" >/dev/null 2>&1; then
-      echo "fetch-mesa.sh falló por remoto/estado previo; sincronizando work/mesa al commit fijado ${LOCKED_COMMIT}..."
-      git -C work/mesa checkout -f "$LOCKED_COMMIT"
-      git -C work/mesa reset --hard "$LOCKED_COMMIT"
-      git -C work/mesa clean -fdx
-    else
-      exit "$FETCH_RC"
-    fi
-  fi
-elif [ -d "work/mesa/.git" ] && [ -n "$LOCKED_COMMIT" ]; then
-  git -C work/mesa checkout -f "$LOCKED_COMMIT"
-  git -C work/mesa reset --hard "$LOCKED_COMMIT"
-  git -C work/mesa clean -fdx
+if [ "$NEED_FETCH" -eq 1 ]; then
+  rm -rf work/mesa
+  mkdir -p work/mesa
+  curl -fSL --retry 5 --retry-delay 5 \
+    "${LOCKED_REPO}/-/archive/${TARGET_REF}/mesa-${TARGET_REF}.tar.gz" \
+    | tar -xz --strip-components=1 -C work/mesa
+  git -C work/mesa init -q
+  git -C work/mesa config user.email "ci@local"
+  git -C work/mesa config user.name "CI"
+  git -C work/mesa add -A
+  git -C work/mesa commit -q -m "Mesa ${TARGET_REF}"
+  git -C work/mesa tag -f "${TARGET_REF}"
 else
-  echo "ERROR: No se encontró ./scripts/fetch-mesa.sh ni work/mesa preparado con sources.lock." >&2
-  exit 1
+  git -C work/mesa reset --hard HEAD
+  git -C work/mesa clean -fdx
 fi
 
 set +e
