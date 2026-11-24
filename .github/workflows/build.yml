@@ -68,12 +68,10 @@ jobs:
 
       - name: Diagnose jm-v7/002 in panvk_physical_device.c
         run: |
-          echo "=== panvk_physical_device_init_kbase ==="
-          grep -n -A 35 "panvk_physical_device_init_kbase(" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || true
-          echo "=== Buscando PAN_I_WANT_A_BROKEN_VULKAN_DRIVER o case 7: ==="
-          grep -n -C 15 "PAN_I_WANT_A_BROKEN_VULKAN_DRIVER" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || true
-          echo "=== Líneas 1370 a 1430 de panvk_physical_device.c ==="
-          nl -ba work/mesa/src/panfrost/vulkan/panvk_physical_device.c | sed -n '1370,1430p' || true
+          echo "=== Buscando not well-tested o case 7 o kbase init ==="
+          grep -n -C 15 -E "not well-tested|case 7:|init_kbase|kbase" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || true
+          echo "=== Líneas 380 a 450 de panvk_physical_device.c ==="
+          nl -ba work/mesa/src/panfrost/vulkan/panvk_physical_device.c | sed -n '380,450p' || true
 
       - name: Apply patches for Mali-G52
         run: |
