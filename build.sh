@@ -143,6 +143,25 @@ if os.path.exists(kbase_src):
     with open(kbase_src, "r", encoding="utf-8", errors="replace") as ks:
         kbase_c = ks.read()
 
+    # 1. Fix pan_kmod_dev_init calls with 6 args (Mesa 26.3 expects 7 args including sync_ops)
+    def fix_dev_init_call(match):
+        full = match.group(0)
+        inner = match.group(1)
+        depth = 0
+        commas = 0
+        for ch in inner:
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                commas += 1
+        if commas == 5:
+            return f"pan_kmod_dev_init({inner}, NULL)"
+        return full
+
+    kbase_c = re.sub(r"pan_kmod_dev_init\s*\(([^;]+?)\)\s*;", lambda m: fix_dev_init_call(m) + ";", kbase_c, flags=re.DOTALL)
+
     drv_match = re.search(
         r"(?:static\s+)?(?:const\s+)?struct\s+pan_kmod_driver\s+([A-Za-z0-9_]+)\s*(?:=|;)",
         kbase_c,
@@ -162,20 +181,24 @@ if os.path.exists(kbase_src):
     has_bo_import_fd = bool(re.search(r"\bkbase_kmod_bo_import_fd\s*\(", kbase_c))
     has_bo_import = bool(re.search(r"\bkbase_kmod_bo_import\s*\(", kbase_c))
     has_bo_export_fd = bool(re.search(r"\bkbase_kmod_bo_export_fd\s*\(", kbase_c))
-    has_bo_get_mmap_off = bool(re.search(r"\bkbase_kmod_bo_get_mmap_offset\s*\(", kbase_c))
     has_bo_munmap = bool(re.search(r"\bkbase_kmod_bo_munmap\s*\(", kbase_c))
+
+    # Extract exact return type & params of kbase_kmod_bo_get_mmap_offset if defined
+    mmap_off_def = re.search(
+        r"((?:static\s+)?[A-Za-z0-9_*\s]+?)\s+kbase_kmod_bo_get_mmap_offset\s*\(([^)]*)\)",
+        kbase_c,
+    )
 
     kbase_c = re.sub(r"(\.dev_create\s*=\s*)kbase_kmod_dev_create\b", r"\1kbase_kmod_dev_create_ops", kbase_c)
     if has_bo_import_fd:
         kbase_c = re.sub(r"\.bo_import_fd\s*=\s*kbase_kmod_bo_import_fd\b", r".bo_import = kbase_kmod_bo_import_fd_ops", kbase_c)
-    elif has_bo_import:
+    if has_bo_import:
         kbase_c = re.sub(r"(\.bo_import\s*=\s*)kbase_kmod_bo_import\b", r"\1kbase_kmod_bo_import_ops", kbase_c)
     if has_bo_export_fd:
         kbase_c = re.sub(r"\.bo_export_fd\s*=\s*kbase_kmod_bo_export_fd\b", r".bo_export = kbase_kmod_bo_export_fd_ops", kbase_c)
     if has_bo_munmap:
         kbase_c = re.sub(r"(\.bo_munmap\s*=\s*)kbase_kmod_bo_munmap\b", r"\1kbase_kmod_bo_munmap_ops", kbase_c)
-    if has_bo_get_mmap_off:
-        kbase_c = re.sub(r"^\s*\.bo_get_mmap_offset\s*=\s*kbase_kmod_bo_get_mmap_offset,?\s*\n", "", kbase_c, flags=re.MULTILINE)
+    kbase_c = re.sub(r"^\s*\.bo_get_mmap_offset\s*=\s*kbase_kmod_bo_get_mmap_offset,?\s*\n", "", kbase_c, flags=re.MULTILINE)
 
     shim_lines = [
         "/* __KBASE_OPS_SHIM_START__ */",
@@ -209,14 +232,16 @@ if os.path.exists(kbase_src):
             "static int kbase_kmod_bo_export_fd_ops(struct pan_kmod_bo *bo)\n"
             "{ return kbase_kmod_bo_export_fd(bo); }"
         )
-    if has_bo_get_mmap_off:
-        shim_lines.append("static uint64_t kbase_kmod_bo_get_mmap_offset(struct pan_kmod_bo *bo);")
+    if mmap_off_def:
+        ret_t = mmap_off_def.group(1).strip()
+        if not ret_t.startswith("static"):
+            ret_t = "static " + ret_t
+        shim_lines.append(f"{ret_t} kbase_kmod_bo_get_mmap_offset({mmap_off_def.group(2)});")
     if has_bo_munmap:
         shim_lines.append("static int kbase_kmod_bo_munmap(struct pan_kmod_bo *bo, void *host_addr, size_t size);")
-        extra_call = " (void)kbase_kmod_bo_get_mmap_offset(bo);" if has_bo_get_mmap_off else ""
         shim_lines.append(
             "static int kbase_kmod_bo_munmap_ops(struct pan_kmod_bo *bo, void *host_addr, size_t size)\n"
-            f"{{{extra_call} return kbase_kmod_bo_munmap(bo, host_addr, size); }}"
+            "{ return kbase_kmod_bo_munmap(bo, host_addr, size); }"
         )
 
     shim_lines.append("/* __KBASE_OPS_SHIM_END__ */")
