@@ -9,15 +9,24 @@ cd "$WORKSPACE_DIR"
 
 : "${PANVK_RELEASE:=0.0.2-alpha-G52}"
 : "${PANVK_PROFILE:=g52-v7-jm}"
+: "${MESA_REF:=mesa-26.3.0}"
 
-echo "=== [1/4] Obteniendo Mesa y aplicando parches desde scripts/ ==="
-if [ -x "./scripts/fetch-mesa.sh" ]; then
-  ./scripts/fetch-mesa.sh
-elif [ -f "./scripts/fetch-mesa.sh" ]; then
-  bash ./scripts/fetch-mesa.sh
+echo "=== [1/4] Preparando work/mesa y aplicando parches ==="
+if [ -d "work/mesa/.git" ]; then
+  git -C work/mesa reset --hard HEAD
+  git -C work/mesa clean -fdx
 else
-  echo "ERROR: No se encontró ./scripts/fetch-mesa.sh" >&2
-  exit 1
+  rm -rf work/mesa
+  mkdir -p work/mesa
+  curl -fSL --retry 5 --retry-delay 5 \
+    "https://gitlab.freedesktop.org/mesa/mesa/-/archive/${MESA_REF}/mesa-${MESA_REF}.tar.gz" \
+    | tar -xz --strip-components=1 -C work/mesa
+  git -C work/mesa init -q
+  git -C work/mesa config user.email "ci@local"
+  git -C work/mesa config user.name "CI"
+  git -C work/mesa add -A
+  git -C work/mesa commit -q -m "Mesa ${MESA_REF}"
+  git -C work/mesa tag -f "${MESA_REF}"
 fi
 
 if [ -x "./scripts/apply-patches.sh" ]; then
@@ -68,7 +77,7 @@ fi
 export MESON_WORKING_DIR="$WORKSPACE_DIR"
 CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
 [ -z "$CLANG_DIR" ] && CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
-export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/20/lib/linux/aarch64}"
+export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/21/lib/linux/aarch64}"
 echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
 
 unset CPATH LIBRARY_PATH CMAKE_PREFIX_PATH PKG_CONFIG_PATH
