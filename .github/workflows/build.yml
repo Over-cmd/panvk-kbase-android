@@ -55,9 +55,8 @@ jobs:
       - name: Verify sources.lock and profile
         run: |
           python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
-          echo "=== Buscando perfil ${PROFILE} ==="
-          ls -la profiles/ 2>/dev/null || true
-          find profiles/ -maxdepth 3 -iname "*g52*" -o -iname "*v7*" 2>/dev/null || true
+          echo "=== Perfil ${PROFILE}.json ==="
+          cat "profiles/${PROFILE}.json" 2>/dev/null || true
 
       - name: Fetch Mesa
         run: |
@@ -67,14 +66,12 @@ jobs:
         run: |
           ./scripts/apply-patches.sh --profile "${PROFILE}" || true
 
-      - name: Diagnose jm-v7/003 in kbase_kmod.c
+      - name: Diagnose hunk 2 of jm-v7/003 in kbase_kmod.c
         run: |
-          echo "=== Buscando kbase_kmod.c ==="
-          find work/mesa -name "kbase_kmod.c" 2>/dev/null || true
-          echo "=== KBASE_IOCTL_MEM_JIT_INIT ==="
-          grep -n -C 15 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c 2>/dev/null || true
-          echo "=== KBASE_JM_MEM_TILER_ALIGN_TOP ==="
-          grep -n -C 15 "KBASE_JM_MEM_TILER_ALIGN_TOP" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c 2>/dev/null || true
+          echo "=== kbase_kmod_bo_alloc en kbase_kmod.c ==="
+          grep -n -A 45 "kbase_kmod_bo_alloc(" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c 2>/dev/null || true
+          echo "=== Buscando extension o commit_pages en kbase_kmod.c ==="
+          grep -n -C 15 -E "commit_pages|ALLOC_ON_FAULT|TILER_ALIGN" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c 2>/dev/null || true
 
       - name: Build Android driver for AArch64 (LLVM 21)
         env:
