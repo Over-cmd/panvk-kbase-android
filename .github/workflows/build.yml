@@ -85,23 +85,25 @@ jobs:
           rm -rf "$PKG_DIR" "$ROOT_DIR/$ZIP_NAME" "$ROOT_DIR/$MANIFEST_NAME" "$ROOT_DIR/SHA256SUMS.txt"
           mkdir -p "$PKG_DIR"
 
-          cp "$SO_PATH" "$PKG_DIR/libvulkan_panfrost.so"
+          cp -f "$SO_PATH" "$PKG_DIR/libvulkan_panfrost.so"
+          SO_SHA256="$(sha256sum "$PKG_DIR/libvulkan_panfrost.so" | awk '{print $1}')"
 
           cat <<EOF > "$PKG_DIR/meta.json"
-          {
-            "schemaVersion": 1,
-            "name": "PanVK G52 (${FLAVOR})",
-            "description": "PanVK Mali-G52 (kbase) Vulkan driver (${FLAVOR})",
-            "author": "PanVK / Mesa",
-            "packageVersion": "${PANVK_RELEASE}",
-            "vendor": "ARM Mali",
-            "driverVersion": "${PANVK_RELEASE}",
-            "minApi": 30,
-            "libraryName": "libvulkan_panfrost.so"
-          }
-          EOF
+{
+  "schemaVersion": 1,
+  "name": "PanVK G52 (${FLAVOR})",
+  "description": "PanVK Mali-G52 (kbase) Vulkan driver (${FLAVOR}) built on ${MESA_REF}.",
+  "author": "PanVK / Mesa",
+  "packageVersion": "${PANVK_RELEASE}",
+  "vendor": "ARM Mali",
+  "driverVersion": "Mesa ${MESA_REF} / PanVK G52 ${PANVK_RELEASE}",
+  "minApi": 30,
+  "libraryName": "libvulkan_panfrost.so",
+  "sanitizedArtifactSha256": "${SO_SHA256}"
+}
+EOF
 
-          (cd "$PKG_DIR" && zip -r "$ROOT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+          (cd "$PKG_DIR" && zip -j "$ROOT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
 
           {
             echo "Package: ${ZIP_NAME}"
@@ -109,16 +111,14 @@ jobs:
             echo "Flavor: ${FLAVOR}"
             echo "Mesa Ref: ${MESA_REF}"
             echo "Source SO: ${SO_PATH}"
-            echo "--- Contents ---"
+            echo "SO SHA256: ${SO_SHA256}"
+            echo "--- ZIP Contents ---"
             unzip -l "$ROOT_DIR/$ZIP_NAME"
           } > "$ROOT_DIR/$MANIFEST_NAME"
 
           (cd "$ROOT_DIR" && sha256sum "$ZIP_NAME" "$MANIFEST_NAME" > SHA256SUMS.txt)
 
-          # Meter MANIFEST y SHA256SUMS también dentro del ZIP si lo deseas
-          (cd "$ROOT_DIR" && zip -j "$ZIP_NAME" "$MANIFEST_NAME" SHA256SUMS.txt)
-
-          echo "=== Contenido final del ZIP ==="
+          echo "=== Contenido exacto del ZIP ==="
           unzip -l "$ROOT_DIR/$ZIP_NAME"
           ls -lh "$ROOT_DIR/$ZIP_NAME" "$ROOT_DIR/$MANIFEST_NAME" "$ROOT_DIR/SHA256SUMS.txt"
 
