@@ -1,4 +1,4 @@
-name: Build PanVK Mali-G52
+name: Build PanVK Mali-G52 (Mesa devel)
 
 on:
   push:
@@ -9,10 +9,11 @@ on:
 env:
   # Versión del paquete; también se muestra como el nombre del controlador en DXVK HUD / MangoHud.
   PANVK_RELEASE: "0.0.2-alpha-G52"
+  MESA_REF: "main"
 
 jobs:
   build-panvk-android:
-    name: Build PanVK G52 (${{ matrix.flavor }})
+    name: Build PanVK G52 devel (${{ matrix.flavor }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -54,12 +55,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install mako PyYAML meson ninja packaging
 
-      - name: Verify sources.lock
+      - name: Fetch Mesa devel (main)
         run: |
-          python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
-
-      - name: Fetch pinned Mesa
-        run: ./scripts/fetch-mesa.sh
+          rm -rf work/mesa
+          mkdir -p work/mesa
+          curl -fSL --retry 5 --retry-delay 5 \
+            "https://gitlab.freedesktop.org/mesa/mesa/-/archive/${MESA_REF}/mesa-${MESA_REF}.tar.gz" \
+            | tar -xz --strip-components=1 -C work/mesa
+          git -C work/mesa init -q
+          git -C work/mesa config user.email "ci@local"
+          git -C work/mesa config user.name "CI"
+          git -C work/mesa add -A
+          git -C work/mesa commit -q -m "Mesa ${MESA_REF}"
+          git -C work/mesa tag -f "${MESA_REF}"
 
       - name: Apply PanVK G52 Patches
         run: ./scripts/apply-patches.sh --profile g52-v7-jm
