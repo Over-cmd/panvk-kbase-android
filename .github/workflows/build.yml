@@ -14,7 +14,7 @@ env:
 
 jobs:
   build-panvk-g52:
-    name: Build PanVK Mali-G52 (${{ env.PROFILE }})
+    name: Build PanVK Mali-G52 (g52-v7-jm)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -87,7 +87,7 @@ jobs:
       - name: Upload .adpkg and driver artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: panvk-${{ env.PROFILE }}-aarch64-adpkg
+          name: panvk-g52-v7-jm-aarch64-adpkg
           path: |
             dist/**/*.adpkg
             dist/android-${{ env.PROFILE }}/libvulkan_panfrost.so
