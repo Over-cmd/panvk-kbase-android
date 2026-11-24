@@ -173,7 +173,7 @@ if os.path.exists(kbase_src):
     if has_bo_export_fd:
         kbase_c = re.sub(r"\.bo_export_fd\s*=\s*kbase_kmod_bo_export_fd\b", r".bo_export = kbase_kmod_bo_export_fd_ops", kbase_c)
     if has_bo_munmap:
-        kbase_c = re.sub(r"\.bo_munmap\s*=\s*kbase_kmod_bo_munmap\b", r".bo_mmap = kbase_kmod_bo_munmap_ops", kbase_c)
+        kbase_c = re.sub(r"(\.bo_munmap\s*=\s*)kbase_kmod_bo_munmap\b", r"\1kbase_kmod_bo_munmap_ops", kbase_c)
     if has_bo_get_mmap_off:
         kbase_c = re.sub(r"^\s*\.bo_get_mmap_offset\s*=\s*kbase_kmod_bo_get_mmap_offset,?\s*\n", "", kbase_c, flags=re.MULTILINE)
 
@@ -215,8 +215,8 @@ if os.path.exists(kbase_src):
         shim_lines.append("static int kbase_kmod_bo_munmap(struct pan_kmod_bo *bo, void *host_addr, size_t size);")
         extra_call = " (void)kbase_kmod_bo_get_mmap_offset(bo);" if has_bo_get_mmap_off else ""
         shim_lines.append(
-            "static void *kbase_kmod_bo_munmap_ops(struct pan_kmod_bo *bo, int prot, int flags, void *host_addr)\n"
-            f"{{ (void)prot; (void)flags;{extra_call} if (host_addr) kbase_kmod_bo_munmap(bo, host_addr, 0); return NULL; }}"
+            "static int kbase_kmod_bo_munmap_ops(struct pan_kmod_bo *bo, void *host_addr, size_t size)\n"
+            f"{{{extra_call} return kbase_kmod_bo_munmap(bo, host_addr, size); }}"
         )
 
     shim_lines.append("/* __KBASE_OPS_SHIM_END__ */")
