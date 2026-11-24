@@ -230,6 +230,22 @@ if os.path.exists(kbase_src):
 
     with open(kbase_src, "w", encoding="utf-8") as ks:
         ks.write(kbase_c)
+
+kmod_h = "work/mesa/src/panfrost/lib/kmod/pan_kmod.h"
+if os.path.exists(kmod_h):
+    with open(kmod_h, "r", encoding="utf-8", errors="replace") as kh:
+        hcontent = kh.read()
+    if "struct pan_kmod_ops" in hcontent:
+        ops_body = hcontent.split("struct pan_kmod_ops", 1)[1].split("};", 1)[0]
+        if "bo_munmap" not in ops_body:
+            hcontent = re.sub(
+                r"(struct pan_kmod_ops\s*\{)",
+                r"\1\n\tint (*bo_munmap)(struct pan_kmod_bo *bo, void *host_addr, size_t size);",
+                hcontent,
+                count=1,
+            )
+            with open(kmod_h, "w", encoding="utf-8") as kh:
+                kh.write(hcontent)
 PY
 
 phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
