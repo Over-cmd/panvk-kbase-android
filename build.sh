@@ -143,24 +143,37 @@ if os.path.exists(kbase_src):
     with open(kbase_src, "r", encoding="utf-8", errors="replace") as ks:
         kbase_c = ks.read()
 
-    # 1. Fix pan_kmod_dev_init calls with 6 args (Mesa 26.3 expects 7 args including sync_ops)
+    # 1. Fix pan_kmod_dev_init argument order (allocator, ops, ...) and 7th arg (sync_ops) in Mesa 26.3
     def fix_dev_init_call(match):
-        full = match.group(0)
-        inner = match.group(1)
+        inner = match.group(1).strip()
+
+        args = []
         depth = 0
-        commas = 0
-        for ch in inner:
+        start = 0
+        for idx, ch in enumerate(inner):
             if ch in "([{":
                 depth += 1
             elif ch in ")]}":
                 depth -= 1
             elif ch == "," and depth == 0:
-                commas += 1
-        if commas == 5:
-            return f"pan_kmod_dev_init({inner}, NULL)"
-        return full
+                args.append(inner[start:idx].strip())
+                start = idx + 1
+        args.append(inner[start:].strip())
 
-    kbase_c = re.sub(r"pan_kmod_dev_init\s*\(([^;]+?)\)\s*;", lambda m: fix_dev_init_call(m) + ";", kbase_c, flags=re.DOTALL)
+        if len(args) >= 2 and "ops" in args[0] and "allocator" in args[1]:
+            args[0], args[1] = args[1], args[0]
+
+        if len(args) == 6:
+            args.append("NULL")
+
+        return f"pan_kmod_dev_init({', '.join(args)})"
+
+    kbase_c = re.sub(
+        r"pan_kmod_dev_init\s*\(([^;]+?)\)\s*;",
+        lambda m: fix_dev_init_call(m) + ";",
+        kbase_c,
+        flags=re.DOTALL,
+    )
 
     drv_match = re.search(
         r"(?:static\s+)?(?:const\s+)?struct\s+pan_kmod_driver\s+([A-Za-z0-9_]+)\s*(?:=|;)",
