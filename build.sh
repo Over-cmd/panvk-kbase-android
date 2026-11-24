@@ -167,24 +167,76 @@ if os.path.exists(kbase_src):
         kbase_c,
     )
     drv_name = drv_match.group(1) if drv_match else "kbase_drv"
-
     if not re.search(rf"\b{re.escape(drv_name)}\s*=", kbase_c):
         kbase_c += f"\nstatic const struct pan_kmod_driver {drv_name} = {{0}};\n"
 
+    # Limpiar wrappers previos si existieran para re-aplicar de forma limpia
     kbase_c = re.sub(
-        r"kbase_kmod_dev_create\s*\(\s*fd\s*,\s*flags\s*,\s*&kbase_drv\s*,\s*allocator\s*\)",
-        f"kbase_kmod_dev_create(fd, flags, &{drv_name}, allocator)",
+        r"/\* __KBASE_OPS_SHIM_START__ \*/.*?/\* __KBASE_OPS_SHIM_END__ \*/\n?",
+        "",
         kbase_c,
+        flags=re.DOTALL,
     )
 
-    target_ops = "kbase_kmod_dev_create_ops("
-    idx_ops = kbase_c.find(target_ops)
-    if idx_ops != -1:
-        fn_start = kbase_c.rfind("\nstatic ", 0, idx_ops)
-        insert_pos = fn_start + 1 if fn_start != -1 else idx_ops
-        decl_line = f"extern const struct pan_kmod_driver {drv_name};\n"
-        if decl_line not in kbase_c[:idx_ops]:
-            kbase_c = kbase_c[:insert_pos] + decl_line + kbase_c[insert_pos:]
+    # Ajustar designadores dentro de struct pan_kmod_ops
+    kbase_c = re.sub(r"(\.dev_create\s*=\s*)kbase_kmod_dev_create\b", r"\1kbase_kmod_dev_create_ops", kbase_c)
+    kbase_c = re.sub(r"(\.bo_import\s*=\s*)kbase_kmod_bo_import\b", r"\1kbase_kmod_bo_import_ops", kbase_c)
+    kbase_c = re.sub(r"\.bo_import_fd\s*=\s*([A-Za-z0-9_]+)", r".bo_import = \1", kbase_c)
+    kbase_c = re.sub(r"\.bo_export_fd\s*=\s*([A-Za-z0-9_]+)", r".bo_export = \1", kbase_c)
+    kbase_c = re.sub(r"\.bo_munmap\s*=\s*([A-Za-z0-9_]+)", r".bo_mmap = \1", kbase_c)
+    kbase_c = re.sub(r"^\s*\.bo_get_mmap_offset\s*=\s*[^,\n}]+,?\s*\n", "", kbase_c, flags=re.MULTILINE)
+
+    # Detectar nombres reales de funciones en el archivo para evitar errores de declaración
+    has_dev_create = bool(re.search(r"\bkbase_kmod_dev_create\s*\(", kbase_c))
+    has_bo_import = bool(re.search(r"\bkbase_kmod_bo_import\s*\(", kbase_c))
+    has_bo_import_fd = bool(re.search(r"\bkbase_kmod_bo_import_fd\s*\(", kbase_c))
+    has_bo_export_fd = bool(re.search(r"\bkbase_kmod_bo_export_fd\s*\(", kbase_c))
+    has_bo_munmap = bool(re.search(r"\bkbase_kmod_bo_munmap\s*\(", kbase_c))
+
+    shim_lines = ["/* __KBASE_OPS_SHIM_START__ */", "struct pan_kmod_driver;", "struct pan_kmod_allocator;", "struct pan_kmod_dev;", "struct pan_kmod_bo;"]
+    if has_dev_create:
+        shim_lines.append(f"extern const struct pan_kmod_driver {drv_name};")
+        shim_lines.append("static struct pan_kmod_dev *kbase_kmod_dev_create(int fd, uint32_t flags, const struct pan_kmod_driver *driver, const struct pan_kmod_allocator *allocator);")
+        shim_lines.append(
+            f"static struct pan_kmod_dev *kbase_kmod_dev_create_ops(int fd, uint32_t flags, const struct pan_kmod_allocator *allocator)\n"
+            f"{{ return kbase_kmod_dev_create(fd, flags, &{drv_name}, allocator); }}"
+        )
+    if has_bo_import:
+        shim_lines.append("static struct pan_kmod_bo *kbase_kmod_bo_import(struct pan_kmod_dev *dev, uint32_t handle, uint64_t size);")
+        shim_lines.append(
+            "static struct pan_kmod_bo *kbase_kmod_bo_import_ops(struct pan_kmod_dev *dev, int fd)\n"
+            "{ return kbase_kmod_bo_import(dev, (uint32_t)fd, 0); }"
+        )
+    if has_bo_import_fd:
+        shim_lines.append("static struct pan_kmod_bo *kbase_kmod_bo_import_fd(struct pan_kmod_dev *dev, int fd, uint64_t size);")
+        shim_lines.append(
+            "static struct pan_kmod_bo *kbase_kmod_bo_import_fd_ops(struct pan_kmod_dev *dev, int fd)\n"
+            "{ return kbase_kmod_bo_import_fd(dev, fd, 0); }"
+        )
+        kbase_c = re.sub(r"(\.bo_import\s*=\s*)kbase_kmod_bo_import_fd\b", r"\1kbase_kmod_bo_import_fd_ops", kbase_c)
+    if has_bo_export_fd:
+        shim_lines.append("static int kbase_kmod_bo_export_fd(struct pan_kmod_bo *bo);")
+        shim_lines.append(
+            "static int kbase_kmod_bo_export_fd_ops(struct pan_kmod_bo *bo)\n"
+            "{ return kbase_kmod_bo_export_fd(bo); }"
+        )
+        kbase_c = re.sub(r"(\.bo_export\s*=\s*)kbase_kmod_bo_export_fd\b", r"\1kbase_kmod_bo_export_fd_ops", kbase_c)
+    if has_bo_munmap:
+        shim_lines.append("static int kbase_kmod_bo_munmap(struct pan_kmod_bo *bo, void *host_addr, size_t size);")
+        shim_lines.append(
+            "static void *kbase_kmod_bo_munmap_ops(struct pan_kmod_bo *bo, int prot, int flags, void *host_addr)\n"
+            "{ (void)prot; (void)flags; kbase_kmod_bo_munmap(bo, host_addr, 0); return NULL; }"
+        )
+        kbase_c = re.sub(r"(\.bo_mmap\s*=\s*)kbase_kmod_bo_munmap\b", r"\1kbase_kmod_bo_munmap_ops", kbase_c)
+
+    shim_lines.append("/* __KBASE_OPS_SHIM_END__ */")
+    shim_code = "\n".join(shim_lines) + "\n\n"
+
+    ops_struct_pos = kbase_c.rfind("struct pan_kmod_ops")
+    if ops_struct_pos != -1:
+        line_start = kbase_c.rfind("\n", 0, ops_struct_pos)
+        insert_at = line_start + 1 if line_start != -1 else ops_struct_pos
+        kbase_c = kbase_c[:insert_at] + shim_code + kbase_c[insert_at:]
 
     with open(kbase_src, "w", encoding="utf-8") as ks:
         ks.write(kbase_c)
