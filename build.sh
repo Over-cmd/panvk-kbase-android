@@ -9,142 +9,38 @@ cd "$WORKSPACE_DIR"
 
 : "${PANVK_RELEASE:=0.0.2-alpha-G52}"
 : "${PANVK_PROFILE:=g52-v7-jm}"
-: "${MESA_REF:=mesa-26.3.0}"
 
-LOCKED_COMMIT=""
-LOCKED_REPO="https://gitlab.freedesktop.org/mesa/mesa.git"
+MESA_COMMIT=""
+MESA_REPO="https://gitlab.freedesktop.org/mesa/mesa.git"
 if [ -f "sources.lock" ]; then
-  LOCKED_COMMIT="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaCommit',''))" 2>/dev/null || true)"
+  MESA_COMMIT="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaCommit',''))" 2>/dev/null || true)"
   PARSED_REPO="$(python3 -c "import json; d=json.load(open('sources.lock')); print(d.get('mesaRepo',''))" 2>/dev/null || true)"
-  [ -n "$PARSED_REPO" ] && LOCKED_REPO="${PARSED_REPO%.git}"
-fi
-TARGET_REF="${LOCKED_COMMIT:-$MESA_REF}"
-
-echo "=== [1/4] Preparando work/mesa (${TARGET_REF}) y aplicando parches ==="
-NEED_FETCH=0
-if [ ! -d "work/mesa/.git" ]; then
-  NEED_FETCH=1
-elif [ -n "$LOCKED_COMMIT" ]; then
-  CUR_HEAD="$(git -C work/mesa rev-parse HEAD 2>/dev/null || true)"
-  if [ "$CUR_HEAD" != "$LOCKED_COMMIT" ]; then
-    NEED_FETCH=1
-  fi
+  [ -n "$PARSED_REPO" ] && MESA_REPO="${PARSED_REPO%.git}"
 fi
 
-if [ "$NEED_FETCH" -eq 1 ]; then
-  rm -rf work/mesa
-  mkdir -p work/mesa
-  curl -fSL --retry 5 --retry-delay 5 \
-    "${LOCKED_REPO}/-/archive/${TARGET_REF}/mesa-${TARGET_REF}.tar.gz" \
-    | tar -xz --strip-components=1 -C work/mesa
-  git -C work/mesa init -q
-  git -C work/mesa config user.email "ci@local"
-  git -C work/mesa config user.name "CI"
-  git -C work/mesa add -A
-  git -C work/mesa commit -q -m "Mesa ${TARGET_REF}"
-  git -C work/mesa tag -f "${TARGET_REF}"
-else
-  git -C work/mesa reset --hard HEAD
-  git -C work/mesa clean -fdx
-fi
-
-set +e
-if [ -x "./scripts/apply-patches.sh" ]; then
-  ./scripts/apply-patches.sh --profile "$PANVK_PROFILE"
-  PATCH_RC=$?
-elif [ -f "./scripts/apply-patches.sh" ]; then
-  bash ./scripts/apply-patches.sh --profile "$PANVK_PROFILE"
-  PATCH_RC=$?
-else
-  echo "ERROR: No se encontró ./scripts/apply-patches.sh" >&2
+if [ -z "$MESA_COMMIT" ]; then
+  echo "ERROR: No se encontró mesaCommit en sources.lock" >&2
   exit 1
 fi
-set -e
 
-if [ "$PATCH_RC" -ne 0 ]; then
-  echo "Adaptando pan_model.c y continuando serie jm-v7..."
-  python3 - <<'PY'
-import glob
-import os
-import re
-import subprocess
-import sys
+echo "=== [1/4] Preparando Mesa (${MESA_COMMIT}) y aplicando parches del repo ==="
+rm -rf work/mesa
+mkdir -p work/mesa
+curl -fSL --retry 5 --retry-delay 5 \
+  "${MESA_REPO}/-/archive/${MESA_COMMIT}/mesa-${MESA_COMMIT}.tar.gz" \
+  | tar -xz --strip-components=1 -C work/mesa
 
-pan_model = "work/mesa/src/panfrost/model/pan_model.c"
-if not os.path.isfile(pan_model):
-    print("ERROR: No existe work/mesa/src/panfrost/model/pan_model.c", file=sys.stderr)
-    sys.exit(1)
+git -C work/mesa init -q
+git -C work/mesa config user.email "ci@local"
+git -C work/mesa config user.name "CI"
+git -C work/mesa add -A
+git -C work/mesa commit -q -m "Mesa ${MESA_COMMIT}"
+git -C work/mesa tag -f "${MESA_COMMIT}"
 
-with open(pan_model, "r", encoding="utf-8", errors="replace") as f:
-    src = f.read()
-
-bifrost_block = (
-    "   /* Bifrost (v6/v7) rows carry no variant, but some kbase kernels report\n"
-    "    * one anyway (G52 r1 0x74021000 says variant 0x2), so match on the\n"
-    "    * product id alone there. */\n"
-    "   if ((gpu_prod_id >> 16) >= 6 && (gpu_prod_id >> 16) < 9) {\n"
-    "      for (unsigned i = 0; i < ARRAY_SIZE(pan_model_list); ++i) {\n"
-    "         if (pan_model_list[i].gpu_prod_id == gpu_prod_id)\n"
-    "            return &pan_model_list[i];\n"
-    "      }\n"
-    "   }\n\n"
-)
-
-if "(gpu_prod_id >> 16) >= 6 && (gpu_prod_id >> 16) < 9" not in src:
-    m_fn = re.search(r"(?m)^[^\s].*\bpan_get_model\s*\(", src) or re.search(r"\bpan_get_model\s*\(", src)
-    if not m_fn:
-        print("ERROR: No se encontró pan_get_model en pan_model.c", file=sys.stderr)
-        sys.exit(1)
-    m_brace = re.search(r"\)\s*\{", src[m_fn.end():])
-    if not m_brace:
-        print("ERROR: No se encontró llave de apertura de pan_get_model", file=sys.stderr)
-        print("Contexto tras pan_get_model:\n" + src[m_fn.start():m_fn.end() + 300], file=sys.stderr)
-        sys.exit(1)
-    body_start = m_fn.end() + m_brace.end()
-    # Limitar la búsqueda al cuerpo de pan_get_model hasta la siguiente función de nivel superior
-    m_next_fn = re.search(r"(?m)^[a-zA-Z_][a-zA-Z0-9_*\s]+\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\([^;]*\)\s*\{", src[body_start:])
-    body_end = body_start + m_next_fn.start() if m_next_fn else len(src)
-    body = src[body_start:body_end]
-    ret_matches = list(re.finditer(r"\n([ \t]*)return NULL;", body))
-    if not ret_matches:
-        print("ERROR: No se encontró return NULL; dentro de pan_get_model", file=sys.stderr)
-        print("Final del cuerpo de pan_get_model:\n" + body[-600:], file=sys.stderr)
-        sys.exit(1)
-    m_ret = ret_matches[-1]
-    ins_pos = body_start + m_ret.start()
-    src = src[:ins_pos] + "\n" + bifrost_block + src[ins_pos + 1:]
-    with open(pan_model, "w", encoding="utf-8") as f:
-        f.write(src)
-    print("OK (adapted pan_get_model) patches/jm-v7/001-ignore-the-gpu-variant-on-bifrost.patch", flush=True)
-
-for p in sorted(glob.glob("patches/jm-v7/*.patch")):
-    if os.path.basename(p).startswith("001-"):
-        continue
-    abs_p = os.path.abspath(p)
-    applied_ok = False
-    last_err = ""
-    for args in [
-        ["--recount", "--whitespace=nowarn"],
-        ["-C3", "--recount", "--whitespace=nowarn"],
-        ["-C1", "--recount", "--whitespace=nowarn"],
-        ["--3way", "--recount", "--whitespace=nowarn"],
-    ]:
-        res = subprocess.run(
-            ["git", "-C", "work/mesa", "apply", *args, abs_p],
-            capture_output=True,
-            text=True,
-        )
-        if res.returncode == 0:
-            print(f"OK ({' '.join(args)}) {p}", flush=True)
-            applied_ok = True
-            break
-        last_err = (res.stderr or res.stdout).strip()
-        subprocess.run(["git", "-C", "work/mesa", "reset", "--merge"], capture_output=True, text=True)
-
-    if not applied_ok:
-        print(f"ERROR aplicando {p}: {last_err}", file=sys.stderr)
-        sys.exit(1)
-PY
+if [ -x "./scripts/apply-patches.sh" ]; then
+  ./scripts/apply-patches.sh --profile "$PANVK_PROFILE"
+else
+  bash ./scripts/apply-patches.sh --profile "$PANVK_PROFILE"
 fi
 
 phys_dev="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
@@ -176,7 +72,7 @@ ln -sf "$WORKSPACE_DIR/build-host/src/compiler/clc/mesa_clc" "$WORKSPACE_DIR/bui
 ln -sf "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn_bindgen2" "$WORKSPACE_DIR/build-host/src/compiler/spirv/vtn-bindgen2"
 export PATH="$WORKSPACE_DIR/build-host/src/compiler/clc:$WORKSPACE_DIR/build-host/src/compiler/spirv:$WORKSPACE_DIR/build-host/src/panfrost/clc:$PATH"
 
-echo "=== [3/4] Configurando entorno Android (arm64-v8a) con shims y android.toml ==="
+echo "=== [3/4] Configurando entorno Android (arm64-v8a) ==="
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
 if [ -z "${ANDROID_NDK_HOME:-}" ]; then
   echo "ERROR: ANDROID_NDK_HOME / ANDROID_NDK_LATEST_HOME no está definido." >&2
@@ -187,10 +83,8 @@ export MESON_WORKING_DIR="$WORKSPACE_DIR"
 CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
 [ -z "$CLANG_DIR" ] && CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1 || true)"
 export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/21/lib/linux/aarch64}"
-echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
 
 unset CPATH LIBRARY_PATH CMAKE_PREFIX_PATH PKG_CONFIG_PATH
-
 PKG_DIRS="$WORKSPACE_DIR/shims"
 
 if [ "$FLAVOR" = "x11" ]; then
@@ -207,19 +101,12 @@ if [ "$FLAVOR" = "x11" ]; then
 fi
 
 export PKG_CONFIG_LIBDIR="$PKG_DIRS"
-
-if [ -f "android.toml" ]; then
-  envsubst < android.toml > android-cross.txt
-else
-  echo "ERROR: No se encontró android.toml en $WORKSPACE_DIR" >&2
-  exit 1
-fi
-cat android-cross.txt
+envsubst < android.toml > android-cross.txt
 
 PLATFORMS="android"
 [ "$FLAVOR" = "x11" ] && PLATFORMS="android,x11"
 
-echo "=== [4/4] Configurando y compilando PanVK G52 ($FLAVOR) ==="
+echo "=== [4/4] Compilando PanVK G52 ($FLAVOR) ==="
 rm -rf build
 meson setup build work/mesa \
   --cross-file android-cross.txt \
