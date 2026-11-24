@@ -54,6 +54,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install mako PyYAML meson ninja packaging
 
+      - name: Install X11 dependencies (x11 flavor)
+        if: matrix.flavor == 'x11'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libx11-dev libx11-xcb-dev libxrandr-dev libxshmfence-dev \
+            libxcb1-dev libxcb-randr0-dev libxcb-keysyms1-dev libxcb-dri3-dev \
+            libxcb-present-dev libxcb-sync1 libxcb-sync-dev libxcb-shm0-dev libxcb-xfixes0-dev
+
       - name: Verify sources.lock
         run: |
           python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
