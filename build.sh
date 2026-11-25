@@ -78,9 +78,8 @@ install_android_spirv_tools() {
 
   sync_spirv_repos
 
-  if [ ! -f "${android_spv_prefix}/lib/pkgconfig/SPIRV-Tools.pc" ] && \
-     [ ! -f "${android_spv_prefix}/lib/aarch64-linux-android/pkgconfig/SPIRV-Tools.pc" ]; then
-    rm -rf /tmp/SPIRV-Tools-android-build
+  if [ ! -f "${android_spv_prefix}/lib/libSPIRV-Tools-opt.a" ]; then
+    rm -rf /tmp/SPIRV-Tools-android-build "${android_spv_prefix}"
     cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools-android-build -G Ninja \
       -DCMAKE_TOOLCHAIN_FILE="${toolchain_cmake}" \
       -DANDROID_ABI=arm64-v8a \
@@ -460,23 +459,23 @@ build_and_package() {
   export LLVM_CONFIG="llvm-config-${LLVM_VER}"
   export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
   export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
-  # Mantener /usr/local primero para host-tools (x86_64) y no contaminar el enlazador del host con aarch64
-  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-  export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
 
   apply_android_tolm
 
+  # Limpiar build/android-bionic si existía con caché de host SPIRV-Tools para que Meson tome work/android-spirv-tools
+  if [ -d "${ROOT}/build/android-bionic" ] && [ -d "${android_spv_prefix}/lib" ]; then
+    rm -rf "${ROOT}/build/android-bionic"
+  fi
+
+  if [ -d "${android_spv_prefix}/lib/pkgconfig" ]; then
+    export PKG_CONFIG_PATH="${android_spv_prefix}/lib/pkgconfig:${android_spv_prefix}/lib/aarch64-linux-android/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export CMAKE_PREFIX_PATH="${android_spv_prefix}:/usr/local:${CMAKE_PREFIX_PATH:-}"
+  else
+    export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+  fi
+
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    # Si el fallo ocurrió en el build de Android tras tener host-tools, reconfigurar android-bionic con PKG_CONFIG_PATH de Android y reintentar
-    if [ -f "${ROOT}/build/android-bionic/build.ninja" ] && [ -d "${android_spv_prefix}/lib/pkgconfig" ]; then
-      PKG_CONFIG_PATH="${android_spv_prefix}/lib/pkgconfig:${android_spv_prefix}/lib/aarch64-linux-android/pkgconfig" \
-        meson setup --reconfigure "${ROOT}/build/android-bionic" --cross-file "${ORIG_CROSS_INI}" || true
-      if ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-        ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
-        ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
-        return 0
-      fi
-    fi
     if [ -f "${ROOT}/build/android-bionic.log" ]; then
       echo "=== Linker errors in build/android-bionic.log ==="
       grep -n -C 5 "incompatible with aarch64linux\|SPIRV-Tools" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
