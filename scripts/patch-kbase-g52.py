@@ -65,7 +65,7 @@ if "growable BO, GROW_ON_GPF" not in text:
 
 # --- 004 hunk 1: atom_seq_nr field in struct kbase_kmod_dev ---
 text = "".join(lines)
-if "atom_seq_nr;" not in text:
+if "bool atom_seq_nr;" not in text:
     dev_start = next((i for i, l in enumerate(lines) if "struct kbase_kmod_dev {" in l), None)
     dev_end = (
         next((i for i in range(dev_start, len(lines)) if lines[i].startswith("};")), None)
@@ -152,6 +152,8 @@ kbase_check_bifrost_atom_stride(int fd, bool *seq_nr)
 
 # --- 004 hunk 3: call stride check & set atom_seq_nr in kbase_kmod_dev_create ---
 text = "".join(lines)
+lines = text.splitlines(keepends=True)
+
 if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in text:
     alloc_idx = next(
         (i for i, l in enumerate(lines) if "pan_kmod_alloc(allocator, sizeof(*kbase_dev))" in l),
@@ -165,36 +167,58 @@ if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in text:
             "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n\n",
         ]
 
-if "kbase_dev->atom_seq_nr = atom_seq_nr;" not in text:
-    dev_stride_idx = next(
-        (i for i, l in enumerate(lines) if "kbase_dev->atom_stride = atom_stride;" in l),
+text = "".join(lines)
+lines = text.splitlines(keepends=True)
+
+if "atom_seq_nr = atom_seq_nr;" not in text:
+    create_idx = next((i for i, l in enumerate(lines) if "kbase_kmod_dev_create(" in l), None)
+    stride_assign_idx = next(
+        (
+            i for i in range(create_idx or 0, len(lines))
+            if "= atom_stride;" in lines[i] and "atom_seq_nr" not in lines[i]
+        ),
         None,
     )
-    if dev_stride_idx is not None:
-        lines.insert(dev_stride_idx + 1, "      kbase_dev->atom_seq_nr = atom_seq_nr;\n")
+    if stride_assign_idx is not None:
+        lhs = lines[stride_assign_idx].split("=", 1)[0].strip()
+        seq_lhs = lhs.replace("atom_stride", "atom_seq_nr")
+        indent = lines[stride_assign_idx][: len(lines[stride_assign_idx]) - len(lines[stride_assign_idx].lstrip())]
+        lines.insert(stride_assign_idx + 1, f"{indent}{seq_lhs} = atom_seq_nr;\n")
 
 # --- 004 hunks 4 & 5: wrap atom with seq_nr on job submit ---
-text = "".join(lines)
-old_submit = """   struct kbase_ioctl_job_submit sub = {
-      .addr = (uintptr_t)&atom,
-      .nr_atoms = 1,
-      .stride = kd->atom_stride,
-   };"""
+lines = "".join(lines).splitlines(keepends=True)
+i = 0
+while i < len(lines):
+    if "struct kbase_ioctl_job_submit" in lines[i] and "{" in "".join(lines[i : i + 6]):
+        block_end = next(
+            (j for j in range(i, min(i + 12, len(lines))) if "};" in lines[j]),
+            None,
+        )
+        if block_end is not None:
+            block_str = "".join(lines[i : block_end + 1])
+            if "&atom" in block_str and "atom_stride" in block_str and "atom_seq_nr" not in block_str:
+                indent = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
+                addr_line_idx = next(
+                    (j for j in range(i, block_end + 1) if ".addr" in lines[j] and "&atom" in lines[j]),
+                    None,
+                )
+                if addr_line_idx is not None:
+                    lines[addr_line_idx] = lines[addr_line_idx].replace(
+                        "(uintptr_t)&atom",
+                        "kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom",
+                    )
+                    wrapper = [
+                        f"{indent}struct {{\n",
+                        f"{indent}   __u64 seq_nr;\n",
+                        f"{indent}   struct base_jd_atom atom;\n",
+                        f"{indent}}} w = {{ .atom = atom }};\n",
+                    ]
+                    lines[i:i] = wrapper
+                    i = block_end + len(wrapper) + 1
+                    continue
+    i += 1
 
-new_submit = """   struct {
-      __u64 seq_nr;
-      struct base_jd_atom atom;
-   } w = { .atom = atom };
-   struct kbase_ioctl_job_submit sub = {
-      .addr = kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom,
-      .nr_atoms = 1,
-      .stride = kd->atom_stride,
-   };"""
-
-if old_submit in text:
-    text = text.replace(old_submit, new_submit)
-
-target.write_text(text, encoding="utf-8")
+target.write_text("".join(lines), encoding="utf-8")
 
 # --- Verificacion final de marcadores ---
 final_text = target.read_text(encoding="utf-8")
@@ -204,7 +228,7 @@ markers = {
     "004_struct_field": "bool atom_seq_nr;",
     "004_stride_probe": "kbase_check_bifrost_atom_stride(",
     "004_stride_call": "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)",
-    "004_dev_assign": "kbase_dev->atom_seq_nr = atom_seq_nr;",
+    "004_dev_assign": "atom_seq_nr = atom_seq_nr;",
     "004_job_submit_seq_nr": "kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom",
 }
 
