@@ -136,38 +136,26 @@ src, count_flags = pattern_flags.subn(
     count=1,
 )
 
-# 2) Extraer el bloque atom_seq_nr / kbase_check_bifrost_atom_stride de donde haya quedado
-#    (por ejemplo dentro de kbase_kmod_supports_dmabuf) y reubicarlo dentro de kbase_kmod_dev_create
-stride_call_pat = re.compile(
-    r"\n[ \t]*bool atom_seq_nr = false;\s*\n[ \t]*if\s*\(!is_csf && atom_stride == 56 && raw_id &&\s*\n[ \t]*pan_arch\(raw_id & 0xffffffffu\) < 9\)\s*\n[ \t]*atom_stride = kbase_check_bifrost_atom_stride\(fd, &atom_seq_nr\);\s*\n?",
+# 2) Asegurar declaración adelantada de kbase_check_bifrost_atom_stride antes de su uso
+fwd_decl = "static unsigned kbase_check_bifrost_atom_stride(int fd, bool *seq_nr);\n"
+call_pos = src.find("kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)")
+def_match = re.search(r"\nstatic unsigned\s*\nkbase_check_bifrost_atom_stride\s*\(", src)
+if call_pos != -1 and def_match and def_match.start() > call_pos and fwd_decl not in src:
+    src = src.replace(def_match.group(0), "\n" + fwd_decl + def_match.group(0).lstrip("\n"), 1)
+
+# 3) Si el bloque atom_seq_nr usa atom_stride donde aún no está declarado, declarar unsigned atom_stride = 56;
+stride_block_pat = re.compile(
+    r"(\n[ \t]*bool atom_seq_nr = false;\s*\n[ \t]*if\s*\(!is_csf && atom_stride == 56 && raw_id &&\s*\n[ \t]*pan_arch\(raw_id & 0xffffffffu\) < 9\)\s*\n[ \t]*atom_stride = kbase_check_bifrost_atom_stride\(fd, &atom_seq_nr\);\s*\n)",
     re.MULTILINE,
 )
-
-match_stride = stride_call_pat.search(src)
-if match_stride:
-    src = stride_call_pat.sub("\n", src, count=1)
-    # Buscar la definición de función kbase_kmod_dev_create (no la entrada .dev_create = ...)
-    fn_match = re.search(r"\n(?:static\s+)?[^\n;]*\bkbase_kmod_dev_create\s*\(", src)
-    if fn_match:
-        body_start = src.find("\n{", fn_match.start())
-        if body_start != -1:
-            # Buscar una asignación a atom_stride o kbase_dev dentro de kbase_kmod_dev_create
-            sub = src[body_start:]
-            anchor = re.search(r"(\n[ \t]*atom_stride\s*=[^\n;]+;\s*\n)", sub)
-            if not anchor:
-                anchor = re.search(r"(\n[ \t]*kbase_dev->[^\n;]+;\s*\n)", sub)
-            relocated = (
-                "\n   bool atom_seq_nr = false;\n"
-                "   if (!is_csf && atom_stride == 56 && raw_id &&\n"
-                "       pan_arch(raw_id & 0xffffffffu) < 9)\n"
-                "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n"
-            )
-            if anchor:
-                pos = body_start + anchor.end()
-            else:
-                pos = body_start + 2
-            src = src[:pos] + relocated + src[pos:]
-            print("Relocated kbase_check_bifrost_atom_stride into kbase_kmod_dev_create")
+m_block = stride_block_pat.search(src)
+if m_block:
+    prefix = src[:m_block.start()]
+    fn_start = prefix.rfind("\n{")
+    fn_scope = src[fn_start:m_block.start()] if fn_start != -1 else prefix
+    if not re.search(r"\batom_stride\b", fn_scope):
+        replacement = "\n   unsigned atom_stride = 56;\n" + m_block.group(1).lstrip("\n")
+        src = src[:m_block.start()] + replacement + src[m_block.end():]
 
 path.write_text(src, encoding="utf-8")
 PY
@@ -201,10 +189,10 @@ build_and_package() {
   apply_android_tolm
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    echo "=== Compiler errors in build/android-bionic.log ==="
-    grep -n -C 4 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
-    echo "=== kbase_kmod_dev_create definition ==="
-    grep -n -A 45 "^kbase_kmod_dev_create(" "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" || true
+    echo "=== kbase_kmod.c around line 1293 ==="
+    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1275,1315p' || true
+    echo "=== kbase_check_bifrost_atom_stride lines ==="
+    grep -n -C 8 "kbase_check_bifrost_atom_stride" "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" || true
     return 1
   fi
 
