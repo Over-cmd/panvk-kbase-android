@@ -5,7 +5,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILE="${PROFILE:-g52-v7-jm}"
 LLVM_VER="${LLVM_VER:-21}"
 ANDROID_API="${ANDROID_API:-30}"
-SPIRV_TOOLS_REF="${SPIRV_TOOLS_REF:-}"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -80,18 +79,8 @@ install_deps() {
 
   if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
     rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-
-    if [ -n "${SPIRV_TOOLS_REF}" ] && \
-       git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Headers.git "refs/tags/${SPIRV_TOOLS_REF}" >/dev/null 2>&1 && \
-       git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Tools.git "refs/tags/${SPIRV_TOOLS_REF}" >/dev/null 2>&1; then
-      echo "Cloning SPIRV-Headers and SPIRV-Tools at tag ${SPIRV_TOOLS_REF}"
-      git clone --depth 1 --branch "${SPIRV_TOOLS_REF}" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-      git clone --depth 1 --branch "${SPIRV_TOOLS_REF}" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
-    else
-      git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-      git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
-    fi
-
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
     cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DSPIRV-Headers_SOURCE_DIR=/tmp/SPIRV-Headers \
@@ -144,12 +133,7 @@ src = re.sub(
     count=1,
 )
 
-# 2) Extraer bloque GROW_ON_GPF acotado sin cruzar cierres de función
-grow_snippet_re = re.compile(
-    r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[^\n{]*\{(?:[^{}]|\{[^{}]*\})*?\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
-    re.MULTILINE,
-)
-
+# 2) Meter el bloque GROW_ON_GPF en kbase_kmod_bo_alloc
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
     "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n"
@@ -160,6 +144,11 @@ grow_clean = (
     '                " of %" PRIu64 " pages committed",\n'
     "                pan_arch(dev->props.gpu_id), commit_pages, va_pages);\n"
     "   }"
+)
+
+grow_snippet_re = re.compile(
+    r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[^\n{]*\{(?:[^{}]|\{[^{}]*\})*?\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
+    re.MULTILINE,
 )
 
 if grow_snippet_re.search(src):
