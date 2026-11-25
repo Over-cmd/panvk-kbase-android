@@ -161,7 +161,6 @@ if "growable BO, GROW_ON_GPF" not in src:
             print("Placed GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
 # 2) Limpiar cualquier copia de kbase_check_bifrost_atom_stride que haya caído fuera de kbase_kmod_dev_create
-#    (por ejemplo dentro de kbase_kmod_supports_dmabuf)
 dmabuf_m = re.search(r"\bkbase_kmod_supports_dmabuf\s*\([^\)]*\)\s*\n\{[\s\S]*?\n\}", src)
 if dmabuf_m and "kbase_check_bifrost_atom_stride" in dmabuf_m.group(0):
     cleaned_dmabuf = re.sub(
@@ -203,13 +202,13 @@ if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
             src = src[:pos] + stride_block + src[pos:]
             print("Placed atom_stride check inside kbase_kmod_dev_create after kbase_dev->is_csf = is_csf;")
 
-# 4) Declaración adelantada de kbase_check_bifrost_atom_stride si se llama antes de su definición
+# 4) Declaración adelantada de kbase_check_bifrost_atom_stride antes de kbase_kmod_dev_create
 fwd_decl = "static unsigned kbase_check_bifrost_atom_stride(int fd, bool *seq_nr);\n"
-call_pos = src.find("kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)")
-def_match = re.search(r"\nstatic unsigned\s*\nkbase_check_bifrost_atom_stride\s*\(", src)
-if call_pos != -1 and def_match and def_match.start() > call_pos and fwd_decl not in src:
-    src = src.replace(def_match.group(0), "\n" + fwd_decl + def_match.group(0).lstrip("\n"), 1)
-    print("Added forward declaration for kbase_check_bifrost_atom_stride")
+if "kbase_check_bifrost_atom_stride(" in src and fwd_decl not in src:
+    dev_create_def = re.search(r"\n(?:static\s+)?[^\n;]*\bkbase_kmod_dev_create\s*\(", src)
+    if dev_create_def:
+        src = src[:dev_create_def.start()] + "\n" + fwd_decl + src[dev_create_def.start():]
+        print("Added forward declaration for kbase_check_bifrost_atom_stride before kbase_kmod_dev_create")
 
 path.write_text(src, encoding="utf-8")
 PY
