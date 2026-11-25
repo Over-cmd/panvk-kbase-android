@@ -42,10 +42,7 @@ install_deps() {
     libxcb1-dev \
     libxcb-dri3-dev \
     libxcb-present-dev \
-    libxcb-randr-dev \
     libxcb-sync-dev \
-    libxcb-xfixes-dev \
-    libxcb-shm-dev \
     libx11-dev \
     libxrandr-dev \
     libxshmfence-dev \
