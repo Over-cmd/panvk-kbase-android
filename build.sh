@@ -19,6 +19,25 @@ restore_cross_ini() {
 }
 trap restore_cross_ini EXIT
 
+ensure_host_x11_headers() {
+  local multiarch
+  multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || echo "x86_64-linux-gnu")"
+
+  find /usr/include -maxdepth 3 \( -name "xcb.h" -o -name "Xlib.h" -o -name "xshmfence.h" \) 2>/dev/null || true
+
+  if [ ! -e /usr/include/xcb ] && [ -d "/usr/include/${multiarch}/xcb" ]; then
+    sudo ln -sfn "/usr/include/${multiarch}/xcb" /usr/include/xcb
+  fi
+  if [ ! -e /usr/include/X11 ] && [ -d "/usr/include/${multiarch}/X11" ]; then
+    sudo ln -sfn "/usr/include/${multiarch}/X11" /usr/include/X11
+  fi
+  if [ ! -e /usr/include/xshmfence.h ] && [ -f "/usr/include/${multiarch}/xshmfence.h" ]; then
+    sudo ln -sfn "/usr/include/${multiarch}/xshmfence.h" /usr/include/xshmfence.h
+  fi
+
+  ls -ld /usr/include/xcb /usr/include/X11 /usr/include/xshmfence.h 2>/dev/null || true
+}
+
 install_deps() {
   sudo add-apt-repository -y universe || true
   sudo apt-get update
@@ -50,7 +69,7 @@ install_deps() {
     gettext-base \
     gettext
 
-  ls -d /usr/include/xcb /usr/include/X11 /usr/include/xshmfence.h 2>/dev/null || true
+  ensure_host_x11_headers
 
   python3 -m pip install --upgrade pip
   pip install mako PyYAML meson ninja packaging
