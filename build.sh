@@ -153,7 +153,7 @@ src = re.sub(
     count=1,
 )
 
-# 2) Reubicar bloque GROW_ON_GPF dentro de kbase_kmod_bo_alloc sin borrar código ajeno
+# 2) Reubicar bloque GROW_ON_GPF dentro de kbase_kmod_bo_alloc
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
     "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n"
@@ -166,23 +166,44 @@ grow_clean = (
     "   }"
 )
 
-bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
-if bo_fn_m:
-    bo_sub = src[bo_fn_m.start():]
-    # Reemplazar el bloque GROW_ON_GPF si ya está dentro de kbase_kmod_bo_alloc
-    in_bo_grow = re.search(
-        r"(?:\n[ \t]*/\* Bifrost JM[^\n]*\n[ \t]*\*[^\n]*\*/)?\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}",
-        bo_sub,
-    )
-    if in_bo_grow:
-        pos_s = bo_fn_m.start() + in_bo_grow.start()
-        pos_e = bo_fn_m.start() + in_bo_grow.end()
-        prefix = src[bo_fn_m.start():pos_s]
-        kd_decl = ""
-        if "kbase_dev" not in prefix:
-            kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
-        src = src[:pos_s] + "\n" + kd_decl + grow_clean + src[pos_e:]
-        print("Normalized GROW_ON_GPF block inside kbase_kmod_bo_alloc")
+grow_block_re = re.compile(
+    r"(?:\n[ \t]*/\* Bifrost JM[^\n]*\n[ \t]*\*[^\n]*\*/)?\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}",
+    re.MULTILINE,
+)
+
+# Quitar cualquier copia previa de GROW_ON_GPF para reubicarla limpia en kbase_kmod_bo_alloc
+src = grow_block_re.sub("", src)
+
+# Encontrar definición real de kbase_kmod_bo_alloc
+bo_def_start = None
+for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *]*\bkbase_kmod_bo_alloc\s*\(", src):
+    sig_end = src.find(")", m.start())
+    if sig_end != -1:
+        after = src[sig_end + 1 : sig_end + 120]
+        if "{" in after and ";" not in after.split("{", 1)[0]:
+            bo_def_start = m.start()
+            break
+
+if bo_def_start is not None:
+    bo_open_brace = src.find("{", bo_def_start)
+    bo_end_m = re.search(r"\n\}\s*\n", src[bo_open_brace:])
+    bo_def_end = (bo_open_brace + bo_end_m.end()) if bo_end_m else len(src)
+    bo_body = src[bo_open_brace:bo_def_end]
+
+    anchors = list(re.finditer(r"\n[ \t]*(?:va_pages|extension)\s*=[^\n;]+;\s*\n", bo_body))
+    if anchors:
+        ins_rel = anchors[-1].end()
+    else:
+        ioctl_m = re.search(r"\n[ \t]*[^\n]*KBASE_IOCTL_MEM_ALLOC", bo_body)
+        ins_rel = ioctl_m.start() if ioctl_m else 1
+
+    abs_pos = bo_open_brace + ins_rel
+    prefix = src[bo_open_brace:abs_pos]
+    kd_decl = ""
+    if "kbase_dev" not in prefix:
+        kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
+    src = src[:abs_pos] + "\n" + kd_decl + grow_clean + "\n" + src[abs_pos:]
+    print("Relocated GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
 # 3) Insertar la comprobación de atom_stride dentro de kbase_kmod_dev_create tras kbase_dev->is_csf = is_csf;
 if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
@@ -257,8 +278,6 @@ build_and_package() {
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     echo "=== Compiler errors in build/android-bionic.log ==="
     grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
-    echo "=== kbase_kmod.c around line 1445 and 1515 ==="
-    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1430,1535p' || true
     return 1
   fi
 
