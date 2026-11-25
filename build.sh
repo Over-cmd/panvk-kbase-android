@@ -133,7 +133,12 @@ src = re.sub(
     count=1,
 )
 
-# 2) Meter el bloque GROW_ON_GPF en kbase_kmod_bo_alloc
+# 2) Extraer bloque GROW_ON_GPF acotado sin cruzar cierres de función
+grow_snippet_re = re.compile(
+    r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[^\n{]*\{(?:[^{}]|\{[^{}]*\})*?\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
+    re.MULTILINE,
+)
+
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
     "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n"
@@ -144,11 +149,6 @@ grow_clean = (
     '                " of %" PRIu64 " pages committed",\n'
     "                pan_arch(dev->props.gpu_id), commit_pages, va_pages);\n"
     "   }"
-)
-
-grow_snippet_re = re.compile(
-    r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[^\n{]*\{(?:[^{}]|\{[^{}]*\})*?\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
-    re.MULTILINE,
 )
 
 if grow_snippet_re.search(src):
