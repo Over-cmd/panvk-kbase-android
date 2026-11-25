@@ -81,6 +81,24 @@ install_deps() {
     rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
     git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
     git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+
+    # Si main presenta desfase de enums entre SPIRV-Tools y SPIRV-Headers, usar el último tag común
+    if ! grep -q "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Headers/include/spirv/unified1/spirv.h 2>/dev/null && \
+       grep -q "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Tools/source/table2.cpp 2>/dev/null; then
+      rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
+      local common_tag
+      common_tag="$(git ls-remote --tags --refs --sort=-v:refname https://github.com/KhronosGroup/SPIRV-Tools.git \
+        | awk -F'refs/tags/' '/^.*refs\/tags\/v[0-9]+\.[0-9]+(\.[0-9]+)?$/ {print $2; exit}')"
+      if [ -n "$common_tag" ] && git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Headers.git "refs/tags/${common_tag}" >/dev/null 2>&1; then
+        echo "Syncing SPIRV-Headers and SPIRV-Tools to tag ${common_tag}"
+        git clone --depth 1 --branch "$common_tag" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+        git clone --depth 1 --branch "$common_tag" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+      else
+        git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+        git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+      fi
+    fi
+
     cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DSPIRV-Headers_SOURCE_DIR=/tmp/SPIRV-Headers \
@@ -146,7 +164,6 @@ grow_clean = (
     "   }"
 )
 
-# Buscar el bloque desde su comentario o desde `if (!kbase_dev->is_csf` hasta `commit_pages = MIN2...` y su `}`
 grow_full_re = re.compile(
     r"(?:\n[ \t]*/\*[^\n]*Bifrost JM \(no JIT[^\n]*\n[ \t]*\*[^\n]*\*/)?\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}",
     re.MULTILINE,
@@ -156,17 +173,14 @@ bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
 bo_start = bo_fn_m.start() if bo_fn_m else len(src)
 
 for m in list(grow_full_re.finditer(src)):
-    # Si está fuera de kbase_kmod_bo_alloc, eliminarlo de su ubicación errónea
     if m.start() < bo_start:
         src = src[:m.start()] + "\n   /* relocated to kbase_kmod_bo_alloc */" + src[m.end():]
         print("Removed misplaced GROW_ON_GPF block before kbase_kmod_bo_alloc")
 
-# Insertar dentro de kbase_kmod_bo_alloc donde existan va_pages y page_size
 if "growable BO, GROW_ON_GPF" not in src:
     bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
     if bo_fn_m:
         bo_sub = src[bo_fn_m.start():]
-        # Buscar la última asignación de va_pages o extension dentro de kbase_kmod_bo_alloc
         anchors = list(re.finditer(r"\n[ \t]*(?:va_pages|extension)\s*=[^\n;]+;\s*\n", bo_sub))
         if anchors:
             last_a = anchors[-1]
@@ -260,10 +274,8 @@ build_and_package() {
   apply_android_tolm
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    echo "=== kbase_kmod.c around line 1521 ==="
-    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1500,1545p' || true
-    echo "=== va_pages / page_size in kbase_kmod.c ==="
-    grep -nE "va_pages|page_size|commit_pages" "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" || true
+    echo "=== Compiler errors in build/android-bionic.log ==="
+    grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
     return 1
   fi
 
