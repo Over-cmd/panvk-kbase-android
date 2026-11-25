@@ -460,15 +460,16 @@ build_and_package() {
   export LLVM_CONFIG="llvm-config-${LLVM_VER}"
   export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
   export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
-  export PKG_CONFIG_PATH="${android_spv_prefix}/lib/pkgconfig:${android_spv_prefix}/lib/aarch64-linux-android/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-  export CMAKE_PREFIX_PATH="${android_spv_prefix}:/usr/local:${CMAKE_PREFIX_PATH:-}"
-  export LIBRARY_PATH="${android_spv_prefix}/lib:${LIBRARY_PATH:-}"
+  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
 
   apply_android_tolm
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    echo "=== Compiler errors in build/android-bionic.log ==="
-    grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+    if [ -f "${ROOT}/build/android-bionic.log" ]; then
+      echo "=== Compiler errors in build/android-bionic.log ==="
+      grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+    fi
     return 1
   fi
 
