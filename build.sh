@@ -1,174 +1,102 @@
-name: Build PanVK Mali-G52
+#!/usr/bin/env bash
+set -euo pipefail
 
-on:
-  push:
-    branches: [ "**" ]
-  pull_request:
-    branches: [ "**" ]
-  workflow_dispatch:
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROFILE="${PROFILE:-g52-v7-jm}"
+LLVM_VER="${LLVM_VER:-21}"
 
-env:
-  # Versión del paquete; también se muestra como el nombre del controlador en DXVK HUD / MangoHud.
-  PANVK_RELEASE: "26.3.0-devel-G52"
-  LLVM_VER: "21"
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 
-jobs:
-  build-panvk-android:
-    name: Build PanVK G52 (${{ matrix.flavor }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        flavor: [adrenotools, x11]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+install_deps() {
+  sudo add-apt-repository -y universe || true
+  sudo apt-get update
+  apt-cache search spirv || true
+  sudo apt-get install -y --no-install-recommends \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
+    build-essential \
+    cmake \
+    git \
+    ninja-build \
+    "clang-${LLVM_VER}" \
+    "lld-${LLVM_VER}" \
+    "llvm-${LLVM_VER}-dev" \
+    "libclang-${LLVM_VER}-dev" \
+    "libclc-${LLVM_VER}-dev" \
+    "libllvmspirvlib-${LLVM_VER}-dev" \
+    libelf-dev \
+    bison \
+    flex \
+    libdrm-dev \
+    libxcb1-dev \
+    libx11-dev \
+    libxshmfence-dev \
+    pkg-config \
+    gettext-base \
+    gettext
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+  python3 -m pip install --upgrade pip
+  pip install mako PyYAML meson ninja packaging
 
-      - name: Install build dependencies (Clang/LLVM 21)
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
-        run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            -o Dpkg::Options::="--force-confdef" \
-            -o Dpkg::Options::="--force-confold" \
-            build-essential \
-            clang-${LLVM_VER} \
-            lld-${LLVM_VER} \
-            llvm-${LLVM_VER}-dev \
-            libclang-${LLVM_VER}-dev \
-            libclc-${LLVM_VER}-dev \
-            libllvmspirvlib-${LLVM_VER}-dev \
-            libelf-dev \
-            spirv-tools \
-            bison \
-            flex \
-            libdrm-dev \
-            pkg-config \
-            gettext-base \
-            gettext
-          python -m pip install --upgrade pip
-          pip install mako PyYAML meson ninja packaging
+  if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
+    rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+    cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DSPIRV-Headers_SOURCE_DIR=/tmp/SPIRV-Headers \
+      -DSPIRV_SKIP_TESTS=ON \
+      -DSPIRV_WERROR=OFF
+    cmake --build /tmp/SPIRV-Tools/build -j"$(nproc)"
+    sudo cmake --install /tmp/SPIRV-Tools/build
+    sudo ldconfig
+  fi
+  pkg-config --modversion SPIRV-Tools || true
+}
 
-      - name: Verify sources.lock and Mesa 26.3.0-devel
-        run: |
-          python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
+prepare_mesa() {
+  cd "$ROOT"
+  python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
+  test -f "profiles/${PROFILE}.json"
 
-      - name: Fetch pinned Mesa (26.3.0-devel)
-        run: ./scripts/fetch-mesa.sh
+  ./scripts/fetch-mesa.sh
 
-      - name: Apply PanVK G52 Patches
-        run: ./scripts/apply-patches.sh --profile g52-v7-jm
+  if ./scripts/apply-patches.sh --profile "${PROFILE}"; then
+    return 0
+  fi
 
-      - name: Stamp driver version
-        run: |
-          f="work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c"
-          if [ -f "$f" ]; then
-            sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$f"
-            grep -q "^#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"" "$f"
-            sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$f"
-            grep -q '"PanVK G52 " PANVK_KBASE_RELEASE' "$f"
-          fi
+  python3 scripts/patch-kbase-g52.py
+  for p in patches/jm-v7/*.patch; do
+    base="$(basename "$p")"
+    case "$base" in
+      001-*|002-*|003-*|004-*) continue ;;
+    esac
+    echo "Applying remaining jm-v7 patch: $base"
+    git -C work/mesa apply --recount "$PWD/$p"
+  done
+}
 
-      - name: Generate Host Tools (LLVM 21)
-        env:
-          CC: "clang-${LLVM_VER}"
-          CXX: "clang++-${LLVM_VER}"
-          LD: "ld.lld-${LLVM_VER}"
-        run: |
-          meson setup build-host work/mesa \
-            -Dbuildtype=release \
-            -Db_ndebug=true \
-            -Dplatforms=[] \
-            -Dgallium-drivers=[] \
-            -Dvulkan-drivers=[] \
-            -Dtools=panfrost \
-            -Dprecomp-compiler=enabled \
-            -Dinstall-precomp-compiler=true \
-            -Dllvm=enabled \
-            -Dmesa-clc=enabled \
-            -Dinstall-mesa-clc=true
-          ninja -C build-host \
-            src/compiler/clc/mesa_clc \
-            src/compiler/spirv/vtn_bindgen2 \
-            src/panfrost/clc/panfrost_compile
-          ln -sf "$GITHUB_WORKSPACE/build-host/src/compiler/clc/mesa_clc" "$GITHUB_WORKSPACE/build-host/src/compiler/clc/mesa-clc"
-          ln -sf "$GITHUB_WORKSPACE/build-host/src/compiler/spirv/vtn_bindgen2" "$GITHUB_WORKSPACE/build-host/src/compiler/spirv/vtn-bindgen2"
-          echo "$GITHUB_WORKSPACE/build-host/src/compiler/clc" >> "$GITHUB_PATH"
-          echo "$GITHUB_WORKSPACE/build-host/src/compiler/spirv" >> "$GITHUB_PATH"
-          echo "$GITHUB_WORKSPACE/build-host/src/panfrost/clc" >> "$GITHUB_PATH"
+build_and_package() {
+  cd "$ROOT"
+  export CC="clang-${LLVM_VER}"
+  export CXX="clang++-${LLVM_VER}"
+  export LD="ld.lld-${LLVM_VER}"
+  export LLVM_CONFIG="llvm-config-${LLVM_VER}"
+  export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+  export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
 
-      - name: Configure Meson for PanVK G52 (AArch64)
-        env:
-          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/shims
-        run: |
-          export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
-          export MESON_WORKING_DIR="$GITHUB_WORKSPACE"
-          CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
-          if [ -z "$CLANG_DIR" ]; then
-            CLANG_DIR="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
-          fi
-          export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
-          echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
-          envsubst < android.toml > android-cross.txt
-          cat android-cross.txt
+  ./scripts/build-android.sh --profile "${PROFILE}"
+  ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
+  ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
+}
 
-          PLATFORMS="android"
-          if [ "${{ matrix.flavor }}" = "x11" ]; then
-            PLATFORMS="android,x11"
-          fi
+main() {
+  install_deps
+  prepare_mesa
+  build_and_package
+}
 
-          meson setup build work/mesa \
-            --cross-file android-cross.txt \
-            -Dbuildtype=release \
-            -Dplatforms="$PLATFORMS" \
-            -Dandroid-stub=true \
-            -Dandroid-strict=false \
-            -Dandroid-libbacktrace=disabled \
-            -Dplatform-sdk-version=30 \
-            -Dglx=disabled \
-            -Dgbm=disabled \
-            -Degl=disabled \
-            -Dopengl=false \
-            -Dgles1=disabled \
-            -Dgles2=disabled \
-            -Dglvnd=disabled \
-            -Dvalgrind=disabled \
-            -Dgallium-drivers= \
-            -Dshared-glapi=disabled \
-            -Dzstd=disabled \
-            -Dmesa-clc=system \
-            -Dprecomp-compiler=system \
-            -Dvulkan-drivers=panfrost \
-            -Dllvm=disabled \
-            -Dpanfrost-kmds=kbase
-
-      - name: Build PanVK G52 Driver
-        run: |
-          meson compile -C build
-
-      - name: Package Driver
-        run: |
-          ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
-
-      - name: Upload Packaged Driver ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: PanVK-G52-${{ matrix.flavor }}-release
-          path: |
-            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}.zip
-            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}-MANIFEST.txt
-            SHA256SUMS.txt
-          if-no-files-found: error
-
-      - name: Upload Raw Driver Binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: libvulkan_panfrost-g52-aarch64-${{ matrix.flavor }}
-          path: build/src/panfrost/vulkan/libvulkan_panfrost.so
-          if-no-files-found: error
+main "$@"
