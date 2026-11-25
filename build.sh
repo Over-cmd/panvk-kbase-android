@@ -460,15 +460,20 @@ build_and_package() {
   export LLVM_CONFIG="llvm-config-${LLVM_VER}"
   export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
   export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
-  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-  export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+  export PKG_CONFIG_PATH="${android_spv_prefix}/lib/pkgconfig:${android_spv_prefix}/lib/aarch64-linux-android/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export CMAKE_PREFIX_PATH="${android_spv_prefix}:/usr/local:${CMAKE_PREFIX_PATH:-}"
 
   apply_android_tolm
 
+  # Si ya existe un build previo de meson/ninja, forzar reconfiguración para que tome el nuevo pkgconfig/cross-file
+  if [ -f "${ROOT}/build/android-bionic/build.ninja" ]; then
+    meson setup --reconfigure "${ROOT}/build/android-bionic" --cross-file "${ORIG_CROSS_INI}" || true
+  fi
+
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     if [ -f "${ROOT}/build/android-bionic.log" ]; then
-      echo "=== Compiler errors in build/android-bionic.log ==="
-      grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+      echo "=== Linker errors in build/android-bionic.log ==="
+      grep -n -C 5 "incompatible with aarch64linux\|SPIRV-Tools" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
     fi
     return 1
   fi
