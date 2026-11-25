@@ -125,7 +125,7 @@ from pathlib import Path
 path = Path(sys.argv[1])
 src = path.read_text(encoding="utf-8")
 
-# 1) Extraer cualquier bloque GROW_ON_GPF mal ubicado (dentro de to_kbase_mem_flags o comentado)
+# 1) Extraer cualquier bloque GROW_ON_GPF fuera de kbase_kmod_bo_alloc
 grow_snippet_re = re.compile(
     r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
     re.MULTILINE,
@@ -146,7 +146,6 @@ grow_clean = (
 if grow_snippet_re.search(src):
     src = grow_snippet_re.sub("/* relocated to kbase_kmod_bo_alloc */", src, count=1)
 
-# Insertar dentro de kbase_kmod_bo_alloc tras extension = (2 * 1024 * 1024) / page_size;
 if "growable BO, GROW_ON_GPF" not in src:
     bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
     if bo_fn_m:
@@ -154,7 +153,6 @@ if "growable BO, GROW_ON_GPF" not in src:
         ext_m = re.search(r"(\n[ \t]*extension\s*=\s*\(2\s*\*\s*1024\s*\*\s*1024\)\s*/\s*page_size;\s*\n)", bo_sub)
         if ext_m:
             pos = bo_fn_m.start() + ext_m.end()
-            # Asegurar kbase_dev disponible antes de usarlo en kbase_kmod_bo_alloc
             fn_body_prefix = src[bo_fn_m.start():pos]
             kd_decl = ""
             if "kbase_dev" not in fn_body_prefix:
@@ -162,27 +160,40 @@ if "growable BO, GROW_ON_GPF" not in src:
             src = src[:pos] + kd_decl + grow_clean + "\n" + src[pos:]
             print("Placed GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
-# 2) Extraer bloque atom_seq_nr / kbase_check_bifrost_atom_stride de donde haya caído
-stride_call_pat = re.compile(
-    r"\n[ \t]*(?:unsigned\s+atom_stride\s*=\s*56;\s*\n[ \t]*)?bool atom_seq_nr = false;\s*\n[ \t]*if\s*\(!is_csf && atom_stride == 56 && raw_id &&\s*\n[ \t]*pan_arch\(raw_id & 0xffffffffu\) < 9\)\s*\n[ \t]*atom_stride = kbase_check_bifrost_atom_stride\(fd, &atom_seq_nr\);\s*\n?",
-    re.MULTILINE,
-)
+# 2) Limpiar cualquier copia de kbase_check_bifrost_atom_stride que haya caído fuera de kbase_kmod_dev_create
+#    (por ejemplo dentro de kbase_kmod_supports_dmabuf)
+dmabuf_m = re.search(r"\bkbase_kmod_supports_dmabuf\s*\([^\)]*\)\s*\n\{[\s\S]*?\n\}", src)
+if dmabuf_m and "kbase_check_bifrost_atom_stride" in dmabuf_m.group(0):
+    cleaned_dmabuf = re.sub(
+        r"\n[ \t]*(?:unsigned\s+atom_stride\s*=\s*56;\s*\n[ \t]*)?bool atom_seq_nr = false;\s*\n[ \t]*if\s*\(!is_csf && atom_stride == 56 && raw_id &&\s*\n[ \t]*pan_arch\(raw_id & 0xffffffffu\) < 9\)\s*\n[ \t]*atom_stride = kbase_check_bifrost_atom_stride\(fd, &atom_seq_nr\);\s*\n?",
+        "\n",
+        dmabuf_m.group(0),
+    )
+    src = src[:dmabuf_m.start()] + cleaned_dmabuf + src[dmabuf_m.end():]
+    print("Removed misplaced atom_stride block from kbase_kmod_supports_dmabuf")
 
-if stride_call_pat.search(src):
-    src = stride_call_pat.sub("\n", src, count=1)
-
-# Reubicar dentro de kbase_kmod_dev_create justo después de KBASE_IOCTL_MEM_JIT_INIT (donde ya hay fd, is_csf, raw_id)
+# 3) Insertar la comprobación de atom_stride dentro de kbase_kmod_dev_create tras kbase_dev->is_csf = is_csf;
 if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
     dev_create_m = re.search(r"\nkbase_kmod_dev_create\s*\(", src)
     if dev_create_m:
         sub = src[dev_create_m.start():]
-        jit_anchor = re.search(r"(KBASE_IOCTL_MEM_JIT_INIT[^\n;]*;[^\n]*\n[ \t]*\})", sub)
-        if jit_anchor:
-            pos = dev_create_m.start() + jit_anchor.end()
+        csf_anchor = re.search(r"(\n[ \t]*kbase_dev->is_csf\s*=\s*is_csf;\s*\n)", sub)
+        if csf_anchor:
+            pos = dev_create_m.start() + csf_anchor.end()
             prefix_in_fn = src[dev_create_m.start():pos]
             stride_decl = "" if re.search(r"\batom_stride\b", prefix_in_fn) else "   unsigned atom_stride = 56;\n"
+            raw_decl = ""
+            if not re.search(r"\braw_id\b", prefix_in_fn):
+                raw_decl = (
+                    "   uint64_t raw_id = kbase_gpuprop_get(props_buf, props_size,\n"
+                    "                                       KBASE_GPUPROP_RAW_GPU_ID, 0);\n"
+                    "   if (!raw_id)\n"
+                    "      raw_id = kbase_gpuprop_get(props_buf, props_size,\n"
+                    "                                 KBASE_GPUPROP_PRODUCT_ID, 0) << 16;\n"
+                )
             stride_block = (
                 "\n"
+                + raw_decl
                 + stride_decl
                 + "   bool atom_seq_nr = false;\n"
                 "   if (!is_csf && atom_stride == 56 && raw_id &&\n"
@@ -190,9 +201,9 @@ if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
                 "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n"
             )
             src = src[:pos] + stride_block + src[pos:]
-            print("Placed atom_stride check inside kbase_kmod_dev_create after KBASE_IOCTL_MEM_JIT_INIT")
+            print("Placed atom_stride check inside kbase_kmod_dev_create after kbase_dev->is_csf = is_csf;")
 
-# 3) Declaración adelantada de kbase_check_bifrost_atom_stride si se llama antes de su definición
+# 4) Declaración adelantada de kbase_check_bifrost_atom_stride si se llama antes de su definición
 fwd_decl = "static unsigned kbase_check_bifrost_atom_stride(int fd, bool *seq_nr);\n"
 call_pos = src.find("kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)")
 def_match = re.search(r"\nstatic unsigned\s*\nkbase_check_bifrost_atom_stride\s*\(", src)
@@ -231,7 +242,12 @@ build_and_package() {
 
   apply_android_tolm
 
-  ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
+  if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
+    echo "=== Compiler errors in build/android-bionic.log ==="
+    grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 50 || true
+    return 1
+  fi
+
   ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
   ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
 }
