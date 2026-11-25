@@ -4,9 +4,20 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILE="${PROFILE:-g52-v7-jm}"
 LLVM_VER="${LLVM_VER:-21}"
+ANDROID_API="${ANDROID_API:-30}"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
+
+ORIG_CROSS_INI="${ROOT}/meson/android-aarch64.ini"
+BACKUP_CROSS_INI="/tmp/android-aarch64.ini.orig"
+
+restore_cross_ini() {
+  if [ -f "$BACKUP_CROSS_INI" ]; then
+    mv -f "$BACKUP_CROSS_INI" "$ORIG_CROSS_INI"
+  fi
+}
+trap restore_cross_ini EXIT
 
 install_deps() {
   sudo add-apt-repository -y universe || true
@@ -77,6 +88,20 @@ prepare_mesa() {
   done
 }
 
+apply_android_tolm() {
+  local tolm_file="${ROOT}/android.tolm"
+  [ -f "$tolm_file" ] || return 0
+
+  export MESON_WORKING_DIR="${ROOT}"
+  export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+  export CLANG_LIB_DIR="${CLANG_LIB_DIR:-$("${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang-${LLVM_VER}" --print-resource-dir 2>/dev/null)/lib/linux}"
+
+  [ -f "$ORIG_CROSS_INI" ] && cp -f "$ORIG_CROSS_INI" "$BACKUP_CROSS_INI"
+
+  envsubst '${ANDROID_NDK_HOME} ${MESON_WORKING_DIR} ${CLANG_LIB_DIR}' < "$tolm_file" \
+    | grep -v '^[[:space:]]*pkg_config_libdir[[:space:]]*=' > "$ORIG_CROSS_INI"
+}
+
 build_and_package() {
   cd "$ROOT"
   export CC="clang-${LLVM_VER}"
@@ -88,7 +113,9 @@ build_and_package() {
   export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
   export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
 
-  ./scripts/build-android.sh --profile "${PROFILE}"
+  apply_android_tolm
+
+  ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
   ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
   ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
 }
