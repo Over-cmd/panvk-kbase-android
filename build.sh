@@ -145,15 +145,72 @@ from pathlib import Path
 path = Path(sys.argv[1])
 src = path.read_text(encoding="utf-8")
 
-# 1) Restaurar tipo de retorno de kbase_kmod_dev_create si falta en su definición
-src = re.sub(
-    r"(?m)^([ \t]*)kbase_kmod_dev_create\s*\(\s*int fd,",
-    r"\1static struct pan_kmod_dev *\n\1kbase_kmod_dev_create(int fd,",
-    src,
-    count=1,
-)
+# Limpiar declaraciones adelantadas o duplicados mal puestos antes de analizar funciones
+fwd_decl = "static unsigned kbase_check_bifrost_atom_stride(int fd, bool *seq_nr);\n"
+src = re.sub(r"\n?static unsigned kbase_check_bifrost_atom_stride\(int fd, bool \*seq_nr\);\n?", "\n", src)
+src = re.sub(r"\n?static struct pan_kmod_dev \*\n\s*static struct pan_kmod_dev \*\n", "\nstatic struct pan_kmod_dev *\n", src)
 
-# 2) Reubicar bloque GROW_ON_GPF dentro de kbase_kmod_bo_alloc
+def find_func_span(text: str, func_name: str):
+    """Devuelve (header_start, open_brace_idx, close_brace_idx) para la definición con cuerpo."""
+    pat = re.compile(rf"\b{re.escape(func_name)}\s*\(")
+    for m in pat.finditer(text):
+        # Buscar paréntesis de cierre de la firma
+        depth = 0
+        i = m.end() - 1
+        while i < len(text):
+            if text[i] == "(":
+                depth += 1
+            elif text[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if depth != 0:
+            continue
+        # Ver qué sigue tras `)` ignorando espacios y comentarios
+        j = i + 1
+        while j < len(text) and text[j] in " \t\r\n":
+            j += 1
+        if j < len(text) and text[j] == "{":
+            # Encontrar inicio del encabezado de función (línea tras el cierre de la función anterior o comentario)
+            prev_nl = text.rfind("\n", 0, m.start())
+            hdr_start = (prev_nl + 1) if prev_nl != -1 else 0
+            # Retroceder si la línea actual solo tiene tipo de retorno (ej. `static struct pan_kmod_dev *`)
+            while hdr_start > 0:
+                prev_prev_nl = text.rfind("\n", 0, hdr_start - 1)
+                line_above = text[(prev_prev_nl + 1) if prev_prev_nl != -1 else 0 : hdr_start - 1].strip()
+                if line_above == "" or line_above.endswith("}") or line_above.endswith(";") or line_above.startswith("/*") or line_above.startswith("*"):
+                    break
+                hdr_start = (prev_prev_nl + 1) if prev_prev_nl != -1 else 0
+
+            # Encontrar llave de cierre correspondiente de la función
+            bdepth = 0
+            k = j
+            while k < len(text):
+                if text[k] == "{":
+                    bdepth += 1
+                elif text[k] == "}":
+                    bdepth -= 1
+                    if bdepth == 0:
+                        return hdr_start, j, k
+                k += 1
+    return None
+
+# 1) Reparar firma de kbase_kmod_dev_create si no tiene tipo de retorno
+dev_span = find_func_span(src, "kbase_kmod_dev_create")
+if dev_span:
+    h_s, o_b, c_b = dev_span
+    sig_text = src[h_s:o_b]
+    if "pan_kmod_dev" not in sig_text:
+        m_fn = re.search(r"\bkbase_kmod_dev_create\s*\(", sig_text)
+        if m_fn:
+            abs_fn = h_s + m_fn.start()
+            line_s = src.rfind("\n", 0, abs_fn)
+            ins = (line_s + 1) if line_s != -1 else abs_fn
+            src = src[:ins] + "static struct pan_kmod_dev *\n" + src[ins:]
+            print("Restored return type for kbase_kmod_dev_create")
+
+# 2) Extraer bloque GROW_ON_GPF de donde esté y reubicarlo dentro de kbase_kmod_bo_alloc
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
     "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n"
@@ -166,103 +223,72 @@ grow_clean = (
     "   }"
 )
 
-grow_block_re = re.compile(
-    r"(?:\n[ \t]*/\* Bifrost JM[^\n]*\n[ \t]*\*[^\n]*\*/)?\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}",
+grow_re = re.compile(
+    r"(?:[ \t]*/\* Bifrost JM[^\n]*\n(?:[ \t]*\*[^\n]*\n)*)?[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}\n?",
     re.MULTILINE,
 )
-src = grow_block_re.sub("", src)
+src = grow_re.sub("", src)
 
-bo_def_start = None
-for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *]*\bkbase_kmod_bo_alloc\s*\(", src):
-    sig_end = src.find(")", m.start())
-    if sig_end != -1:
-        after = src[sig_end + 1 : sig_end + 120]
-        if "{" in after and ";" not in after.split("{", 1)[0]:
-            bo_def_start = m.start()
-            break
-
-if bo_def_start is not None:
-    bo_open_brace = src.find("{", bo_def_start)
-    bo_end_m = re.search(r"\n\}\s*\n", src[bo_open_brace:])
-    bo_def_end = (bo_open_brace + bo_end_m.end()) if bo_end_m else len(src)
-    bo_body = src[bo_open_brace:bo_def_end]
-
+bo_span = find_func_span(src, "kbase_kmod_bo_alloc")
+if bo_span:
+    _, bo_open, bo_close = bo_span
+    bo_body = src[bo_open:bo_close]
     anchors = list(re.finditer(r"\n[ \t]*(?:va_pages|extension)\s*=[^\n;]+;\s*\n", bo_body))
     if anchors:
         ins_rel = anchors[-1].end()
     else:
         ioctl_m = re.search(r"\n[ \t]*[^\n]*KBASE_IOCTL_MEM_ALLOC", bo_body)
         ins_rel = ioctl_m.start() if ioctl_m else 1
-
-    abs_pos = bo_open_brace + ins_rel
-    prefix = src[bo_open_brace:abs_pos]
+    abs_pos = bo_open + ins_rel
+    prefix = src[bo_open:abs_pos]
     kd_decl = ""
     if "kbase_dev" not in prefix:
         kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
     src = src[:abs_pos] + "\n" + kd_decl + grow_clean + "\n" + src[abs_pos:]
     print("Relocated GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
-# 3) Reubicar comprobación de atom_stride dentro de kbase_kmod_dev_create
-# Encontrar definición real de kbase_kmod_dev_create (con `{`)
-dev_def_start = None
-for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *]*\bkbase_kmod_dev_create\s*\(", src):
-    sig_end = src.find(")", m.start())
-    if sig_end != -1:
-        after = src[sig_end + 1 : sig_end + 120]
-        if "{" in after and ";" not in after.split("{", 1)[0]:
-            dev_def_start = m.start()
-            break
+# 3) Extraer comprobación de atom_stride de funciones ajenas y colocarla en kbase_kmod_dev_create
+dev_span = find_func_span(src, "kbase_kmod_dev_create")
+stride_fn_span = find_func_span(src, "kbase_check_bifrost_atom_stride")
 
-# Retirar cualquier bloque atom_stride / atom_seq_nr que esté fuera de kbase_kmod_dev_create
-if dev_def_start is not None:
-    dev_open_brace = src.find("{", dev_def_start)
-    dev_end_m = re.search(r"\n\}\s*\n", src[dev_open_brace:])
-    dev_def_end = (dev_open_brace + dev_end_m.end()) if dev_end_m else len(src)
-
-    for sm in list(re.finditer(r"kbase_check_bifrost_atom_stride\s*\(\s*fd\s*,\s*&atom_seq_nr\s*\)\s*;", src)):
-        # No tocar la propia definición de kbase_check_bifrost_atom_stride
-        fn_hdr_before = src.rfind("\n", 0, sm.start())
-        line_str = src[fn_hdr_before + 1 : sm.end()]
-        if "static unsigned" in line_str or "unsigned" in line_str and "int fd" in src[max(0, sm.start() - 120) : sm.start()]:
+if dev_span:
+    _, dev_open, dev_close = dev_span
+    # Buscar llamadas `kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);` fuera de kbase_kmod_dev_create
+    for call_m in list(re.finditer(r"[ \t]*atom_stride\s*=\s*kbase_check_bifrost_atom_stride\s*\(\s*fd\s*,\s*&atom_seq_nr\s*\)\s*;\s*\n?", src)):
+        pos_c = call_m.start()
+        if stride_fn_span and stride_fn_span[1] <= pos_c <= stride_fn_span[2]:
             continue
-        if sm.start() < dev_open_brace or sm.end() > dev_def_end:
-            # Expandir hacia atrás hasta el inicio del bloque/líneas asociadas a atom_seq_nr
-            blk_start = sm.start()
-            for back_pat in [
-                r"\n[ \t]*uint64_t\s+raw_id\s*=",
-                r"\n[ \t]*unsigned\s+atom_stride\s*=\s*56\s*;",
-                r"\n[ \t]*bool\s+atom_seq_nr\s*=",
-                r"\n[ \t]*if\s*\(\s*!is_csf\s*&&\s*atom_stride\s*==\s*56",
-            ]:
-                pm = re.search(back_pat, src[max(0, sm.start() - 450) : sm.start()])
-                if pm:
-                    cand = max(0, sm.start() - 450) + pm.start() + 1
-                    if cand < blk_start:
-                        blk_start = cand
-            blk_end = sm.end()
-            if blk_end < len(src) and src[blk_end : blk_end + 1] == "\n":
-                blk_end += 1
-            src = src[:blk_start] + src[blk_end:]
-            print("Relocated misplaced atom_stride block out of foreign scope")
+        if dev_open <= pos_c <= dev_close:
+            continue
+        # Expandir hacia atrás para abarcar `if (!is_csf ...)` y líneas asociadas `bool atom_seq_nr = false;` / `unsigned atom_stride = 56;` / `uint64_t raw_id = ...`
+        win_start = max(0, pos_c - 500)
+        window = src[win_start:pos_c]
+        cut_s = pos_c
+        for pat_str in [
+            r"[ \t]*uint64_t\s+raw_id\s*=[^\n;]+;\s*\n(?:\s*if\s*\(!raw_id\)[^\n;]+;\s*\n)?",
+            r"[ \t]*unsigned\s+atom_stride\s*=\s*56;\s*\n",
+            r"[ \t]*bool\s+atom_seq_nr\s*=\s*false;\s*\n",
+            r"[ \t]*if\s*\(\s*!is_csf\s*&&\s*atom_stride\s*==\s*56[^\n)]*\)\s*\n?",
+        ]:
+            pm = re.search(pat_str, window)
+            if pm:
+                cand = win_start + pm.start()
+                if cand < cut_s:
+                    cut_s = cand
+        cut_e = call_m.end()
+        src = src[:cut_s] + src[cut_e:]
+        print("Relocated misplaced atom_stride block out of foreign function")
+        dev_span = find_func_span(src, "kbase_kmod_dev_create")
+        if dev_span:
+            _, dev_open, dev_close = dev_span
 
-            # Recalcular límites de kbase_kmod_dev_create
-            for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *]*\bkbase_kmod_dev_create\s*\(", src):
-                sig_end = src.find(")", m.start())
-                if sig_end != -1:
-                    after = src[sig_end + 1 : sig_end + 120]
-                    if "{" in after and ";" not in after.split("{", 1)[0]:
-                        dev_def_start = m.start()
-                        break
-            dev_open_brace = src.find("{", dev_def_start)
-            dev_end_m = re.search(r"\n\}\s*\n", src[dev_open_brace:])
-            dev_def_end = (dev_open_brace + dev_end_m.end()) if dev_end_m else len(src)
-
-    dev_body = src[dev_open_brace:dev_def_end]
+    # Insertar dentro de kbase_kmod_dev_create tras `kbase_dev->is_csf = is_csf;`
+    dev_body = src[dev_open:dev_close]
     if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in dev_body:
-        csf_anchor = re.search(r"(\n[ \t]*kbase_dev->is_csf\s*=\s*is_csf;\s*\n)", dev_body)
-        if csf_anchor:
-            abs_pos = dev_open_brace + csf_anchor.end()
-            prefix_in_fn = src[dev_open_brace:abs_pos]
+        csf_m = re.search(r"(\n[ \t]*kbase_dev->is_csf\s*=\s*is_csf;\s*\n)", dev_body)
+        if csf_m:
+            abs_pos = dev_open + csf_m.end()
+            prefix_in_fn = src[dev_open:abs_pos]
             stride_decl = "" if re.search(r"\batom_stride\b", prefix_in_fn) else "   unsigned atom_stride = 56;\n"
             raw_decl = ""
             if not re.search(r"\braw_id\b", prefix_in_fn):
@@ -285,21 +311,16 @@ if dev_def_start is not None:
             src = src[:abs_pos] + stride_block + src[abs_pos:]
             print("Placed atom_stride check inside kbase_kmod_dev_create after kbase_dev->is_csf = is_csf;")
 
-# 4) Declaración adelantada de kbase_check_bifrost_atom_stride limpia a nivel de archivo antes de kbase_kmod_dev_create
-fwd_decl = "static unsigned kbase_check_bifrost_atom_stride(int fd, bool *seq_nr);\n"
-src = src.replace("\n" + fwd_decl + "\n", "\n").replace(fwd_decl, "")
-
-if "kbase_check_bifrost_atom_stride(" in src:
-    for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *]*\bkbase_kmod_dev_create\s*\(", src):
-        sig_end = src.find(")", m.start())
-        if sig_end != -1:
-            after = src[sig_end + 1 : sig_end + 120]
-            if "{" in after and ";" not in after.split("{", 1)[0]:
-                prev_close = src.rfind("\n}\n", 0, m.start())
-                ins_at = (prev_close + len("\n}\n")) if prev_close != -1 else m.start()
-                src = src[:ins_at] + "\n" + fwd_decl + "\n" + src[ins_at:]
-                print("Added file-scope forward declaration for kbase_check_bifrost_atom_stride")
-                break
+# 4) Declaración adelantada limpia a nivel de archivo antes de kbase_kmod_dev_create
+dev_span = find_func_span(src, "kbase_kmod_dev_create")
+if dev_span and "kbase_check_bifrost_atom_stride(" in src:
+    h_s, _, _ = dev_span
+    # Asegurar que h_s esté justo después de un `\n`
+    if h_s > 0 and src[h_s - 1] != "\n":
+        nl = src.rfind("\n", 0, h_s)
+        h_s = (nl + 1) if nl != -1 else 0
+    src = src[:h_s] + fwd_decl + "\n" + src[h_s:]
+    print("Added clean file-scope forward declaration before kbase_kmod_dev_create")
 
 path.write_text(src, encoding="utf-8")
 PY
