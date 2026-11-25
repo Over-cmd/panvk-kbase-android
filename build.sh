@@ -37,6 +37,27 @@ ensure_host_x11_headers() {
   ls -ld /usr/include/xcb/xcb.h /usr/include/xcb/shm.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h 2>/dev/null || true
 }
 
+sync_spirv_repos() {
+  rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
+  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+
+  if grep -rn "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Tools >/dev/null 2>&1 && \
+     ! grep -rn "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Headers >/dev/null 2>&1; then
+    local hdr_tags tools_tags common_tag
+    hdr_tags="$(git ls-remote --tags --refs https://github.com/KhronosGroup/SPIRV-Headers.git | awk -F'refs/tags/' '{print $2}' | sort -V)"
+    tools_tags="$(git ls-remote --tags --refs https://github.com/KhronosGroup/SPIRV-Tools.git | awk -F'refs/tags/' '{print $2}' | sort -V)"
+    common_tag="$(comm -12 <(printf '%s\n' "$hdr_tags") <(printf '%s\n' "$tools_tags") | grep -E '^v?[0-9]+\.[0-9]+' | tail -n 1 || true)"
+
+    if [ -n "$common_tag" ]; then
+      echo "Syncing SPIRV-Headers and SPIRV-Tools to common tag: ${common_tag}"
+      rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
+      git clone --depth 1 --branch "$common_tag" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+      git clone --depth 1 --branch "$common_tag" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+    fi
+  fi
+}
+
 install_deps() {
   sudo add-apt-repository -y universe || true
   sudo apt-get update
@@ -78,9 +99,7 @@ install_deps() {
   pip install mako PyYAML meson ninja packaging
 
   if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
-    rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+    sync_spirv_repos
     cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DSPIRV-Headers_SOURCE_DIR=/tmp/SPIRV-Headers \
