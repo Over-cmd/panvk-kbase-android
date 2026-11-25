@@ -133,12 +133,7 @@ src = re.sub(
     count=1,
 )
 
-# 2) Extraer bloque GROW_ON_GPF acotado sin cruzar cierres de función
-grow_snippet_re = re.compile(
-    r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[^\n{]*\{(?:[^{}]|\{[^{}]*\})*?\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
-    re.MULTILINE,
-)
-
+# 2) Quitar cualquier bloque GROW_ON_GPF que esté fuera de kbase_kmod_bo_alloc
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
     "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n"
@@ -151,21 +146,36 @@ grow_clean = (
     "   }"
 )
 
-if grow_snippet_re.search(src):
-    src = grow_snippet_re.sub("/* relocated to kbase_kmod_bo_alloc */", src, count=1)
+# Buscar el bloque desde su comentario o desde `if (!kbase_dev->is_csf` hasta `commit_pages = MIN2...` y su `}`
+grow_full_re = re.compile(
+    r"(?:\n[ \t]*/\*[^\n]*Bifrost JM \(no JIT[^\n]*\n[ \t]*\*[^\n]*\*/)?\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}",
+    re.MULTILINE,
+)
 
+bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
+bo_start = bo_fn_m.start() if bo_fn_m else len(src)
+
+for m in list(grow_full_re.finditer(src)):
+    # Si está fuera de kbase_kmod_bo_alloc, eliminarlo de su ubicación errónea
+    if m.start() < bo_start:
+        src = src[:m.start()] + "\n   /* relocated to kbase_kmod_bo_alloc */" + src[m.end():]
+        print("Removed misplaced GROW_ON_GPF block before kbase_kmod_bo_alloc")
+
+# Insertar dentro de kbase_kmod_bo_alloc donde existan va_pages y page_size
 if "growable BO, GROW_ON_GPF" not in src:
     bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
     if bo_fn_m:
         bo_sub = src[bo_fn_m.start():]
-        ext_m = re.search(r"(\n[ \t]*extension\s*=\s*\(2\s*\*\s*1024\s*\*\s*1024\)\s*/\s*page_size;\s*\n)", bo_sub)
-        if ext_m:
-            pos = bo_fn_m.start() + ext_m.end()
-            fn_body_prefix = src[bo_fn_m.start():pos]
+        # Buscar la última asignación de va_pages o extension dentro de kbase_kmod_bo_alloc
+        anchors = list(re.finditer(r"\n[ \t]*(?:va_pages|extension)\s*=[^\n;]+;\s*\n", bo_sub))
+        if anchors:
+            last_a = anchors[-1]
+            pos = bo_fn_m.start() + last_a.end()
+            prefix_in_fn = src[bo_fn_m.start():pos]
             kd_decl = ""
-            if "kbase_dev" not in fn_body_prefix:
+            if "kbase_dev" not in prefix_in_fn:
                 kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
-            src = src[:pos] + kd_decl + grow_clean + "\n" + src[pos:]
+            src = src[:pos] + "\n" + kd_decl + grow_clean + "\n" + src[pos:]
             print("Placed GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
 # 3) Limpiar cualquier copia de kbase_check_bifrost_atom_stride en kbase_kmod_supports_dmabuf
@@ -250,8 +260,10 @@ build_and_package() {
   apply_android_tolm
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    echo "=== Compiler errors in build/android-bionic.log ==="
-    grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+    echo "=== kbase_kmod.c around line 1521 ==="
+    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1500,1545p' || true
+    echo "=== va_pages / page_size in kbase_kmod.c ==="
+    grep -nE "va_pages|page_size|commit_pages" "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" || true
     return 1
   fi
 
