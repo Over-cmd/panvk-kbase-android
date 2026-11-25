@@ -1,56 +1,69 @@
 from pathlib import Path
 
 target = Path("work/mesa/src/panfrost/lib/kmod/kbase_kmod.c")
-text = target.read_text(encoding="utf-8")
+lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
 
-# --- 003: skip MEM_JIT_INIT on Bifrost JM (arch < 9) ---
-old_jit = """\tif (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
-\t\tmesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
-\t\t\t  "(tiler heap creation will not work)", strerror(errno));
-\t}"""
+# --- 003 hunk 1: reemplazar bloque if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) ---
+jit_if_idx = next(
+    i for i, l in enumerate(lines)
+    if "KBASE_IOCTL_MEM_JIT_INIT" in l and "ioctl(" in l
+)
+jit_end_idx = next(
+    i for i in range(jit_if_idx, len(lines))
+    if lines[i].strip() == "}"
+) + 1
 
-new_jit = """\t/* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA
-\t * (the tiler heap is a SAME_VA GROW_ON_GPF BO), and JIT_INIT fails with
-\t * ENOMEM on G52 r1 kernels, so skip it (as JimVulkan/mali-panvk, MIT). */
-\tuint64_t raw_id = kbase_gpuprop_get(props_buf, props_size,
-\t\t\t\t\t    KBASE_GPUPROP_RAW_GPU_ID, 0);
-\tif (!raw_id)
-\t\traw_id = kbase_gpuprop_get(props_buf, props_size,
-\t\t\t\t\t   KBASE_GPUPROP_PRODUCT_ID, 0) << 16;
-\tif (!is_csf && raw_id && pan_arch(raw_id & 0xffffffffu) < 9) {
-\t\tmesa_logi("kbase: v%u JM, KBASE_IOCTL_MEM_JIT_INIT skipped; tiler "
-\t\t\t  "heap is a GROW_ON_GPF region",
-\t\t\t  pan_arch(raw_id & 0xffffffffu));
-\t} else if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
-\t\tmesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
-\t\t\t  "(tiler heap creation will not work)", strerror(errno));
-\t}"""
+jit_replacement = [
+    "\t/* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA\n",
+    "\t * (the tiler heap is a SAME_VA GROW_ON_GPF BO), and JIT_INIT fails with\n",
+    "\t * ENOMEM on G52 r1 kernels, so skip it (as JimVulkan/mali-panvk, MIT). */\n",
+    "\tuint64_t raw_id = kbase_gpuprop_get(props_buf, props_size,\n",
+    "\t\t\t\t\t    KBASE_GPUPROP_RAW_GPU_ID, 0);\n",
+    "\tif (!raw_id)\n",
+    '\t\traw_id = kbase_gpuprop_get(props_buf, props_size,\n',
+    "\t\t\t\t\t   KBASE_GPUPROP_PRODUCT_ID, 0) << 16;\n",
+    "\tif (!is_csf && raw_id && pan_arch(raw_id & 0xffffffffu) < 9) {\n",
+    '\t\tmesa_logi("kbase: v%u JM, KBASE_IOCTL_MEM_JIT_INIT skipped; tiler "\n',
+    '\t\t\t  "heap is a GROW_ON_GPF region",\n',
+    "\t\t\t  pan_arch(raw_id & 0xffffffffu));\n",
+    '\t} else if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {\n',
+    '\t\tmesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "\n',
+    '\t\t\t  "(tiler heap creation will not work)", strerror(errno));\n',
+    "\t}\n",
+]
 
-assert old_jit in text, "old_jit not found"
-text = text.replace(old_jit, new_jit, 1)
+# --- 003 hunk 2: GROW_ON_GPF 1 MiB upfront commit on Bifrost JM ---
+bo_idx = next(
+    i for i, l in enumerate(lines)
+    if "PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT" in l and "if " in l
+)
+bo_end_idx = next(
+    i for i in range(bo_idx, len(lines))
+    if lines[i].strip() == "}"
+) + 1
 
-# --- 003: GROW_ON_GPF 1 MiB upfront commit on Bifrost JM ---
-old_bo = """   if (kmod_flags & PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT) {
-      /* Growable region: nothing committed up-front, grown in 2 MB
-       * increments on GPU page fault (matches panfork's heap setup). */
-      commit_pages = 0;
-      extension = (2 * 1024 * 1024) / page_size;
-   }"""
+bo_addition = [
+    "\n",
+    "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n",
+    "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n",
+    "   if (!kbase_dev->is_csf && pan_arch(dev->props.gpu_id) < 9 &&\n",
+    "       (kmod_flags & PAN_KMOD_BO_FLAG_NO_MMAP)) {\n",
+    "      commit_pages = MIN2((1024 * 1024) / page_size, va_pages);\n",
+    '      mesa_logi("kbase: v%u growable BO, GROW_ON_GPF, %" PRIu64\n',
+    '                " of %" PRIu64 " pages committed",\n',
+    "                pan_arch(dev->props.gpu_id), commit_pages, va_pages);\n",
+    "   }\n",
+]
 
-new_bo = old_bo + """
+# Aplicar de abajo hacia arriba para no invalidar índices
+if bo_end_idx > jit_end_idx:
+    lines[bo_end_idx:bo_end_idx] = bo_addition
+    lines[jit_if_idx:jit_end_idx] = jit_replacement
+else:
+    lines[jit_if_idx:jit_end_idx] = jit_replacement
+    lines[bo_end_idx:bo_end_idx] = bo_addition
 
-   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let
-    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */
-   if (!kbase_dev->is_csf && pan_arch(dev->props.gpu_id) < 9 &&
-       (kmod_flags & PAN_KMOD_BO_FLAG_NO_MMAP)) {
-      commit_pages = MIN2((1024 * 1024) / page_size, va_pages);
-      mesa_logi("kbase: v%u growable BO, GROW_ON_GPF, %" PRIu64
-                " of %" PRIu64 " pages committed",
-                pan_arch(dev->props.gpu_id), commit_pages, va_pages);
-   }"""
-
-assert old_bo in text, "old_bo not found"
-text = text.replace(old_bo, new_bo, 1)
+text = "".join(lines)
 
 # --- 004 hunk 1: atom_seq_nr field in struct kbase_kmod_dev ---
 old_dev_struct = """   unsigned atom_stride;
