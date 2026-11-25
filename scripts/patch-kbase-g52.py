@@ -55,7 +55,6 @@ bo_addition = [
     "   }\n",
 ]
 
-# Aplicar de abajo hacia arriba para no invalidar índices
 if bo_end_idx > jit_end_idx:
     lines[bo_end_idx:bo_end_idx] = bo_addition
     lines[jit_if_idx:jit_end_idx] = jit_replacement
@@ -63,22 +62,14 @@ else:
     lines[jit_if_idx:jit_end_idx] = jit_replacement
     lines[bo_end_idx:bo_end_idx] = bo_addition
 
-text = "".join(lines)
-
 # --- 004 hunk 1: atom_seq_nr field in struct kbase_kmod_dev ---
-old_dev_struct = """   unsigned atom_stride;
-   uint32_t last_event_code[KBASE_MAX_ATOMS];"""
-
-new_dev_struct = """   unsigned atom_stride;
-   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */
-   bool atom_seq_nr;
-   uint32_t last_event_code[KBASE_MAX_ATOMS];"""
-
-assert old_dev_struct in text, "old_dev_struct not found"
-text = text.replace(old_dev_struct, new_dev_struct, 1)
+stride_field_idx = next(
+    i for i, l in enumerate(lines)
+    if "atom_stride;" in l and "last_event_code" not in l
+)
+lines.insert(stride_field_idx + 1, "   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */\n   bool atom_seq_nr;\n")
 
 # --- 004 hunk 2: kbase_try_atom_stride & kbase_check_bifrost_atom_stride ---
-lines = text.splitlines(keepends=True)
 probe_idx = next(
     i for i, l in enumerate(lines)
     if "kbase_probe_atom_stride(" in l and i + 2 < len(lines) and lines[i + 2].strip() == "{"
@@ -144,34 +135,27 @@ kbase_check_bifrost_atom_stride(int fd, bool *seq_nr)
 """
 
 lines[probe_end:probe_end] = [stride_helpers]
-text = "".join(lines)
 
 # --- 004 hunk 3: call stride check & set atom_seq_nr in kbase_kmod_dev_create ---
-old_create_alloc = """   struct kbase_kmod_dev *kbase_dev =
-      pan_kmod_alloc(allocator, sizeof(*kbase_dev));"""
+alloc_idx = next(
+    i for i, l in enumerate(lines)
+    if "pan_kmod_alloc(allocator, sizeof(*kbase_dev))" in l
+)
+lines[alloc_idx:alloc_idx] = [
+    "   bool atom_seq_nr = false;\n",
+    "   if (!is_csf && atom_stride == 56 && raw_id &&\n",
+    "       pan_arch(raw_id & 0xffffffffu) < 9)\n",
+    "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n\n",
+]
 
-new_create_alloc = """   bool atom_seq_nr = false;
-   if (!is_csf && atom_stride == 56 && raw_id &&
-       pan_arch(raw_id & 0xffffffffu) < 9)
-      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);
-
-   struct kbase_kmod_dev *kbase_dev =
-      pan_kmod_alloc(allocator, sizeof(*kbase_dev));"""
-
-assert old_create_alloc in text, "old_create_alloc not found"
-text = text.replace(old_create_alloc, new_create_alloc, 1)
-
-old_create_stride = """   if (!is_csf) {
-      kbase_dev->atom_stride = atom_stride;"""
-
-new_create_stride = """   if (!is_csf) {
-      kbase_dev->atom_stride = atom_stride;
-      kbase_dev->atom_seq_nr = atom_seq_nr;"""
-
-assert old_create_stride in text, "old_create_stride not found"
-text = text.replace(old_create_stride, new_create_stride, 1)
+dev_stride_idx = next(
+    i for i, l in enumerate(lines)
+    if "kbase_dev->atom_stride = atom_stride;" in l
+)
+lines.insert(dev_stride_idx + 1, "      kbase_dev->atom_seq_nr = atom_seq_nr;\n")
 
 # --- 004 hunks 4 & 5: wrap atom with seq_nr on job submit ---
+text = "".join(lines)
 old_submit = """   struct kbase_ioctl_job_submit sub = {
       .addr = (uintptr_t)&atom,
       .nr_atoms = 1,
