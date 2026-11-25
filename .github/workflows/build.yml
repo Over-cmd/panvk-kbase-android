@@ -31,6 +31,7 @@ jobs:
           NEEDRESTART_MODE: a
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          apt-cache search spirv || true
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
@@ -76,6 +77,11 @@ jobs:
             git -C work/mesa apply --recount "$PWD/$p"
           done
 
+      - name: Inspect SPIRV-Tools requirement in host-tools
+        run: |
+          sed -n '2100,2130p' work/mesa/meson.build || true
+          grep -n "mesa-clc\|spirv" scripts/bootstrap-host-tools.sh || true
+
       - name: Build Android driver for AArch64 (LLVM 21)
         env:
           PANVK_RELEASE: ${{ env.PANVK_RELEASE }}
@@ -85,6 +91,7 @@ jobs:
           export LD="ld.lld-${LLVM_VER}"
           export LLVM_CONFIG="llvm-config-${LLVM_VER}"
           export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
+          export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
           ./scripts/build-android.sh --profile "${PROFILE}"
 
       - name: Validate compiled AArch64 binary
