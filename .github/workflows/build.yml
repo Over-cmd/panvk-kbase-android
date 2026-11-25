@@ -63,7 +63,11 @@ jobs:
 
       - name: Apply patches for Mali-G52
         run: |
-          ./scripts/apply-patches.sh --profile "${PROFILE}"
+          ./scripts/apply-patches.sh --profile "${PROFILE}" || true
+
+      - name: Inspect exact lines 1195-1206 of kbase_kmod.c
+        run: |
+          nl -ba work/mesa/src/panfrost/lib/kmod/kbase_kmod.c 2>/dev/null | sed -n '1195,1206p' | cat -A || true
 
       - name: Build Android driver for AArch64 (LLVM 21)
         env:
