@@ -133,12 +133,7 @@ src = re.sub(
     count=1,
 )
 
-# 2) Extraer bloque GROW_ON_GPF acotado sin cruzar cierres de función
-grow_snippet_re = re.compile(
-    r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[^\n{]*\{(?:[^{}]|\{[^{}]*\})*?\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
-    re.MULTILINE,
-)
-
+# 2) Eliminar cualquier bloque GROW_ON_GPF mal ubicado fuera de kbase_kmod_bo_alloc
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
     "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n"
@@ -151,22 +146,44 @@ grow_clean = (
     "   }"
 )
 
-if grow_snippet_re.search(src):
-    src = grow_snippet_re.sub("/* relocated to kbase_kmod_bo_alloc */", src, count=1)
+bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
+bo_start = bo_fn_m.start() if bo_fn_m else len(src)
 
-if "growable BO, GROW_ON_GPF" not in src:
-    bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
-    if bo_fn_m:
-        bo_sub = src[bo_fn_m.start():]
-        ext_m = re.search(r"(\n[ \t]*extension\s*=\s*\(2\s*\*\s*1024\s*\*\s*1024\)\s*/\s*page_size;\s*\n)", bo_sub)
-        if ext_m:
-            pos = bo_fn_m.start() + ext_m.end()
-            fn_body_prefix = src[bo_fn_m.start():pos]
-            kd_decl = ""
-            if "kbase_dev" not in fn_body_prefix:
-                kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
-            src = src[:pos] + kd_decl + grow_clean + "\n" + src[pos:]
-            print("Placed GROW_ON_GPF block inside kbase_kmod_bo_alloc")
+# Localizar por `GROW_ON_GPF` y expandir hasta la llave de cierre `}` del `if`
+for m in list(re.finditer(r"GROW_ON_GPF", src)):
+    if m.start() < bo_start:
+        if_start = src.rfind("if (", 0, m.start())
+        if if_start == -1:
+            if_start = src.rfind("if\t(", 0, m.start())
+        brace_close = src.find("\n   }", m.start())
+        if brace_close == -1:
+            brace_close = src.find("\n}", m.start())
+        if if_start != -1 and brace_close != -1:
+            comment_start = src.rfind("/* Bifrost JM", 0, if_start)
+            cut_start = comment_start if (comment_start != -1 and if_start - comment_start < 200) else if_start
+            cut_end = brace_close + len("\n   }")
+            src = src[:cut_start] + "/* relocated to kbase_kmod_bo_alloc */" + src[cut_end:]
+            print("Removed misplaced GROW_ON_GPF block")
+            bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
+            bo_start = bo_fn_m.start() if bo_fn_m else len(src)
+
+# Insertar dentro de kbase_kmod_bo_alloc tras extension / va_pages o antes de KBASE_IOCTL_MEM_ALLOC
+if "growable BO, GROW_ON_GPF" not in src and bo_fn_m:
+    bo_sub = src[bo_fn_m.start():]
+    anchors = list(re.finditer(r"\n[ \t]*(?:va_pages|extension)\s*=[^\n;]+;\s*\n", bo_sub))
+    if anchors:
+        pos = bo_fn_m.start() + anchors[-1].end()
+    else:
+        ioctl_m = re.search(r"\n[ \t]*[^\n]*KBASE_IOCTL_MEM_ALLOC", bo_sub)
+        pos = (bo_fn_m.start() + ioctl_m.start()) if ioctl_m else None
+
+    if pos is not None:
+        prefix_in_fn = src[bo_fn_m.start():pos]
+        kd_decl = ""
+        if "kbase_dev" not in prefix_in_fn:
+            kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
+        src = src[:pos] + "\n" + kd_decl + grow_clean + "\n" + src[pos:]
+        print("Placed GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
 # 3) Limpiar cualquier copia de kbase_check_bifrost_atom_stride en kbase_kmod_supports_dmabuf
 dmabuf_m = re.search(r"\bkbase_kmod_supports_dmabuf\s*\([^\)]*\)\s*\n\{[\s\S]*?\n\}", src)
