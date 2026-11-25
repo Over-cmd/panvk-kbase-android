@@ -25,95 +25,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install build dependencies (Clang/LLVM 21 + SPIRV-Tools)
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
-        run: |
-          sudo add-apt-repository -y universe || true
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update
-          apt-cache search spirv || true
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            -o Dpkg::Options::="--force-confdef" \
-            -o Dpkg::Options::="--force-confold" \
-            build-essential \
-            git \
-            ninja-build \
-            clang-${LLVM_VER} \
-            lld-${LLVM_VER} \
-            llvm-${LLVM_VER}-dev \
-            libclang-${LLVM_VER}-dev \
-            libclc-${LLVM_VER}-dev \
-            libllvmspirvlib-${LLVM_VER}-dev \
-            libelf-dev \
-            bison \
-            flex \
-            libdrm-dev \
-            pkg-config \
-            gettext-base \
-            gettext
-          python -m pip install --upgrade pip
-          pip install mako PyYAML meson ninja packaging
-
-          if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
-            git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-            git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
-            cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools/build -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DSPIRV-Headers_SOURCE_DIR=/tmp/SPIRV-Headers \
-              -DSPIRV_SKIP_TESTS=ON \
-              -DSPIRV_WERROR=OFF
-            cmake --build /tmp/SPIRV-Tools/build -j"$(nproc)"
-            sudo cmake --install /tmp/SPIRV-Tools/build
-            sudo ldconfig
-          fi
-          pkg-config --modversion SPIRV-Tools || true
-
-      - name: Verify sources.lock and profile
-        run: |
-          python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
-          test -f "profiles/${PROFILE}.json"
-
-      - name: Fetch Mesa
-        run: |
-          ./scripts/fetch-mesa.sh
-
-      - name: Apply patches for Mali-G52
-        run: |
-          if ./scripts/apply-patches.sh --profile "${PROFILE}"; then
-            exit 0
-          fi
-          python3 scripts/patch-kbase-g52.py
-          for p in patches/jm-v7/*.patch; do
-            base="$(basename "$p")"
-            case "$base" in
-              001-*|002-*|003-*|004-*) continue ;;
-            esac
-            echo "Applying remaining jm-v7 patch: $base"
-            git -C work/mesa apply --recount "$PWD/$p"
-          done
-
-      - name: Build Android driver for AArch64 (LLVM 21)
+      - name: Build and package PanVK Mali-G52
         env:
           PANVK_RELEASE: ${{ env.PANVK_RELEASE }}
-        run: |
-          export CC="clang-${LLVM_VER}"
-          export CXX="clang++-${LLVM_VER}"
-          export LD="ld.lld-${LLVM_VER}"
-          export LLVM_CONFIG="llvm-config-${LLVM_VER}"
-          export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
-          export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-          export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
-          ./scripts/build-android.sh --profile "${PROFILE}"
-
-      - name: Validate compiled AArch64 binary
-        run: |
-          ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
-
-      - name: Package Android .adpkg
-        run: |
-          ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
+        run: ./build.sh
 
       - name: Upload .adpkg and driver artifacts
         uses: actions/upload-artifact@v4
