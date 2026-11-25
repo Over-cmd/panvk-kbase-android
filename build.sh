@@ -145,10 +145,17 @@ from pathlib import Path
 path = Path(sys.argv[1])
 src = path.read_text(encoding="utf-8")
 
-# 1) Restaurar tipo de retorno de kbase_kmod_dev_create si quedó sin él
+# 1) Asegurar que kbase_kmod_dev_create tenga su prototipo/definición visible
+if "kbase_kmod_dev_create(" not in src:
+    ops_m = re.search(r"\.dev_create\s*=\s*kbase_kmod_dev_create", src)
+    if ops_m:
+        print("Warning: .dev_create references kbase_kmod_dev_create, checking functions in kbase_kmod.c")
+        for fn in re.findall(r"^[a-zA-Z_][a-zA-Z0-9_ *]*\b[a-zA-Z0-9_]*dev_create\b[^\n{]*", src, re.MULTILINE):
+            print("Found candidate:", fn)
+
 src = re.sub(
-    r"\n(kbase_kmod_dev_create\s*\(\s*int fd,)",
-    r"\nstatic struct pan_kmod_dev *\n\1",
+    r"(?m)^([ \t]*)kbase_kmod_dev_create\s*\(\s*int fd,",
+    r"\1static struct pan_kmod_dev *\n\1kbase_kmod_dev_create(int fd,",
     src,
     count=1,
 )
@@ -287,6 +294,10 @@ build_and_package() {
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     echo "=== Compiler errors in build/android-bionic.log ==="
     grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+    echo "=== kbase_kmod.c around line 1515 ==="
+    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1500,1530p' || true
+    echo "=== dev_create / err_unmap_gpu in kbase_kmod.c ==="
+    grep -nE "dev_create|err_unmap_gpu|GROW_ON_GPF" "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" || true
     return 1
   fi
 
