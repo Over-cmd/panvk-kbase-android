@@ -100,19 +100,41 @@ prepare_mesa() {
 
   ./scripts/fetch-mesa.sh
 
-  if ./scripts/apply-patches.sh --profile "${PROFILE}"; then
-    return 0
+  if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
+    python3 scripts/patch-kbase-g52.py
+    for p in patches/jm-v7/*.patch; do
+      base="$(basename "$p")"
+      case "$base" in
+        001-*|002-*|003-*|004-*) continue ;;
+      esac
+      echo "Applying remaining jm-v7 patch: $base"
+      git -C work/mesa apply --recount "$PWD/$p"
+    done
   fi
+}
 
-  python3 scripts/patch-kbase-g52.py
-  for p in patches/jm-v7/*.patch; do
-    base="$(basename "$p")"
-    case "$base" in
-      001-*|002-*|003-*|004-*) continue ;;
-    esac
-    echo "Applying remaining jm-v7 patch: $base"
-    git -C work/mesa apply --recount "$PWD/$p"
-  done
+fix_kbase_kmod_flags() {
+  local kmod_c="${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c"
+  [ -f "$kmod_c" ] || return 0
+
+  python3 - "$kmod_c" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+src = path.read_text(encoding="utf-8")
+
+pattern = re.compile(
+    r"\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}",
+    re.MULTILINE,
+)
+
+new_src, count = pattern.subn("\n\t/* skipped invalid in-flag commit_pages block */", src, count=1)
+if count:
+    path.write_text(new_src, encoding="utf-8")
+    print(f"Sanitized {count} invalid GROW_ON_GPF commit_pages snippet(s) in kbase_kmod.c")
+PY
 }
 
 apply_android_tolm() {
@@ -142,14 +164,7 @@ build_and_package() {
 
   apply_android_tolm
 
-  if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    echo "=== Source of commit_pages / GROW_ON_GPF in patches & scripts ==="
-    grep -rn "commit_pages\|GROW_ON_GPF" "${ROOT}/patches" "${ROOT}/scripts" || true
-    echo "=== Function header around kbase_kmod.c:1519 ==="
-    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1475,1528p' || true
-    return 1
-  fi
-
+  ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
   ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
   ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
 }
@@ -157,6 +172,7 @@ build_and_package() {
 main() {
   install_deps
   prepare_mesa
+  fix_kbase_kmod_flags
   build_and_package
 }
 
