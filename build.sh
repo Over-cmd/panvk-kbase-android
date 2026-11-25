@@ -22,7 +22,6 @@ trap restore_cross_ini EXIT
 install_deps() {
   sudo add-apt-repository -y universe || true
   sudo apt-get update
-  apt-cache search spirv || true
   sudo apt-get install -y --no-install-recommends \
     -o Dpkg::Options::="--force-confdef" \
     -o Dpkg::Options::="--force-confold" \
@@ -41,11 +40,20 @@ install_deps() {
     flex \
     libdrm-dev \
     libxcb1-dev \
+    libxcb-dri3-dev \
+    libxcb-present-dev \
+    libxcb-randr-dev \
+    libxcb-sync-dev \
+    libxcb-xfixes-dev \
+    libxcb-shm-dev \
     libx11-dev \
+    libxrandr-dev \
     libxshmfence-dev \
     pkg-config \
     gettext-base \
     gettext
+
+  ls -d /usr/include/xcb /usr/include/X11 /usr/include/xshmfence.h 2>/dev/null || true
 
   python3 -m pip install --upgrade pip
   pip install mako PyYAML meson ninja packaging
