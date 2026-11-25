@@ -28,7 +28,7 @@ jobs:
       - name: Build and package PanVK Mali-G52
         env:
           PANVK_RELEASE: ${{ env.PANVK_RELEASE }}
-        run: ./build.sh
+        run: bash ./build.sh
 
       - name: Upload .adpkg and driver artifacts
         uses: actions/upload-artifact@v4
