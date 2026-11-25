@@ -175,7 +175,7 @@ if "atom_seq_nr = atom_seq_nr;" not in text:
     stride_assign_idx = next(
         (
             i for i in range(create_idx or 0, len(lines))
-            if "= atom_stride;" in lines[i] and "atom_seq_nr" not in lines[i]
+            if "atom_stride" in lines[i] and "=" in lines[i] and "==" not in lines[i] and "atom_seq_nr" not in lines[i]
         ),
         None,
     )
@@ -189,23 +189,27 @@ if "atom_seq_nr = atom_seq_nr;" not in text:
 lines = "".join(lines).splitlines(keepends=True)
 i = 0
 while i < len(lines):
-    if "struct kbase_ioctl_job_submit" in lines[i] and "{" in "".join(lines[i : i + 6]):
+    if "kbase_ioctl_job_submit" in lines[i] and "{" in "".join(lines[i : i + 6]):
         block_end = next(
-            (j for j in range(i, min(i + 12, len(lines))) if "};" in lines[j]),
+            (j for j in range(i, min(i + 14, len(lines))) if "};" in lines[j]),
             None,
         )
         if block_end is not None:
             block_str = "".join(lines[i : block_end + 1])
-            if "&atom" in block_str and "atom_stride" in block_str and "atom_seq_nr" not in block_str:
+            if "&atom" in block_str and "atom_seq_nr" not in block_str:
                 indent = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
                 addr_line_idx = next(
                     (j for j in range(i, block_end + 1) if ".addr" in lines[j] and "&atom" in lines[j]),
                     None,
                 )
                 if addr_line_idx is not None:
+                    # Detectar nombre del puntero al dispositivo en la funcion actual
+                    fn_start = next((k for k in range(i, -1, -1) if lines[k] and not lines[k][0].isspace() and "{" not in lines[k]), 0)
+                    fn_header = "".join(lines[fn_start : i + 1])
+                    dev_var = "kd" if "kd" in fn_header else ("kbase_dev" if "kbase_dev" in fn_header else "dev")
                     lines[addr_line_idx] = lines[addr_line_idx].replace(
                         "(uintptr_t)&atom",
-                        "kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom",
+                        f"{dev_var}->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom",
                     )
                     wrapper = [
                         f"{indent}struct {{\n",
@@ -229,13 +233,19 @@ markers = {
     "004_stride_probe": "kbase_check_bifrost_atom_stride(",
     "004_stride_call": "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)",
     "004_dev_assign": "atom_seq_nr = atom_seq_nr;",
-    "004_job_submit_seq_nr": "kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom",
+    "004_job_submit_seq_nr": "atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom",
 }
 
 missing = [name for name, needle in markers.items() if needle not in final_text]
 for name, needle in markers.items():
     status = "OK" if needle in final_text else "MISSING"
     print(f"[{status}] {name}: {needle}")
+
+if missing:
+    print("=== Contexto en kbase_kmod.c para depurar ===")
+    for idx, l in enumerate(final_text.splitlines(), 1):
+        if "atom_stride" in l or "KBASE_IOCTL_JOB_SUBMIT" in l or "kbase_ioctl_job_submit" in l:
+            print(f"L{idx}: {l}")
 
 assert not missing, f"Missing markers in kbase_kmod.c: {missing}"
 print("All 003 + 004 markers verified in kbase_kmod.c")
