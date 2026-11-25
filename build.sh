@@ -133,7 +133,7 @@ src = re.sub(
     count=1,
 )
 
-# 2) Eliminar cualquier bloque GROW_ON_GPF mal ubicado fuera de kbase_kmod_bo_alloc
+# 2) Reubicar bloque GROW_ON_GPF dentro de kbase_kmod_bo_alloc
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
     "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n"
@@ -149,7 +149,6 @@ grow_clean = (
 bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
 bo_start = bo_fn_m.start() if bo_fn_m else len(src)
 
-# Localizar por `GROW_ON_GPF` y expandir hasta la llave de cierre `}` del `if`
 for m in list(re.finditer(r"GROW_ON_GPF", src)):
     if m.start() < bo_start:
         if_start = src.rfind("if (", 0, m.start())
@@ -167,7 +166,6 @@ for m in list(re.finditer(r"GROW_ON_GPF", src)):
             bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
             bo_start = bo_fn_m.start() if bo_fn_m else len(src)
 
-# Insertar dentro de kbase_kmod_bo_alloc tras extension / va_pages o antes de KBASE_IOCTL_MEM_ALLOC
 if "growable BO, GROW_ON_GPF" not in src and bo_fn_m:
     bo_sub = src[bo_fn_m.start():]
     anchors = list(re.finditer(r"\n[ \t]*(?:va_pages|extension)\s*=[^\n;]+;\s*\n", bo_sub))
