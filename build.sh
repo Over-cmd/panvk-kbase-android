@@ -125,9 +125,17 @@ from pathlib import Path
 path = Path(sys.argv[1])
 src = path.read_text(encoding="utf-8")
 
-# 1) Extraer cualquier bloque GROW_ON_GPF fuera de kbase_kmod_bo_alloc
+# 1) Restaurar tipo de retorno de kbase_kmod_dev_create si quedó sin él
+src = re.sub(
+    r"\n(kbase_kmod_dev_create\s*\(\s*int fd,)",
+    r"\nstatic struct pan_kmod_dev *\n\1",
+    src,
+    count=1,
+)
+
+# 2) Extraer bloque GROW_ON_GPF acotado sin cruzar cierres de función
 grow_snippet_re = re.compile(
-    r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
+    r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[^\n{]*\{(?:[^{}]|\{[^{}]*\})*?\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
     re.MULTILINE,
 )
 
@@ -160,7 +168,7 @@ if "growable BO, GROW_ON_GPF" not in src:
             src = src[:pos] + kd_decl + grow_clean + "\n" + src[pos:]
             print("Placed GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
-# 2) Limpiar cualquier copia de kbase_check_bifrost_atom_stride que haya caído fuera de kbase_kmod_dev_create
+# 3) Limpiar cualquier copia de kbase_check_bifrost_atom_stride en kbase_kmod_supports_dmabuf
 dmabuf_m = re.search(r"\bkbase_kmod_supports_dmabuf\s*\([^\)]*\)\s*\n\{[\s\S]*?\n\}", src)
 if dmabuf_m and "kbase_check_bifrost_atom_stride" in dmabuf_m.group(0):
     cleaned_dmabuf = re.sub(
@@ -171,7 +179,7 @@ if dmabuf_m and "kbase_check_bifrost_atom_stride" in dmabuf_m.group(0):
     src = src[:dmabuf_m.start()] + cleaned_dmabuf + src[dmabuf_m.end():]
     print("Removed misplaced atom_stride block from kbase_kmod_supports_dmabuf")
 
-# 3) Insertar la comprobación de atom_stride dentro de kbase_kmod_dev_create tras kbase_dev->is_csf = is_csf;
+# 4) Insertar la comprobación de atom_stride dentro de kbase_kmod_dev_create tras kbase_dev->is_csf = is_csf;
 if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
     dev_create_m = re.search(r"\nkbase_kmod_dev_create\s*\(", src)
     if dev_create_m:
@@ -202,13 +210,13 @@ if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
             src = src[:pos] + stride_block + src[pos:]
             print("Placed atom_stride check inside kbase_kmod_dev_create after kbase_dev->is_csf = is_csf;")
 
-# 4) Declaración adelantada de kbase_check_bifrost_atom_stride antes de kbase_kmod_dev_create
+# 5) Declaración adelantada de kbase_check_bifrost_atom_stride antes de kbase_kmod_dev_create
 fwd_decl = "static unsigned kbase_check_bifrost_atom_stride(int fd, bool *seq_nr);\n"
 if "kbase_check_bifrost_atom_stride(" in src and fwd_decl not in src:
-    dev_create_def = re.search(r"\n(?:static\s+)?[^\n;]*\bkbase_kmod_dev_create\s*\(", src)
+    dev_create_def = re.search(r"\n(?:static struct pan_kmod_dev \*\n)?\bkbase_kmod_dev_create\s*\(", src)
     if dev_create_def:
         src = src[:dev_create_def.start()] + "\n" + fwd_decl + src[dev_create_def.start():]
-        print("Added forward declaration for kbase_check_bifrost_atom_stride before kbase_kmod_dev_create")
+        print("Added forward declaration for kbase_check_bifrost_atom_stride")
 
 path.write_text(src, encoding="utf-8")
 PY
@@ -243,7 +251,7 @@ build_and_package() {
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     echo "=== Compiler errors in build/android-bionic.log ==="
-    grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 50 || true
+    grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
     return 1
   fi
 
