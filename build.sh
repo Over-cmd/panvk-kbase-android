@@ -142,7 +142,14 @@ build_and_package() {
 
   apply_android_tolm
 
-  ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
+  if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
+    echo "=== kbase_kmod.c around line 1519 ==="
+    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1490,1535p' || true
+    echo "=== References to kbase_kmod.c in patches/scripts ==="
+    grep -rn "kbase_kmod.c" "${ROOT}/patches" "${ROOT}/scripts" || true
+    return 1
+  fi
+
   ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
   ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
 }
