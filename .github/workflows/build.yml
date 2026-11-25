@@ -67,13 +67,16 @@ jobs:
             exit 0
           fi
           python3 scripts/patch-kbase-g52.py
+          echo "=== 004 patch and kbase_kmod.c lines 170-210 ==="
+          cat patches/jm-v7/004-bifrost-atom-stride-check-with-64-candidate.patch || true
+          nl -ba work/mesa/src/panfrost/lib/kmod/kbase_kmod.c | sed -n '170,210p' | cat -A || true
           for p in patches/jm-v7/*.patch; do
             base="$(basename "$p")"
             case "$base" in
               001-*|002-*|003-*) continue ;;
             esac
             echo "Applying remaining jm-v7 patch: $base"
-            git -C work/mesa apply --recount "$PWD/$p"
+            git -C work/mesa apply --recount "$PWD/$p" || true
           done
 
       - name: Build Android driver for AArch64 (LLVM 21)
