@@ -45,16 +45,25 @@ sync_spirv_repos() {
   if ! grep -rn "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Headers/include >/dev/null 2>&1; then
     local candidate_tags tag
     candidate_tags="$(git ls-remote --tags --refs --sort=-creatordate https://github.com/KhronosGroup/SPIRV-Tools.git \
-      | awk -F'refs/tags/' '{print $2}' | head -n 40)"
+      | awk -F'refs/tags/' '{print $2}' \
+      | grep -E '^(v?[0-9]+\.[0-9]+(\.[0-9]+)?(-rc[0-9]+)?|sdk-[0-9]+\.[0-9]+(\.[0-9]+)?)$' \
+      | head -n 30 || true)"
+
     for tag in $candidate_tags; do
       if git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Headers.git "refs/tags/${tag}" >/dev/null 2>&1; then
-        echo "Syncing SPIRV-Headers and SPIRV-Tools to tag: ${tag}"
         rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-        git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-        git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
-        break
+        if git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers && \
+           git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools; then
+          echo "Synced SPIRV-Headers and SPIRV-Tools to tag: ${tag}"
+          return 0
+        fi
       fi
     done
+
+    echo "Falling back to latest main branch for SPIRV-Headers and SPIRV-Tools"
+    rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
   fi
 }
 
