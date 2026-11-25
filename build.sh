@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILE="${PROFILE:-g52-v7-jm}"
 LLVM_VER="${LLVM_VER:-21}"
 ANDROID_API="${ANDROID_API:-30}"
+SPIRV_TOOLS_REF="${SPIRV_TOOLS_REF:-v2025.1}"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -79,26 +80,13 @@ install_deps() {
 
   if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
     rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
-
-    # Si main presenta desfase de enums entre SPIRV-Tools y SPIRV-Headers, usar el último tag común
-    if ! grep -q "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Headers/include/spirv/unified1/spirv.h 2>/dev/null && \
-       grep -q "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Tools/source/table2.cpp 2>/dev/null; then
-      rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-      local common_tag
-      common_tag="$(git ls-remote --tags --refs --sort=-v:refname https://github.com/KhronosGroup/SPIRV-Tools.git \
-        | awk -F'refs/tags/' '/^.*refs\/tags\/v[0-9]+\.[0-9]+(\.[0-9]+)?$/ {print $2; exit}')"
-      if [ -n "$common_tag" ] && git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Headers.git "refs/tags/${common_tag}" >/dev/null 2>&1; then
-        echo "Syncing SPIRV-Headers and SPIRV-Tools to tag ${common_tag}"
-        git clone --depth 1 --branch "$common_tag" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-        git clone --depth 1 --branch "$common_tag" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
-      else
-        git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-        git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
-      fi
+    if git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Tools.git "refs/tags/${SPIRV_TOOLS_REF}" >/dev/null 2>&1; then
+      git clone --depth 1 --branch "${SPIRV_TOOLS_REF}" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+      git clone --depth 1 --branch "${SPIRV_TOOLS_REF}" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+    else
+      git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+      git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
     fi
-
     cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DSPIRV-Headers_SOURCE_DIR=/tmp/SPIRV-Headers \
@@ -151,7 +139,12 @@ src = re.sub(
     count=1,
 )
 
-# 2) Quitar cualquier bloque GROW_ON_GPF que esté fuera de kbase_kmod_bo_alloc
+# 2) Extraer bloque GROW_ON_GPF acotado sin cruzar cierres de función
+grow_snippet_re = re.compile(
+    r"(?:/\*[^\n]*TODO[^\n]*\*/\s*)?if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[^\n{]*\{(?:[^{}]|\{[^{}]*\})*?\}(?:\s*/\*[^\n]*\*/)?(?:\s*#endif)?",
+    re.MULTILINE,
+)
+
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
     "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n"
@@ -164,32 +157,21 @@ grow_clean = (
     "   }"
 )
 
-grow_full_re = re.compile(
-    r"(?:\n[ \t]*/\*[^\n]*Bifrost JM \(no JIT[^\n]*\n[ \t]*\*[^\n]*\*/)?\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}",
-    re.MULTILINE,
-)
-
-bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
-bo_start = bo_fn_m.start() if bo_fn_m else len(src)
-
-for m in list(grow_full_re.finditer(src)):
-    if m.start() < bo_start:
-        src = src[:m.start()] + "\n   /* relocated to kbase_kmod_bo_alloc */" + src[m.end():]
-        print("Removed misplaced GROW_ON_GPF block before kbase_kmod_bo_alloc")
+if grow_snippet_re.search(src):
+    src = grow_snippet_re.sub("/* relocated to kbase_kmod_bo_alloc */", src, count=1)
 
 if "growable BO, GROW_ON_GPF" not in src:
     bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
     if bo_fn_m:
         bo_sub = src[bo_fn_m.start():]
-        anchors = list(re.finditer(r"\n[ \t]*(?:va_pages|extension)\s*=[^\n;]+;\s*\n", bo_sub))
-        if anchors:
-            last_a = anchors[-1]
-            pos = bo_fn_m.start() + last_a.end()
-            prefix_in_fn = src[bo_fn_m.start():pos]
+        ext_m = re.search(r"(\n[ \t]*extension\s*=\s*\(2\s*\*\s*1024\s*\*\s*1024\)\s*/\s*page_size;\s*\n)", bo_sub)
+        if ext_m:
+            pos = bo_fn_m.start() + ext_m.end()
+            fn_body_prefix = src[bo_fn_m.start():pos]
             kd_decl = ""
-            if "kbase_dev" not in prefix_in_fn:
+            if "kbase_dev" not in fn_body_prefix:
                 kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
-            src = src[:pos] + "\n" + kd_decl + grow_clean + "\n" + src[pos:]
+            src = src[:pos] + kd_decl + grow_clean + "\n" + src[pos:]
             print("Placed GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
 # 3) Limpiar cualquier copia de kbase_check_bifrost_atom_stride en kbase_kmod_supports_dmabuf
