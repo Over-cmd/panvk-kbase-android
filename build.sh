@@ -117,6 +117,9 @@ fix_kbase_kmod_flags() {
   local kmod_c="${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c"
   [ -f "$kmod_c" ] || return 0
 
+  echo "=== Searching commit_pages and va_pages in kbase_kmod.c ==="
+  grep -nE "commit_pages|va_pages|page_size" "$kmod_c" || true
+
   python3 - "$kmod_c" <<'PY'
 import re
 import sys
