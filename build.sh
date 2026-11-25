@@ -38,24 +38,60 @@ ensure_host_x11_headers() {
 }
 
 sync_spirv_repos() {
-  rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+  if [ ! -d /tmp/SPIRV-Tools ] || [ ! -d /tmp/SPIRV-Headers ]; then
+    rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
+    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
 
-  local pinned_rev=""
-  if [ -f /tmp/SPIRV-Tools/DEPS ]; then
-    pinned_rev="$(grep -E "spirv_headers_revision|SPIRV-Headers" /tmp/SPIRV-Tools/DEPS \
-      | grep -oE '[0-9a-f]{40}' | head -n 1 || true)"
+    local pinned_rev=""
+    if [ -f /tmp/SPIRV-Tools/DEPS ]; then
+      pinned_rev="$(grep -E "spirv_headers_revision|SPIRV-Headers" /tmp/SPIRV-Tools/DEPS \
+        | grep -oE '[0-9a-f]{40}' | head -n 1 || true)"
+    fi
+
+    if [ -n "$pinned_rev" ]; then
+      echo "Syncing SPIRV-Headers to DEPS revision: ${pinned_rev}"
+      mkdir -p /tmp/SPIRV-Headers
+      git -C /tmp/SPIRV-Headers init -q
+      git -C /tmp/SPIRV-Headers remote add origin https://github.com/KhronosGroup/SPIRV-Headers.git
+      git -C /tmp/SPIRV-Headers fetch --depth 1 origin "$pinned_rev"
+      git -C /tmp/SPIRV-Headers checkout -q FETCH_HEAD
+    else
+      git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+    fi
+  fi
+}
+
+install_android_spirv_tools() {
+  local ndk_home="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+  local android_spv_prefix="${ROOT}/work/android-spirv-tools"
+
+  if [ -z "$ndk_home" ]; then
+    echo "Warning: ANDROID_NDK_HOME not set; skipping Android aarch64 SPIRV-Tools build"
+    return 0
   fi
 
-  if [ -n "$pinned_rev" ]; then
-    echo "Syncing SPIRV-Headers to DEPS revision: ${pinned_rev}"
-    mkdir -p /tmp/SPIRV-Headers
-    git -C /tmp/SPIRV-Headers init -q
-    git -C /tmp/SPIRV-Headers remote add origin https://github.com/KhronosGroup/SPIRV-Headers.git
-    git -C /tmp/SPIRV-Headers fetch --depth 1 origin "$pinned_rev"
-    git -C /tmp/SPIRV-Headers checkout -q FETCH_HEAD
-  else
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+  local toolchain_cmake="${ndk_home}/build/cmake/android.toolchain.cmake"
+  if [ ! -f "$toolchain_cmake" ]; then
+    echo "Warning: NDK cmake toolchain not found at ${toolchain_cmake}"
+    return 0
+  fi
+
+  sync_spirv_repos
+
+  if [ ! -f "${android_spv_prefix}/lib/pkgconfig/SPIRV-Tools.pc" ] && \
+     [ ! -f "${android_spv_prefix}/lib/aarch64-linux-android/pkgconfig/SPIRV-Tools.pc" ]; then
+    rm -rf /tmp/SPIRV-Tools-android-build
+    cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools-android-build -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE="${toolchain_cmake}" \
+      -DANDROID_ABI=arm64-v8a \
+      -DANDROID_PLATFORM="android-${ANDROID_API}" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX="${android_spv_prefix}" \
+      -DSPIRV-Headers_SOURCE_DIR=/tmp/SPIRV-Headers \
+      -DSPIRV_SKIP_TESTS=ON \
+      -DSPIRV_WERROR=OFF
+    cmake --build /tmp/SPIRV-Tools-android-build -j"$(nproc)"
+    cmake --install /tmp/SPIRV-Tools-android-build
   fi
 }
 
@@ -111,6 +147,8 @@ install_deps() {
     sudo ldconfig
   fi
   pkg-config --modversion SPIRV-Tools || true
+
+  install_android_spirv_tools
 }
 
 prepare_mesa() {
@@ -323,7 +361,6 @@ from pathlib import Path
 path = Path(sys.argv[1])
 src = path.read_text(encoding="utf-8")
 
-# Quitar duplicados de `case 11:` y `case 14:` en el mismo bloque cuando ya aparecen antes
 lines = src.splitlines(keepends=True)
 seen_cases = set()
 out_lines = []
@@ -355,7 +392,6 @@ for line in lines:
 
 new_src = "".join(out_lines)
 
-# Si hay `goto fail;` dentro de una función donde no existe la etiqueta `fail:`, reemplazarlo por `return VK_ERROR_INITIALIZATION_FAILED;` o `return;` según tipo de retorno
 func_starts = [m.start() for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *\t]+\n[a-zA-Z0-9_]+\s*\(", new_src)]
 for idx, f_start in enumerate(func_starts):
     f_end = func_starts[idx + 1] if idx + 1 < len(func_starts) else len(new_src)
@@ -377,6 +413,7 @@ PY
 
 apply_android_tolm() {
   local tolm_file="${ROOT}/android.tolm"
+  local android_spv_prefix="${ROOT}/work/android-spirv-tools"
   [ -f "$tolm_file" ] || return 0
 
   export MESON_WORKING_DIR="${ROOT}"
@@ -387,18 +424,45 @@ apply_android_tolm() {
 
   envsubst '${ANDROID_NDK_HOME} ${MESON_WORKING_DIR} ${CLANG_LIB_DIR}' < "$tolm_file" \
     | grep -v '^[[:space:]]*pkg_config_libdir[[:space:]]*=' > "$ORIG_CROSS_INI"
+
+  if [ -d "${android_spv_prefix}/lib" ]; then
+    python3 - "$ORIG_CROSS_INI" "$android_spv_prefix" <<'PY'
+import sys
+from pathlib import Path
+
+ini_path = Path(sys.argv[1])
+spv_prefix = sys.argv[2]
+txt = ini_path.read_text(encoding="utf-8")
+
+extra_ldflags = f"'-L{spv_prefix}/lib'"
+extra_cppflags = f"'-I{spv_prefix}/include'"
+
+if "c_link_args" in txt:
+    txt = txt.replace("c_link_args = [", f"c_link_args = [{extra_ldflags}, ", 1)
+if "cpp_link_args" in txt:
+    txt = txt.replace("cpp_link_args = [", f"cpp_link_args = [{extra_ldflags}, ", 1)
+if "c_args" in txt:
+    txt = txt.replace("c_args = [", f"c_args = [{extra_cppflags}, ", 1)
+if "cpp_args" in txt:
+    txt = txt.replace("cpp_args = [", f"cpp_args = [{extra_cppflags}, ", 1)
+
+ini_path.write_text(txt, encoding="utf-8")
+PY
+  fi
 }
 
 build_and_package() {
   cd "$ROOT"
+  local android_spv_prefix="${ROOT}/work/android-spirv-tools"
   export CC="clang-${LLVM_VER}"
   export CXX="clang++-${LLVM_VER}"
   export LD="ld.lld-${LLVM_VER}"
   export LLVM_CONFIG="llvm-config-${LLVM_VER}"
   export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
   export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
-  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-  export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
+  export PKG_CONFIG_PATH="${android_spv_prefix}/lib/pkgconfig:${android_spv_prefix}/lib/aarch64-linux-android/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export CMAKE_PREFIX_PATH="${android_spv_prefix}:/usr/local:${CMAKE_PREFIX_PATH:-}"
+  export LIBRARY_PATH="${android_spv_prefix}/lib:${LIBRARY_PATH:-}"
 
   apply_android_tolm
 
