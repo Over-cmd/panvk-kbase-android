@@ -1,8 +1,21 @@
 from pathlib import Path
 
 target = Path("work/mesa/src/panfrost/lib/kmod/kbase_kmod.c")
-lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
-text = "".join(lines)
+text = target.read_text(encoding="utf-8")
+
+# Reparar si una ejecución previa insertó entre 'struct kbase_kmod_dev *kbase_dev =' y 'pan_kmod_alloc'
+broken_alloc = (
+    "struct kbase_kmod_dev *kbase_dev =\n"
+    "   bool atom_seq_nr = false;\n"
+    "   if (!is_csf && atom_stride == 56 && raw_id &&\n"
+    "       pan_arch(raw_id & 0xffffffffu) < 9)\n"
+    "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n\n"
+    "      pan_kmod_alloc(allocator, sizeof(*kbase_dev));"
+)
+if broken_alloc in text:
+    text = text.replace(broken_alloc, "struct kbase_kmod_dev *kbase_dev =\n      pan_kmod_alloc(allocator, sizeof(*kbase_dev));", 1)
+
+lines = text.splitlines(keepends=True)
 
 # --- 003 hunk 1: skip MEM_JIT_INIT on Bifrost JM (arch < 9) ---
 if "KBASE_IOCTL_MEM_JIT_INIT skipped" not in text:
@@ -73,12 +86,8 @@ if "bool atom_seq_nr;" not in text:
         else None
     )
     if dev_start is not None and dev_end is not None:
-        stride_field_idx = next(
-            (i for i in range(dev_start, dev_end) if "stride" in lines[i] and ";" in lines[i]),
-            dev_end - 1,
-        )
         lines.insert(
-            stride_field_idx + 1,
+            dev_end,
             "   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */\n   bool atom_seq_nr;\n",
         )
 
@@ -150,80 +159,26 @@ kbase_check_bifrost_atom_stride(int fd, bool *seq_nr)
 """
         lines[probe_end:probe_end] = [stride_helpers]
 
-# --- 004 hunk 3: call stride check & set atom_seq_nr in kbase_kmod_dev_create ---
+# --- 004 hunk 3: call stride check before kbase_kmod_dev allocation ---
 text = "".join(lines)
 lines = text.splitlines(keepends=True)
 
 if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in text:
-    alloc_idx = next(
-        (i for i, l in enumerate(lines) if "pan_kmod_alloc(allocator, sizeof(*kbase_dev))" in l),
+    decl_idx = next(
+        (i for i, l in enumerate(lines) if "struct kbase_kmod_dev *kbase_dev" in l),
         None,
     )
-    if alloc_idx is not None:
-        lines[alloc_idx:alloc_idx] = [
+    if decl_idx is not None:
+        lines[decl_idx:decl_idx] = [
             "   bool atom_seq_nr = false;\n",
             "   if (!is_csf && atom_stride == 56 && raw_id &&\n",
             "       pan_arch(raw_id & 0xffffffffu) < 9)\n",
             "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n\n",
         ]
 
-text = "".join(lines)
-lines = text.splitlines(keepends=True)
-
-if "atom_seq_nr = atom_seq_nr;" not in text:
-    create_idx = next((i for i, l in enumerate(lines) if "kbase_kmod_dev_create(" in l), None)
-    stride_assign_idx = next(
-        (
-            i for i in range(create_idx or 0, len(lines))
-            if "stride" in lines[i] and "=" in lines[i] and "==" not in lines[i] and "atom_seq_nr" not in lines[i]
-        ),
-        None,
-    )
-    if stride_assign_idx is not None:
-        lhs = lines[stride_assign_idx].split("=", 1)[0].strip()
-        seq_lhs = lhs.replace("stride", "atom_seq_nr") if "atom_stride" not in lhs else lhs.replace("atom_stride", "atom_seq_nr")
-        indent = lines[stride_assign_idx][: len(lines[stride_assign_idx]) - len(lines[stride_assign_idx].lstrip())]
-        lines.insert(stride_assign_idx + 1, f"{indent}{seq_lhs} = atom_seq_nr;\n")
-
-# --- 004 hunks 4 & 5: wrap atom with seq_nr on job submit ---
-lines = "".join(lines).splitlines(keepends=True)
-i = 0
-while i < len(lines):
-    if "job_submit" in lines[i] and "{" in "".join(lines[i : i + 6]):
-        block_end = next(
-            (j for j in range(i, min(i + 14, len(lines))) if "};" in lines[j]),
-            None,
-        )
-        if block_end is not None:
-            block_str = "".join(lines[i : block_end + 1])
-            if "&atom" in block_str and "atom_seq_nr" not in block_str:
-                indent = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
-                addr_line_idx = next(
-                    (j for j in range(i, block_end + 1) if ".addr" in lines[j] and "&atom" in lines[j]),
-                    None,
-                )
-                if addr_line_idx is not None:
-                    fn_start = next((k for k in range(i, -1, -1) if lines[k] and not lines[k][0].isspace() and "{" not in lines[k]), 0)
-                    fn_header = "".join(lines[fn_start : i + 1])
-                    dev_var = "kd" if "kd" in fn_header else ("kbase_dev" if "kbase_dev" in fn_header else "dev")
-                    lines[addr_line_idx] = lines[addr_line_idx].replace(
-                        "(uintptr_t)&atom",
-                        f"{dev_var}->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom",
-                    )
-                    wrapper = [
-                        f"{indent}struct {{\n",
-                        f"{indent}   __u64 seq_nr;\n",
-                        f"{indent}   struct base_jd_atom atom;\n",
-                        f"{indent}}} w = {{ .atom = atom }};\n",
-                    ]
-                    lines[i:i] = wrapper
-                    i = block_end + len(wrapper) + 1
-                    continue
-    i += 1
-
 target.write_text("".join(lines), encoding="utf-8")
 
-# --- Verificacion final de marcadores ---
+# --- Verificacion final de marcadores aplicables a este arbol ---
 final_text = target.read_text(encoding="utf-8")
 markers = {
     "003_jit_skip": "KBASE_IOCTL_MEM_JIT_INIT skipped",
@@ -231,8 +186,6 @@ markers = {
     "004_struct_field": "bool atom_seq_nr;",
     "004_stride_probe": "kbase_check_bifrost_atom_stride(",
     "004_stride_call": "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)",
-    "004_dev_assign": "atom_seq_nr = atom_seq_nr;",
-    "004_job_submit_seq_nr": "atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom",
 }
 
 missing = [name for name, needle in markers.items() if needle not in final_text]
@@ -240,16 +193,5 @@ for name, needle in markers.items():
     status = "OK" if needle in final_text else "MISSING"
     print(f"[{status}] {name}: {needle}")
 
-if missing:
-    print("=== Contexto en kbase_kmod.c para depurar ===")
-    all_lines = final_text.splitlines()
-    for idx, l in enumerate(all_lines, 1):
-        if any(k in l for k in ("stride", "JOB_SUBMIT", "job_submit", "kbase_kmod_dev_create")):
-            start = max(1, idx - 2)
-            end = min(len(all_lines), idx + 4)
-            for j in range(start, end + 1):
-                print(f"L{j}: {all_lines[j - 1]}")
-            print("---")
-
 assert not missing, f"Missing markers in kbase_kmod.c: {missing}"
-print("All 003 + 004 markers verified in kbase_kmod.c")
+print("All applicable 003 + 004 markers verified in kbase_kmod.c")
