@@ -195,4 +195,23 @@ if old_submit in text:
     text = text.replace(old_submit, new_submit)
 
 target.write_text(text, encoding="utf-8")
-print("Applied 003 + 004 cleanly to kbase_kmod.c")
+
+# --- Verificacion final de marcadores ---
+final_text = target.read_text(encoding="utf-8")
+markers = {
+    "003_jit_skip": "KBASE_IOCTL_MEM_JIT_INIT skipped",
+    "003_bo_grow": "growable BO, GROW_ON_GPF",
+    "004_struct_field": "bool atom_seq_nr;",
+    "004_stride_probe": "kbase_check_bifrost_atom_stride(",
+    "004_stride_call": "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)",
+    "004_dev_assign": "kbase_dev->atom_seq_nr = atom_seq_nr;",
+    "004_job_submit_seq_nr": "kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom",
+}
+
+missing = [name for name, needle in markers.items() if needle not in final_text]
+for name, needle in markers.items():
+    status = "OK" if needle in final_text else "MISSING"
+    print(f"[{status}] {name}: {needle}")
+
+assert not missing, f"Missing markers in kbase_kmod.c: {missing}"
+print("All 003 + 004 markers verified in kbase_kmod.c")
