@@ -126,7 +126,6 @@ path = Path(sys.argv[1])
 src = path.read_text(encoding="utf-8")
 
 # 1) Si el bloque GROW_ON_GPF cayó dentro de to_kbase_mem_flags(), envolverlo en #if 0
-#    para no perder el código mientras no existan kbase_dev/dev/page_size/va_pages ahí.
 pattern_flags = re.compile(
     r"(\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9\s*&&[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\})",
     re.MULTILINE,
@@ -137,26 +136,28 @@ src, count_flags = pattern_flags.subn(
     count=1,
 )
 
-# 2) Reubicar la llamada a kbase_check_bifrost_atom_stride donde sí existan atom_stride, fd y raw_id
+# 2) Sacar el bloque mal ubicado de kbase_kmod_supports_dmabuf y reubicarlo en kbase_kmod_dev_create
 stride_call_pat = re.compile(
     r"\n[ \t]*bool atom_seq_nr = false;\s*\n[ \t]*if\s*\(!is_csf && atom_stride == 56 && raw_id &&\s*\n[ \t]*pan_arch\(raw_id & 0xffffffffu\) < 9\)\s*\n[ \t]*atom_stride = kbase_check_bifrost_atom_stride\(fd, &atom_seq_nr\);\s*\n?",
     re.MULTILINE,
 )
 
 if stride_call_pat.search(src):
-    # Buscar un punto donde ya existan atom_stride y raw_id (después de inicializar atom_stride)
-    anchor_pat = re.compile(r"(\n[ \t]*unsigned\s+atom_stride\s*=\s*[^\n;]+;\s*\n)")
-    anchor_match = anchor_pat.search(src)
-    if anchor_match:
-        src = stride_call_pat.sub("\n", src, count=1)
-        relocated = (
-            "\n   bool atom_seq_nr = false;\n"
-            "   if (!is_csf && atom_stride == 56 && raw_id &&\n"
-            "       pan_arch(raw_id & 0xffffffffu) < 9)\n"
-            "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n"
-        )
-        src = src.replace(anchor_match.group(1), anchor_match.group(1) + relocated, 1)
-        print("Relocated kbase_check_bifrost_atom_stride call after atom_stride initialization")
+    src = stride_call_pat.sub("\n", src, count=1)
+    dev_create_match = re.search(r"\nkbase_kmod_dev_create\s*\(", src)
+    if dev_create_match:
+        sub_src = src[dev_create_match.start():]
+        anchor_match = re.search(r"(\n[ \t]*unsigned\s+atom_stride\s*=\s*[^\n;]+;\s*\n)", sub_src)
+        if anchor_match:
+            relocated = (
+                "\n   bool atom_seq_nr = false;\n"
+                "   if (!is_csf && atom_stride == 56 && raw_id &&\n"
+                "       pan_arch(raw_id & 0xffffffffu) < 9)\n"
+                "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n"
+            )
+            insert_pos = dev_create_match.start() + anchor_match.end()
+            src = src[:insert_pos] + relocated + src[insert_pos:]
+            print("Relocated kbase_check_bifrost_atom_stride into kbase_kmod_dev_create")
 
 path.write_text(src, encoding="utf-8")
 PY
@@ -190,8 +191,8 @@ build_and_package() {
   apply_android_tolm
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    echo "=== kbase_kmod.c around line 197 ==="
-    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '175,235p' || true
+    echo "=== kbase_kmod_dev_create context in kbase_kmod.c ==="
+    grep -n -C 25 "kbase_kmod_dev_create" "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" || true
     return 1
   fi
 
