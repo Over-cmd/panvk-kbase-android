@@ -42,19 +42,19 @@ sync_spirv_repos() {
   git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
   git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
 
-  if grep -rn "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Tools >/dev/null 2>&1 && \
-     ! grep -rn "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Headers >/dev/null 2>&1; then
-    local hdr_tags tools_tags common_tag
-    hdr_tags="$(git ls-remote --tags --refs https://github.com/KhronosGroup/SPIRV-Headers.git | awk -F'refs/tags/' '{print $2}' | sort -V)"
-    tools_tags="$(git ls-remote --tags --refs https://github.com/KhronosGroup/SPIRV-Tools.git | awk -F'refs/tags/' '{print $2}' | sort -V)"
-    common_tag="$(comm -12 <(printf '%s\n' "$hdr_tags") <(printf '%s\n' "$tools_tags") | grep -E '^v?[0-9]+\.[0-9]+' | tail -n 1 || true)"
-
-    if [ -n "$common_tag" ]; then
-      echo "Syncing SPIRV-Headers and SPIRV-Tools to common tag: ${common_tag}"
-      rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-      git clone --depth 1 --branch "$common_tag" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-      git clone --depth 1 --branch "$common_tag" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
-    fi
+  if ! grep -rn "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Headers/include >/dev/null 2>&1; then
+    local candidate_tags tag
+    candidate_tags="$(git ls-remote --tags --refs --sort=-creatordate https://github.com/KhronosGroup/SPIRV-Tools.git \
+      | awk -F'refs/tags/' '{print $2}' | head -n 40)"
+    for tag in $candidate_tags; do
+      if git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Headers.git "refs/tags/${tag}" >/dev/null 2>&1; then
+        echo "Syncing SPIRV-Headers and SPIRV-Tools to tag: ${tag}"
+        rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
+        git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
+        git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
+        break
+      fi
+    done
   fi
 }
 
