@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILE="${PROFILE:-g52-v7-jm}"
 LLVM_VER="${LLVM_VER:-21}"
 ANDROID_API="${ANDROID_API:-30}"
-SPIRV_TOOLS_REF="${SPIRV_TOOLS_REF:-v2025.1}"
+SPIRV_TOOLS_REF="${SPIRV_TOOLS_REF:-}"
 
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -80,13 +80,18 @@ install_deps() {
 
   if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
     rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-    if git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Tools.git "refs/tags/${SPIRV_TOOLS_REF}" >/dev/null 2>&1; then
+
+    if [ -n "${SPIRV_TOOLS_REF}" ] && \
+       git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Headers.git "refs/tags/${SPIRV_TOOLS_REF}" >/dev/null 2>&1 && \
+       git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Tools.git "refs/tags/${SPIRV_TOOLS_REF}" >/dev/null 2>&1; then
+      echo "Cloning SPIRV-Headers and SPIRV-Tools at tag ${SPIRV_TOOLS_REF}"
       git clone --depth 1 --branch "${SPIRV_TOOLS_REF}" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
       git clone --depth 1 --branch "${SPIRV_TOOLS_REF}" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
     else
       git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
       git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
     fi
+
     cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DSPIRV-Headers_SOURCE_DIR=/tmp/SPIRV-Headers \
