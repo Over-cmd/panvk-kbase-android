@@ -63,20 +63,16 @@ jobs:
 
       - name: Apply patches for Mali-G52
         run: |
-          ./scripts/apply-patches.sh --profile "${PROFILE}" || true
-
-      - name: Inspect exact lines 1195-1206 of kbase_kmod.c
-        run: |
-          nl -ba work/mesa/src/panfrost/lib/kmod/kbase_kmod.c 2>/dev/null | sed -n '1195,1206p' | cat -A || true
+          ./scripts/apply-patches.sh --profile "${PROFILE}"
 
       - name: Build Android driver for AArch64 (LLVM 21)
         env:
-          CC: "clang-${LLVM_VER}"
-          CXX: "clang++-${LLVM_VER}"
-          LD: "ld.lld-${LLVM_VER}"
-          LLVM_CONFIG: "llvm-config-${LLVM_VER}"
           PANVK_RELEASE: ${{ env.PANVK_RELEASE }}
         run: |
+          export CC="clang-${LLVM_VER}"
+          export CXX="clang++-${LLVM_VER}"
+          export LD="ld.lld-${LLVM_VER}"
+          export LLVM_CONFIG="llvm-config-${LLVM_VER}"
           export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
           ./scripts/build-android.sh --profile "${PROFILE}"
 
