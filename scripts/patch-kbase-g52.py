@@ -175,13 +175,13 @@ if "atom_seq_nr = atom_seq_nr;" not in text:
     stride_assign_idx = next(
         (
             i for i in range(create_idx or 0, len(lines))
-            if "atom_stride" in lines[i] and "=" in lines[i] and "==" not in lines[i] and "atom_seq_nr" not in lines[i]
+            if "stride" in lines[i] and "=" in lines[i] and "==" not in lines[i] and "atom_seq_nr" not in lines[i]
         ),
         None,
     )
     if stride_assign_idx is not None:
         lhs = lines[stride_assign_idx].split("=", 1)[0].strip()
-        seq_lhs = lhs.replace("atom_stride", "atom_seq_nr")
+        seq_lhs = lhs.replace("stride", "atom_seq_nr") if "atom_stride" not in lhs else lhs.replace("atom_stride", "atom_seq_nr")
         indent = lines[stride_assign_idx][: len(lines[stride_assign_idx]) - len(lines[stride_assign_idx].lstrip())]
         lines.insert(stride_assign_idx + 1, f"{indent}{seq_lhs} = atom_seq_nr;\n")
 
@@ -189,7 +189,7 @@ if "atom_seq_nr = atom_seq_nr;" not in text:
 lines = "".join(lines).splitlines(keepends=True)
 i = 0
 while i < len(lines):
-    if "kbase_ioctl_job_submit" in lines[i] and "{" in "".join(lines[i : i + 6]):
+    if "job_submit" in lines[i] and "{" in "".join(lines[i : i + 6]):
         block_end = next(
             (j for j in range(i, min(i + 14, len(lines))) if "};" in lines[j]),
             None,
@@ -203,7 +203,6 @@ while i < len(lines):
                     None,
                 )
                 if addr_line_idx is not None:
-                    # Detectar nombre del puntero al dispositivo en la funcion actual
                     fn_start = next((k for k in range(i, -1, -1) if lines[k] and not lines[k][0].isspace() and "{" not in lines[k]), 0)
                     fn_header = "".join(lines[fn_start : i + 1])
                     dev_var = "kd" if "kd" in fn_header else ("kbase_dev" if "kbase_dev" in fn_header else "dev")
@@ -243,9 +242,14 @@ for name, needle in markers.items():
 
 if missing:
     print("=== Contexto en kbase_kmod.c para depurar ===")
-    for idx, l in enumerate(final_text.splitlines(), 1):
-        if "atom_stride" in l or "KBASE_IOCTL_JOB_SUBMIT" in l or "kbase_ioctl_job_submit" in l:
-            print(f"L{idx}: {l}")
+    all_lines = final_text.splitlines()
+    for idx, l in enumerate(all_lines, 1):
+        if any(k in l for k in ("stride", "JOB_SUBMIT", "job_submit", "kbase_kmod_dev_create")):
+            start = max(1, idx - 2)
+            end = min(len(all_lines), idx + 4)
+            for j in range(start, end + 1):
+                print(f"L{j}: {all_lines[j - 1]}")
+            print("---")
 
 assert not missing, f"Missing markers in kbase_kmod.c: {missing}"
 print("All 003 + 004 markers verified in kbase_kmod.c")
