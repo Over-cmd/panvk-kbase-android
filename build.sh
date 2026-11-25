@@ -34,7 +34,7 @@ ensure_host_x11_headers() {
     sudo ln -sfn "/usr/include/${multiarch}/X11/xshmfence.h" /usr/include/X11/xshmfence.h
   fi
 
-  ls -ld /usr/include/xcb/xcb.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h 2>/dev/null || true
+  ls -ld /usr/include/xcb/xcb.h /usr/include/xcb/shm.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h 2>/dev/null || true
 }
 
 install_deps() {
@@ -60,7 +60,10 @@ install_deps() {
     libxcb1-dev \
     libxcb-dri3-dev \
     libxcb-present-dev \
+    libxcb-randr0-dev \
+    libxcb-shm0-dev \
     libxcb-sync-dev \
+    libxcb-xfixes0-dev \
     libx11-dev \
     libx11-xcb-dev \
     libxrandr-dev \
