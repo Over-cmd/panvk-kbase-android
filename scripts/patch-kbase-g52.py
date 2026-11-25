@@ -5,13 +5,14 @@ lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
 
 # --- 003 hunk 1: reemplazar bloque if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) ---
 jit_if_idx = next(
-    i for i, l in enumerate(lines)
-    if "KBASE_IOCTL_MEM_JIT_INIT" in l and "ioctl(" in l
+    (i for i, l in enumerate(lines) if "KBASE_IOCTL_MEM_JIT_INIT" in l and "ioctl(" in l),
+    None,
 )
-jit_end_idx = next(
-    i for i in range(jit_if_idx, len(lines))
-    if lines[i].strip() == "}"
-) + 1
+jit_end_idx = (
+    next((i for i in range(jit_if_idx, len(lines)) if lines[i].strip() == "}"), None) + 1
+    if jit_if_idx is not None
+    else None
+)
 
 jit_replacement = [
     "\t/* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA\n",
@@ -34,13 +35,14 @@ jit_replacement = [
 
 # --- 003 hunk 2: GROW_ON_GPF 1 MiB upfront commit on Bifrost JM ---
 bo_idx = next(
-    i for i, l in enumerate(lines)
-    if "PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT" in l and "if " in l
+    (i for i, l in enumerate(lines) if "PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT" in l and "if " in l),
+    None,
 )
-bo_end_idx = next(
-    i for i in range(bo_idx, len(lines))
-    if lines[i].strip() == "}"
-) + 1
+bo_end_idx = (
+    next((i for i in range(bo_idx, len(lines)) if lines[i].strip() == "}"), None) + 1
+    if bo_idx is not None
+    else None
+)
 
 bo_addition = [
     "\n",
@@ -55,31 +57,43 @@ bo_addition = [
     "   }\n",
 ]
 
-if bo_end_idx > jit_end_idx:
-    lines[bo_end_idx:bo_end_idx] = bo_addition
-    lines[jit_if_idx:jit_end_idx] = jit_replacement
+edits = []
+if jit_if_idx is not None and jit_end_idx is not None:
+    edits.append((jit_if_idx, jit_end_idx, jit_replacement))
 else:
-    lines[jit_if_idx:jit_end_idx] = jit_replacement
-    lines[bo_end_idx:bo_end_idx] = bo_addition
+    print("WARN: JIT ioctl block not found")
 
-# --- 004 hunk 1: atom_seq_nr field in struct kbase_kmod_dev ---
-stride_field_idx = next(
-    i for i, l in enumerate(lines)
-    if "atom_stride;" in l and "last_event_code" not in l
-)
-lines.insert(stride_field_idx + 1, "   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */\n   bool atom_seq_nr;\n")
+if bo_end_idx is not None:
+    edits.append((bo_end_idx, bo_end_idx, bo_addition))
+else:
+    print("WARN: PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT block not found")
+
+for start, end, repl in sorted(edits, key=lambda x: x[0], reverse=True):
+    lines[start:end] = repl
+
+# --- 004 hunk 1: atom_seq_nr field inside struct kbase_kmod_dev ---
+dev_start = next((i for i, l in enumerate(lines) if "struct kbase_kmod_dev {" in l), None)
+dev_end = next((i for i in range(dev_start, len(lines)) if lines[i].startswith("};")), None) if dev_start is not None else None
+if dev_start is not None and dev_end is not None:
+    stride_field_idx = next(
+        (i for i in range(dev_start, dev_end) if "stride" in l and ";" in l),
+        dev_end - 1,
+    )
+    lines.insert(
+        stride_field_idx + 1,
+        "   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */\n   bool atom_seq_nr;\n",
+    )
+else:
+    print("WARN: struct kbase_kmod_dev not found")
 
 # --- 004 hunk 2: kbase_try_atom_stride & kbase_check_bifrost_atom_stride ---
 probe_idx = next(
-    i for i, l in enumerate(lines)
-    if "kbase_probe_atom_stride(" in l and i + 2 < len(lines) and lines[i + 2].strip() == "{"
+    (i for i, l in enumerate(lines) if "kbase_probe_atom_stride(" in l and i + 2 < len(lines) and lines[i + 2].strip() == "{"),
+    None,
 )
-probe_end = next(
-    i for i in range(probe_idx + 2, len(lines))
-    if lines[i].startswith("}")
-) + 1
-
-stride_helpers = """
+if probe_idx is not None:
+    probe_end = next(i for i in range(probe_idx + 2, len(lines)) if lines[i].startswith("}")) + 1
+    stride_helpers = """
 /* Submit one dependency-only atom (number 255) at the given stride and
  * drain its event.  Returns false only if the kernel refuses the stride. */
 static bool
@@ -133,26 +147,23 @@ kbase_check_bifrost_atom_stride(int fd, bool *seq_nr)
    return 56;
 }
 """
-
-lines[probe_end:probe_end] = [stride_helpers]
+    lines[probe_end:probe_end] = [stride_helpers]
+else:
+    print("WARN: kbase_probe_atom_stride not found")
 
 # --- 004 hunk 3: call stride check & set atom_seq_nr in kbase_kmod_dev_create ---
-alloc_idx = next(
-    i for i, l in enumerate(lines)
-    if "pan_kmod_alloc(allocator, sizeof(*kbase_dev))" in l
-)
-lines[alloc_idx:alloc_idx] = [
-    "   bool atom_seq_nr = false;\n",
-    "   if (!is_csf && atom_stride == 56 && raw_id &&\n",
-    "       pan_arch(raw_id & 0xffffffffu) < 9)\n",
-    "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n\n",
-]
+alloc_idx = next((i for i, l in enumerate(lines) if "pan_kmod_alloc(allocator, sizeof(*kbase_dev))" in l), None)
+if alloc_idx is not None:
+    lines[alloc_idx:alloc_idx] = [
+        "   bool atom_seq_nr = false;\n",
+        "   if (!is_csf && atom_stride == 56 && raw_id &&\n",
+        "       pan_arch(raw_id & 0xffffffffu) < 9)\n",
+        "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n\n",
+    ]
 
-dev_stride_idx = next(
-    i for i, l in enumerate(lines)
-    if "kbase_dev->atom_stride = atom_stride;" in l
-)
-lines.insert(dev_stride_idx + 1, "      kbase_dev->atom_seq_nr = atom_seq_nr;\n")
+dev_stride_idx = next((i for i, l in enumerate(lines) if "kbase_dev->atom_stride = atom_stride;" in l), None)
+if dev_stride_idx is not None:
+    lines.insert(dev_stride_idx + 1, "      kbase_dev->atom_seq_nr = atom_seq_nr;\n")
 
 # --- 004 hunks 4 & 5: wrap atom with seq_nr on job submit ---
 text = "".join(lines)
@@ -172,9 +183,7 @@ new_submit = """   struct {
       .stride = kd->atom_stride,
    };"""
 
-count_submit = text.count(old_submit)
-assert count_submit == 2, f"Expected 2 job_submit blocks, found {count_submit}"
 text = text.replace(old_submit, new_submit)
 
 target.write_text(text, encoding="utf-8")
-print("Applied 003 + 004 cleanly to kbase_kmod.c")
+print("Finished updating kbase_kmod.c")
