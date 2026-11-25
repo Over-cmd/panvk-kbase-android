@@ -39,31 +39,23 @@ ensure_host_x11_headers() {
 
 sync_spirv_repos() {
   rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
   git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
 
-  if ! grep -rn "SPV_OPERAND_TYPE_ACCESS_SHAPE" /tmp/SPIRV-Headers/include >/dev/null 2>&1; then
-    local candidate_tags tag
-    candidate_tags="$(git ls-remote --tags --refs --sort=-creatordate https://github.com/KhronosGroup/SPIRV-Tools.git \
-      | awk -F'refs/tags/' '{print $2}' \
-      | grep -E '^(v?[0-9]+\.[0-9]+(\.[0-9]+)?(-rc[0-9]+)?|sdk-[0-9]+\.[0-9]+(\.[0-9]+)?)$' \
-      | head -n 30 || true)"
+  local pinned_rev=""
+  if [ -f /tmp/SPIRV-Tools/DEPS ]; then
+    pinned_rev="$(grep -E "spirv_headers_revision|SPIRV-Headers" /tmp/SPIRV-Tools/DEPS \
+      | grep -oE '[0-9a-f]{40}' | head -n 1 || true)"
+  fi
 
-    for tag in $candidate_tags; do
-      if git ls-remote --exit-code --tags https://github.com/KhronosGroup/SPIRV-Headers.git "refs/tags/${tag}" >/dev/null 2>&1; then
-        rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
-        if git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers && \
-           git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools; then
-          echo "Synced SPIRV-Headers and SPIRV-Tools to tag: ${tag}"
-          return 0
-        fi
-      fi
-    done
-
-    echo "Falling back to latest main branch for SPIRV-Headers and SPIRV-Tools"
-    rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
+  if [ -n "$pinned_rev" ]; then
+    echo "Syncing SPIRV-Headers to DEPS revision: ${pinned_rev}"
+    mkdir -p /tmp/SPIRV-Headers
+    git -C /tmp/SPIRV-Headers init -q
+    git -C /tmp/SPIRV-Headers remote add origin https://github.com/KhronosGroup/SPIRV-Headers.git
+    git -C /tmp/SPIRV-Headers fetch --depth 1 origin "$pinned_rev"
+    git -C /tmp/SPIRV-Headers checkout -q FETCH_HEAD
+  else
     git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/SPIRV-Headers
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/SPIRV-Tools
   fi
 }
 
