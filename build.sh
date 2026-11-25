@@ -145,14 +145,7 @@ from pathlib import Path
 path = Path(sys.argv[1])
 src = path.read_text(encoding="utf-8")
 
-# 1) Asegurar que kbase_kmod_dev_create tenga su prototipo/definición visible
-if "kbase_kmod_dev_create(" not in src:
-    ops_m = re.search(r"\.dev_create\s*=\s*kbase_kmod_dev_create", src)
-    if ops_m:
-        print("Warning: .dev_create references kbase_kmod_dev_create, checking functions in kbase_kmod.c")
-        for fn in re.findall(r"^[a-zA-Z_][a-zA-Z0-9_ *]*\b[a-zA-Z0-9_]*dev_create\b[^\n{]*", src, re.MULTILINE):
-            print("Found candidate:", fn)
-
+# 1) Restaurar tipo de retorno de kbase_kmod_dev_create si falta en su definición
 src = re.sub(
     r"(?m)^([ \t]*)kbase_kmod_dev_create\s*\(\s*int fd,",
     r"\1static struct pan_kmod_dev *\n\1kbase_kmod_dev_create(int fd,",
@@ -160,7 +153,7 @@ src = re.sub(
     count=1,
 )
 
-# 2) Reubicar bloque GROW_ON_GPF dentro de kbase_kmod_bo_alloc
+# 2) Reubicar bloque GROW_ON_GPF dentro de kbase_kmod_bo_alloc sin borrar código ajeno
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
     "    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */\n"
@@ -174,54 +167,24 @@ grow_clean = (
 )
 
 bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
-bo_start = bo_fn_m.start() if bo_fn_m else len(src)
-
-for m in list(re.finditer(r"GROW_ON_GPF", src)):
-    if m.start() < bo_start:
-        if_start = src.rfind("if (", 0, m.start())
-        if if_start == -1:
-            if_start = src.rfind("if\t(", 0, m.start())
-        brace_close = src.find("\n   }", m.start())
-        if brace_close == -1:
-            brace_close = src.find("\n}", m.start())
-        if if_start != -1 and brace_close != -1:
-            comment_start = src.rfind("/* Bifrost JM", 0, if_start)
-            cut_start = comment_start if (comment_start != -1 and if_start - comment_start < 200) else if_start
-            cut_end = brace_close + len("\n   }")
-            src = src[:cut_start] + "/* relocated to kbase_kmod_bo_alloc */" + src[cut_end:]
-            print("Removed misplaced GROW_ON_GPF block")
-            bo_fn_m = re.search(r"\bkbase_kmod_bo_alloc\s*\(", src)
-            bo_start = bo_fn_m.start() if bo_fn_m else len(src)
-
-if "growable BO, GROW_ON_GPF" not in src and bo_fn_m:
+if bo_fn_m:
     bo_sub = src[bo_fn_m.start():]
-    anchors = list(re.finditer(r"\n[ \t]*(?:va_pages|extension)\s*=[^\n;]+;\s*\n", bo_sub))
-    if anchors:
-        pos = bo_fn_m.start() + anchors[-1].end()
-    else:
-        ioctl_m = re.search(r"\n[ \t]*[^\n]*KBASE_IOCTL_MEM_ALLOC", bo_sub)
-        pos = (bo_fn_m.start() + ioctl_m.start()) if ioctl_m else None
-
-    if pos is not None:
-        prefix_in_fn = src[bo_fn_m.start():pos]
-        kd_decl = ""
-        if "kbase_dev" not in prefix_in_fn:
-            kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
-        src = src[:pos] + "\n" + kd_decl + grow_clean + "\n" + src[pos:]
-        print("Placed GROW_ON_GPF block inside kbase_kmod_bo_alloc")
-
-# 3) Limpiar cualquier copia de kbase_check_bifrost_atom_stride en kbase_kmod_supports_dmabuf
-dmabuf_m = re.search(r"\bkbase_kmod_supports_dmabuf\s*\([^\)]*\)\s*\n\{[\s\S]*?\n\}", src)
-if dmabuf_m and "kbase_check_bifrost_atom_stride" in dmabuf_m.group(0):
-    cleaned_dmabuf = re.sub(
-        r"\n[ \t]*(?:unsigned\s+atom_stride\s*=\s*56;\s*\n[ \t]*)?bool atom_seq_nr = false;\s*\n[ \t]*if\s*\(!is_csf && atom_stride == 56 && raw_id &&\s*\n[ \t]*pan_arch\(raw_id & 0xffffffffu\) < 9\)\s*\n[ \t]*atom_stride = kbase_check_bifrost_atom_stride\(fd, &atom_seq_nr\);\s*\n?",
-        "\n",
-        dmabuf_m.group(0),
+    # Reemplazar el bloque GROW_ON_GPF si ya está dentro de kbase_kmod_bo_alloc
+    in_bo_grow = re.search(
+        r"(?:\n[ \t]*/\* Bifrost JM[^\n]*\n[ \t]*\*[^\n]*\*/)?\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}",
+        bo_sub,
     )
-    src = src[:dmabuf_m.start()] + cleaned_dmabuf + src[dmabuf_m.end():]
-    print("Removed misplaced atom_stride block from kbase_kmod_supports_dmabuf")
+    if in_bo_grow:
+        pos_s = bo_fn_m.start() + in_bo_grow.start()
+        pos_e = bo_fn_m.start() + in_bo_grow.end()
+        prefix = src[bo_fn_m.start():pos_s]
+        kd_decl = ""
+        if "kbase_dev" not in prefix:
+            kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
+        src = src[:pos_s] + "\n" + kd_decl + grow_clean + src[pos_e:]
+        print("Normalized GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
-# 4) Insertar la comprobación de atom_stride dentro de kbase_kmod_dev_create tras kbase_dev->is_csf = is_csf;
+# 3) Insertar la comprobación de atom_stride dentro de kbase_kmod_dev_create tras kbase_dev->is_csf = is_csf;
 if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
     dev_create_m = re.search(r"\nkbase_kmod_dev_create\s*\(", src)
     if dev_create_m:
@@ -252,7 +215,7 @@ if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
             src = src[:pos] + stride_block + src[pos:]
             print("Placed atom_stride check inside kbase_kmod_dev_create after kbase_dev->is_csf = is_csf;")
 
-# 5) Declaración adelantada de kbase_check_bifrost_atom_stride antes de kbase_kmod_dev_create
+# 4) Declaración adelantada de kbase_check_bifrost_atom_stride antes de kbase_kmod_dev_create
 fwd_decl = "static unsigned kbase_check_bifrost_atom_stride(int fd, bool *seq_nr);\n"
 if "kbase_check_bifrost_atom_stride(" in src and fwd_decl not in src:
     dev_create_def = re.search(r"\n(?:static struct pan_kmod_dev \*\n)?\bkbase_kmod_dev_create\s*\(", src)
@@ -294,10 +257,8 @@ build_and_package() {
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     echo "=== Compiler errors in build/android-bionic.log ==="
     grep -n -C 3 "error:" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
-    echo "=== kbase_kmod.c around line 1515 ==="
-    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1500,1530p' || true
-    echo "=== dev_create / err_unmap_gpu in kbase_kmod.c ==="
-    grep -nE "dev_create|err_unmap_gpu|GROW_ON_GPF" "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" || true
+    echo "=== kbase_kmod.c around line 1445 and 1515 ==="
+    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1430,1535p' || true
     return 1
   fi
 
