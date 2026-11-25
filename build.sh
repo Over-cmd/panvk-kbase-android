@@ -170,11 +170,8 @@ grow_block_re = re.compile(
     r"(?:\n[ \t]*/\* Bifrost JM[^\n]*\n[ \t]*\*[^\n]*\*/)?\n[ \t]*if\s*\(\s*!kbase_dev->is_csf\s*&&\s*pan_arch\(dev->props\.gpu_id\)\s*<\s*9[\s\S]*?commit_pages\s*=\s*MIN2\(\(1024\s*\*\s*1024\)\s*/\s*page_size,\s*va_pages\);[\s\S]*?\n[ \t]*\}",
     re.MULTILINE,
 )
-
-# Quitar cualquier copia previa de GROW_ON_GPF para reubicarla limpia en kbase_kmod_bo_alloc
 src = grow_block_re.sub("", src)
 
-# Encontrar definición real de kbase_kmod_bo_alloc
 bo_def_start = None
 for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *]*\bkbase_kmod_bo_alloc\s*\(", src):
     sig_end = src.find(")", m.start())
@@ -205,15 +202,67 @@ if bo_def_start is not None:
     src = src[:abs_pos] + "\n" + kd_decl + grow_clean + "\n" + src[abs_pos:]
     print("Relocated GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
-# 3) Insertar la comprobación de atom_stride dentro de kbase_kmod_dev_create tras kbase_dev->is_csf = is_csf;
-if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
-    dev_create_m = re.search(r"\nkbase_kmod_dev_create\s*\(", src)
-    if dev_create_m:
-        sub = src[dev_create_m.start():]
-        csf_anchor = re.search(r"(\n[ \t]*kbase_dev->is_csf\s*=\s*is_csf;\s*\n)", sub)
+# 3) Reubicar comprobación de atom_stride dentro de kbase_kmod_dev_create
+# Encontrar definición real de kbase_kmod_dev_create (con `{`)
+dev_def_start = None
+for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *]*\bkbase_kmod_dev_create\s*\(", src):
+    sig_end = src.find(")", m.start())
+    if sig_end != -1:
+        after = src[sig_end + 1 : sig_end + 120]
+        if "{" in after and ";" not in after.split("{", 1)[0]:
+            dev_def_start = m.start()
+            break
+
+# Retirar cualquier bloque atom_stride / atom_seq_nr que esté fuera de kbase_kmod_dev_create
+if dev_def_start is not None:
+    dev_open_brace = src.find("{", dev_def_start)
+    dev_end_m = re.search(r"\n\}\s*\n", src[dev_open_brace:])
+    dev_def_end = (dev_open_brace + dev_end_m.end()) if dev_end_m else len(src)
+
+    for sm in list(re.finditer(r"kbase_check_bifrost_atom_stride\s*\(\s*fd\s*,\s*&atom_seq_nr\s*\)\s*;", src)):
+        # No tocar la propia definición de kbase_check_bifrost_atom_stride
+        fn_hdr_before = src.rfind("\n", 0, sm.start())
+        line_str = src[fn_hdr_before + 1 : sm.end()]
+        if "static unsigned" in line_str or "unsigned" in line_str and "int fd" in src[max(0, sm.start() - 120) : sm.start()]:
+            continue
+        if sm.start() < dev_open_brace or sm.end() > dev_def_end:
+            # Expandir hacia atrás hasta el inicio del bloque/líneas asociadas a atom_seq_nr
+            blk_start = sm.start()
+            for back_pat in [
+                r"\n[ \t]*uint64_t\s+raw_id\s*=",
+                r"\n[ \t]*unsigned\s+atom_stride\s*=\s*56\s*;",
+                r"\n[ \t]*bool\s+atom_seq_nr\s*=",
+                r"\n[ \t]*if\s*\(\s*!is_csf\s*&&\s*atom_stride\s*==\s*56",
+            ]:
+                pm = re.search(back_pat, src[max(0, sm.start() - 450) : sm.start()])
+                if pm:
+                    cand = max(0, sm.start() - 450) + pm.start() + 1
+                    if cand < blk_start:
+                        blk_start = cand
+            blk_end = sm.end()
+            if blk_end < len(src) and src[blk_end : blk_end + 1] == "\n":
+                blk_end += 1
+            src = src[:blk_start] + src[blk_end:]
+            print("Relocated misplaced atom_stride block out of foreign scope")
+
+            # Recalcular límites de kbase_kmod_dev_create
+            for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *]*\bkbase_kmod_dev_create\s*\(", src):
+                sig_end = src.find(")", m.start())
+                if sig_end != -1:
+                    after = src[sig_end + 1 : sig_end + 120]
+                    if "{" in after and ";" not in after.split("{", 1)[0]:
+                        dev_def_start = m.start()
+                        break
+            dev_open_brace = src.find("{", dev_def_start)
+            dev_end_m = re.search(r"\n\}\s*\n", src[dev_open_brace:])
+            dev_def_end = (dev_open_brace + dev_end_m.end()) if dev_end_m else len(src)
+
+    dev_body = src[dev_open_brace:dev_def_end]
+    if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in dev_body:
+        csf_anchor = re.search(r"(\n[ \t]*kbase_dev->is_csf\s*=\s*is_csf;\s*\n)", dev_body)
         if csf_anchor:
-            pos = dev_create_m.start() + csf_anchor.end()
-            prefix_in_fn = src[dev_create_m.start():pos]
+            abs_pos = dev_open_brace + csf_anchor.end()
+            prefix_in_fn = src[dev_open_brace:abs_pos]
             stride_decl = "" if re.search(r"\batom_stride\b", prefix_in_fn) else "   unsigned atom_stride = 56;\n"
             raw_decl = ""
             if not re.search(r"\braw_id\b", prefix_in_fn):
@@ -233,16 +282,24 @@ if "kbase_check_bifrost_atom_stride(fd, &atom_seq_nr)" not in src:
                 "       pan_arch(raw_id & 0xffffffffu) < 9)\n"
                 "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n"
             )
-            src = src[:pos] + stride_block + src[pos:]
+            src = src[:abs_pos] + stride_block + src[abs_pos:]
             print("Placed atom_stride check inside kbase_kmod_dev_create after kbase_dev->is_csf = is_csf;")
 
-# 4) Declaración adelantada de kbase_check_bifrost_atom_stride antes de kbase_kmod_dev_create
+# 4) Declaración adelantada de kbase_check_bifrost_atom_stride limpia a nivel de archivo antes de kbase_kmod_dev_create
 fwd_decl = "static unsigned kbase_check_bifrost_atom_stride(int fd, bool *seq_nr);\n"
-if "kbase_check_bifrost_atom_stride(" in src and fwd_decl not in src:
-    dev_create_def = re.search(r"\n(?:static struct pan_kmod_dev \*\n)?\bkbase_kmod_dev_create\s*\(", src)
-    if dev_create_def:
-        src = src[:dev_create_def.start()] + "\n" + fwd_decl + src[dev_create_def.start():]
-        print("Added forward declaration for kbase_check_bifrost_atom_stride")
+src = src.replace("\n" + fwd_decl + "\n", "\n").replace(fwd_decl, "")
+
+if "kbase_check_bifrost_atom_stride(" in src:
+    for m in re.finditer(r"(?m)^[a-zA-Z_][a-zA-Z0-9_ *]*\bkbase_kmod_dev_create\s*\(", src):
+        sig_end = src.find(")", m.start())
+        if sig_end != -1:
+            after = src[sig_end + 1 : sig_end + 120]
+            if "{" in after and ";" not in after.split("{", 1)[0]:
+                prev_close = src.rfind("\n}\n", 0, m.start())
+                ins_at = (prev_close + len("\n}\n")) if prev_close != -1 else m.start()
+                src = src[:ins_at] + "\n" + fwd_decl + "\n" + src[ins_at:]
+                print("Added file-scope forward declaration for kbase_check_bifrost_atom_stride")
+                break
 
 path.write_text(src, encoding="utf-8")
 PY
