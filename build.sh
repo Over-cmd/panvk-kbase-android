@@ -23,19 +23,18 @@ ensure_host_x11_headers() {
   local multiarch
   multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || echo "x86_64-linux-gnu")"
 
-  find /usr/include -maxdepth 3 \( -name "xcb.h" -o -name "Xlib.h" -o -name "xshmfence.h" \) 2>/dev/null || true
-
   if [ ! -e /usr/include/xcb ] && [ -d "/usr/include/${multiarch}/xcb" ]; then
     sudo ln -sfn "/usr/include/${multiarch}/xcb" /usr/include/xcb
   fi
   if [ ! -e /usr/include/X11 ] && [ -d "/usr/include/${multiarch}/X11" ]; then
     sudo ln -sfn "/usr/include/${multiarch}/X11" /usr/include/X11
   fi
-  if [ ! -e /usr/include/xshmfence.h ] && [ -f "/usr/include/${multiarch}/xshmfence.h" ]; then
-    sudo ln -sfn "/usr/include/${multiarch}/xshmfence.h" /usr/include/xshmfence.h
+  if [ ! -e /usr/include/X11/xshmfence.h ] && [ -f "/usr/include/${multiarch}/X11/xshmfence.h" ]; then
+    sudo mkdir -p /usr/include/X11
+    sudo ln -sfn "/usr/include/${multiarch}/X11/xshmfence.h" /usr/include/X11/xshmfence.h
   fi
 
-  ls -ld /usr/include/xcb /usr/include/X11 /usr/include/xshmfence.h 2>/dev/null || true
+  ls -ld /usr/include/xcb/xcb.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h 2>/dev/null || true
 }
 
 install_deps() {
@@ -63,6 +62,7 @@ install_deps() {
     libxcb-present-dev \
     libxcb-sync-dev \
     libx11-dev \
+    libx11-xcb-dev \
     libxrandr-dev \
     libxshmfence-dev \
     pkg-config \
