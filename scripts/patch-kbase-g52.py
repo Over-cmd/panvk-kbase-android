@@ -76,7 +76,7 @@ dev_start = next((i for i, l in enumerate(lines) if "struct kbase_kmod_dev {" in
 dev_end = next((i for i in range(dev_start, len(lines)) if lines[i].startswith("};")), None) if dev_start is not None else None
 if dev_start is not None and dev_end is not None:
     stride_field_idx = next(
-        (i for i in range(dev_start, dev_end) if "stride" in l and ";" in l),
+        (i for i in range(dev_start, dev_end) if "stride" in lines[i] and ";" in lines[i]),
         dev_end - 1,
     )
     lines.insert(
