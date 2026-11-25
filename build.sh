@@ -144,9 +144,10 @@ build_and_package() {
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     echo "=== kbase_kmod.c around line 1519 ==="
-    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1490,1535p' || true
-    echo "=== References to kbase_kmod.c in patches/scripts ==="
-    grep -rn "kbase_kmod.c" "${ROOT}/patches" "${ROOT}/scripts" || true
+    nl -ba "${ROOT}/work/mesa/src/panfrost/lib/kmod/kbase_kmod.c" | sed -n '1495,1535p' || true
+    echo "=== Diff of kbase_kmod.c in 0067-jm-v7-094 ==="
+    awk '/^diff --git a\/src\/panfrost\/lib\/kmod\/kbase_kmod.c/{flag=1} flag && /^diff --git / && !/a\/src\/panfrost\/lib\/kmod\/kbase_kmod.c/{flag=0} flag' \
+      "${ROOT}/patches/jm-v7-wip/0067-jm-v7-094-optional-dma-buf-import-clean-on-v6-v7-PAN.patch" || true
     return 1
   fi
 
