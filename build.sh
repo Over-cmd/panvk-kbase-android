@@ -17,6 +17,14 @@ if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
 fi
 
 ./scripts/fetch-mesa.sh
+
+echo "=== PATCH 002 ==="
+cat patches/jm-v7/002-allow-bifrost-on-kbase-without-the-env-gate.patch || true
+
+echo "=== panvk_physical_device.c context ==="
+grep -n -C 15 "PAN_I_WANT_A_BROKEN_VULKAN_DRIVER" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || \
+  nl -ba work/mesa/src/panfrost/vulkan/panvk_physical_device.c | sed -n '1350,1440p' || true
+
 ./scripts/apply-patches.sh --profile "${PROFILE}"
 ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
