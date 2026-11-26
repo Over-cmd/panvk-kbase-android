@@ -477,7 +477,6 @@ ensure_android_xcb_lib() {
   rm -rf "$build_tmp"
   mkdir -p "$build_tmp"
 
-  # Implementacion real de XGetXCBConnection para libX11-xcb.a
   cat <<'EOF' > "${build_tmp}/x11_xcb_impl.c"
 #include <stddef.h>
 typedef struct _XDisplay Display;
@@ -492,9 +491,9 @@ EOF
   "$ar_bin" rcs "${x11_dir}/lib/libX11-xcb.a" "${build_tmp}/x11_xcb_impl.o"
   "$ranlib_bin" "${x11_dir}/lib/libX11-xcb.a"
 
-  # Implementacion real de xshmfence para libxshmfence.a
   cat <<'EOF' > "${build_tmp}/xshmfence_impl.c"
 #include <errno.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
