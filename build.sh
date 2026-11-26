@@ -37,6 +37,50 @@ ensure_host_x11_headers() {
   ls -ld /usr/include/xcb/xcb.h /usr/include/xcb/shm.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h 2>/dev/null || true
 }
 
+ensure_lua54_pc() {
+  if pkg-config --exists lua54 2>/dev/null; then
+    return 0
+  fi
+
+  local pc_dir="/usr/local/lib/pkgconfig"
+  sudo mkdir -p "$pc_dir"
+
+  if pkg-config --exists lua5.4 2>/dev/null; then
+    local cflags libs ver
+    ver="$(pkg-config --modversion lua5.4)"
+    cflags="$(pkg-config --cflags lua5.4)"
+    libs="$(pkg-config --libs lua5.4)"
+    cat <<EOF | sudo tee "${pc_dir}/lua54.pc" >/dev/null
+prefix=/usr
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib/x86_64-linux-gnu
+includedir=\${prefix}/include/lua5.4
+
+Name: Lua
+Description: An Extensible Extension Language
+Version: ${ver}
+Cflags: ${cflags}
+Libs: ${libs}
+EOF
+    return 0
+  fi
+
+  if [ -d /usr/include/lua5.4 ]; then
+    cat <<'EOF' | sudo tee "${pc_dir}/lua54.pc" >/dev/null
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib/x86_64-linux-gnu
+includedir=${prefix}/include/lua5.4
+
+Name: Lua
+Description: An Extensible Extension Language
+Version: 5.4.6
+Cflags: -I${includedir}
+Libs: -L${libdir} -llua5.4 -lm -ldl
+EOF
+  fi
+}
+
 is_aarch64_archive() {
   local ar_path="$1"
   [ -f "$ar_path" ] || return 1
@@ -212,6 +256,7 @@ install_deps() {
     "libclc-${LLVM_VER}-dev" \
     "libllvmspirvlib-${LLVM_VER}-dev" \
     libelf-dev \
+    liblua5.4-dev \
     bison \
     flex \
     libdrm-dev \
@@ -231,6 +276,7 @@ install_deps() {
     gettext
 
   ensure_host_x11_headers
+  ensure_lua54_pc
 
   python3 -m pip install --upgrade pip
   pip install mako PyYAML meson ninja packaging
@@ -609,7 +655,7 @@ build_and_package() {
   export LLVM_CONFIG="llvm-config-${LLVM_VER}"
   export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
   export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
-  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
   export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
 
   if [ -n "${ANDROID_NDK_HOME}" ] && [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
