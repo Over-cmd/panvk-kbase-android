@@ -17,7 +17,18 @@ if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
 fi
 
 ./scripts/fetch-mesa.sh
-./scripts/apply-patches.sh --profile "${PROFILE}"
+
+if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
+  P004="patches/jm-v7/004-bifrost-atom-stride-check-with-64-candidate.patch"
+  echo "=== KBASE_KMOD.C AROUND LINE 186 ==="
+  nl -ba work/mesa/src/panfrost/lib/kmod/kbase_kmod.c | sed -n '170,225p' || true
+  echo "=== GREP atom_stride ==="
+  grep -n -C 10 "atom_stride" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
+  echo "=== PATCH 004 CONTENT ==="
+  nl -ba "$P004" || true
+  exit 1
+fi
+
 ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
 ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
