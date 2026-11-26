@@ -37,6 +37,27 @@ ensure_host_x11_headers() {
   ls -ld /usr/include/xcb/xcb.h /usr/include/xcb/shm.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h 2>/dev/null || true
 }
 
+ensure_android_xcb_lib() {
+  local x11_dir="${ROOT}/work/android-deps-x11"
+  local deps_dir="${ROOT}/work/android-deps"
+
+  local found_lib=""
+  found_lib="$(find "$x11_dir" "$deps_dir" -maxdepth 4 -name "libxcb.a" -o -name "libxcb.so" 2>/dev/null | head -n 1 || true)"
+
+  if [ -n "$found_lib" ]; then
+    echo "Found Android XCB library: $found_lib"
+    return 0
+  fi
+
+  local sys_xcb_a=""
+  sys_xcb_a="$(find /usr/lib -name "libxcb.a" 2>/dev/null | head -n 1 || true)"
+  if [ -n "$sys_xcb_a" ]; then
+    mkdir -p "${x11_dir}/lib"
+    cp -f "$sys_xcb_a" "${x11_dir}/lib/libxcb.a"
+    echo "Staged libxcb.a at ${x11_dir}/lib/libxcb.a"
+  fi
+}
+
 sync_spirv_repos() {
   if [ ! -d /tmp/SPIRV-Tools ] || [ ! -d /tmp/SPIRV-Headers ]; then
     rm -rf /tmp/SPIRV-Headers /tmp/SPIRV-Tools
@@ -148,6 +169,7 @@ install_deps() {
   pkg-config --modversion SPIRV-Tools || true
 
   install_android_spirv_tools
+  ensure_android_xcb_lib
 }
 
 prepare_mesa() {
@@ -427,24 +449,42 @@ apply_android_tolm() {
 remap_android_ninja_spirv_tools() {
   local ninja_file="${ROOT}/build/android-bionic/build.ninja"
   local android_spv_lib="${ROOT}/work/android-spirv-tools/lib"
+  local x11_lib_dir="${ROOT}/work/android-deps-x11/lib"
 
   [ -f "$ninja_file" ] || return 1
-  [ -d "$android_spv_lib" ] || return 1
 
-  python3 - "$ninja_file" "$android_spv_lib" <<'PY'
+  python3 - "$ninja_file" "$android_spv_lib" "$x11_lib_dir" <<'PY'
 import sys
 from pathlib import Path
 
 ninja_path = Path(sys.argv[1])
 spv_lib = sys.argv[2]
+x11_lib = sys.argv[3]
 txt = ninja_path.read_text(encoding="utf-8")
 
-updated = txt.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
-updated = updated.replace("-L/usr/local/lib", f"-L{spv_lib}")
+updated = txt
+if Path(spv_lib).is_dir():
+    updated = updated.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
+    updated = updated.replace("-L/usr/local/lib", f"-L{spv_lib}")
+
+if "xcb_screen_allowed_depths_iterator" in updated or (Path(x11_lib, "libxcb.a").is_file() and "-lxcb" not in updated):
+    if Path(x11_lib, "libxcb.a").is_file():
+        updated = updated.replace(
+            "src/panfrost/vulkan/libvulkan_panfrost.so:",
+            f"src/panfrost/vulkan/libvulkan_panfrost.so:",
+        )
+        updated = updated.replace(
+            " -o src/panfrost/vulkan/libvulkan_panfrost.so ",
+            f" -L{x11_lib} -o src/panfrost/vulkan/libvulkan_panfrost.so ",
+        )
+        updated = updated.replace(
+            " -Wl,--end-group",
+            f" {x11_lib}/libxcb.a -Wl,--end-group",
+        )
 
 if updated != txt:
     ninja_path.write_text(updated, encoding="utf-8")
-    print(f"Remapped SPIRV-Tools archive references in {ninja_path} to {spv_lib}")
+    print(f"Remapped linker archives in {ninja_path}")
 PY
 }
 
@@ -471,7 +511,7 @@ build_and_package() {
     else
       if [ -f "${ROOT}/build/android-bionic.log" ]; then
         echo "=== Linker errors in build/android-bionic.log ==="
-        grep -n -C 5 "incompatible with aarch64linux\|SPIRV-Tools" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+        grep -n -C 5 "incompatible with aarch64linux\|SPIRV-Tools\|undefined symbol" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
       fi
       return 1
     fi
