@@ -21,9 +21,9 @@ fi
 echo "=== PATCH 002 ==="
 cat patches/jm-v7/002-allow-bifrost-on-kbase-without-the-env-gate.patch || true
 
-echo "=== panvk_physical_device.c context ==="
-grep -n -C 15 "PAN_I_WANT_A_BROKEN_VULKAN_DRIVER" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || \
-  nl -ba work/mesa/src/panfrost/vulkan/panvk_physical_device.c | sed -n '1350,1440p' || true
+echo "=== panvk_physical_device.c match ==="
+grep -n -C 20 "PAN_I_WANT_A_BROKEN_VULKAN_DRIVER" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || \
+  grep -n -C 20 "case 6:" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || true
 
 ./scripts/apply-patches.sh --profile "${PROFILE}"
 ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
