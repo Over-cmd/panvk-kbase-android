@@ -39,8 +39,9 @@ ensure_host_x11_headers() {
 
 ensure_lua54_pc() {
   local deps_pc_dir="${ROOT}/work/android-deps/lib/pkgconfig"
+  local x11_pc_dir="${ROOT}/work/android-deps-x11/lib/pkgconfig"
   local local_pc_dir="/usr/local/lib/pkgconfig"
-  mkdir -p "$deps_pc_dir"
+  mkdir -p "$deps_pc_dir" "$x11_pc_dir"
 
   local ver="5.4.6"
   local cflags="-I/usr/include/lua5.4"
@@ -73,8 +74,8 @@ EOF
   cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || \
     sudo cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || true
 
-  PKG_CONFIG_PATH="${deps_pc_dir}:${local_pc_dir}:/usr/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}" \
-    pkg-config --modversion lua54 || true
+  echo "lua54.pc written to ${deps_pc_dir}/lua54.pc:"
+  PKG_CONFIG_LIBDIR="${deps_pc_dir}:${x11_pc_dir}" pkg-config --modversion lua54 || true
 }
 
 is_aarch64_archive() {
@@ -645,7 +646,6 @@ PY
 
 build_and_package() {
   cd "$ROOT"
-  ensure_lua54_pc
   export CC="clang-${LLVM_VER}"
   export CXX="clang++-${LLVM_VER}"
   export LD="ld.lld-${LLVM_VER}"
@@ -660,8 +660,10 @@ build_and_package() {
   fi
 
   apply_android_tolm
+  ensure_lua54_pc
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
+    ensure_lua54_pc
     if remap_android_ninja_spirv_tools; then
       ninja -C "${ROOT}/build/android-bionic" -j"$(nproc)"
     else
