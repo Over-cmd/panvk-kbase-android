@@ -671,9 +671,9 @@ build_and_package() {
     else
       if [ -f "${ROOT}/build/android-bionic.log" ]; then
         echo "=== Tail of build/android-bionic.log ==="
-        tail -n 35 "${ROOT}/build/android-bionic.log" || true
-        echo "=== Linker errors in build/android-bionic.log ==="
-        grep -n -C 5 "incompatible with aarch64linux\|SPIRV-Tools\|lua54\|undefined symbol" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+        tail -n 40 "${ROOT}/build/android-bionic.log" || true
+        echo "=== libelf & lua54 context in build/android-bionic.log ==="
+        grep -n -C 8 "Determining dependency 'libelf'\|Determining dependency 'lua54'\|ERROR:" "${ROOT}/build/android-bionic.log" | tail -n 80 || true
       fi
       return 1
     fi
