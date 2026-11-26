@@ -20,10 +20,10 @@ fi
 
 if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
   KMOD="work/mesa/src/panfrost/lib/kmod/kbase_kmod.c"
-  echo "=== STRUCT kbase_kmod_dev (65..120) ==="
-  nl -ba "$KMOD" | sed -n '65,120p' || true
-  echo "=== kbase_kmod_dev_create (1126..1250) ==="
-  nl -ba "$KMOD" | sed -n '1126,1250p' || true
+  echo "=== struct kbase_kmod_dev (70..113) ==="
+  nl -ba "$KMOD" | sed -n '70,113p' || true
+  echo "=== kbase_kmod_dev_create end (1229..1348) ==="
+  nl -ba "$KMOD" | sed -n '1229,1348p' || true
   exit 1
 fi
 
