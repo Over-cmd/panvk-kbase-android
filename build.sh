@@ -269,7 +269,7 @@ Elf_Data *elf_newdata(Elf_Scn *scn);
 char *elf_strptr(Elf *elf, size_t ndx, size_t offset);
 size_t elf_getshdrstrndx(Elf *elf, size_t *dst);
 int elf_flagelf(Elf *elf, Elf_Cmd cmd, unsigned int flags);
-int elf_flagscn(Elf_Scn *scn, Elf_Cmd cmd, unsigned int flags);
+int elf_flagscn(Elf *elf, Elf_Cmd cmd, unsigned int flags);
 int elf_flagdata(Elf_Data *data, Elf_Cmd cmd, unsigned int flags);
 off_t elf_update(Elf *elf, Elf_Cmd cmd);
 char *elf_getident(Elf *elf, size_t *ptr);
@@ -376,7 +376,7 @@ Elf_Data *elf_newdata(Elf_Scn *scn) { (void)scn; return NULL; }
 char *elf_strptr(Elf *elf, size_t ndx, size_t offset) { (void)elf; (void)ndx; (void)offset; return NULL; }
 size_t elf_getshdrstrndx(Elf *elf, size_t *dst) { (void)elf; if (dst) *dst = 0; return 0; }
 int elf_flagelf(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
-int elf_flagscn(Elf_Scn *scn, Elf_Cmd cmd, unsigned int flags) { (void)scn; (void)cmd; (void)flags; return 0; }
+int elf_flagscn(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
 int elf_flagdata(Elf_Data *data, Elf_Cmd cmd, unsigned int flags) { (void)data; (void)cmd; (void)flags; return 0; }
 off_t elf_update(Elf *elf, Elf_Cmd cmd) { (void)elf; (void)cmd; return 0; }
 char *elf_getident(Elf *elf, size_t *ptr) { (void)elf; if (ptr) *ptr = 0; return NULL; }
@@ -580,6 +580,7 @@ sync_spirv_repos() {
     fi
 
     if [ -n "$pinned_rev" ]; then
+      echo "Syncing SPIRV-Headers to DEPS revision: ${pinned_rev}"
       mkdir -p /tmp/SPIRV-Headers
       git -C /tmp/SPIRV-Headers init -q
       git -C /tmp/SPIRV-Headers remote add origin https://github.com/KhronosGroup/SPIRV-Headers.git
@@ -985,11 +986,13 @@ apply_android_tolm() {
   ANDROID_NDK_HOME="$(get_ndk_home)"
   export CLANG_LIB_DIR="${CLANG_LIB_DIR:-$("${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang-${LLVM_VER}" --print-resource-dir 2>/dev/null)/lib/linux}"
 
-  [ -f "$ORIG_CROSS_INI" ] && cp -f "$ORIG_CROSS_INI" "$BACKUP_CROSS_INI"
+  [ -f "$ORIG_CROSS_INI" ] && [ ! -f "$BACKUP_CROSS_INI" ] && cp -f "$ORIG_CROSS_INI" "$BACKUP_CROSS_INI"
 
-  # Conservar íntegramente tu android.toml expandiendo solo las variables de entorno
-  envsubst '${ANDROID_NDK_HOME} ${MESON_WORKING_DIR} ${CLANG_LIB_DIR}' < "$tolm_file" > "$ORIG_CROSS_INI"
-  echo "Applied ${tolm_file} -> ${ORIG_CROSS_INI}"
+  # Evita colisión con pkg_config_libdir que build-android.sh inyecta en [properties]
+  envsubst '${ANDROID_NDK_HOME} ${MESON_WORKING_DIR} ${CLANG_LIB_DIR}' < "$tolm_file" \
+    | grep -v -E '^[[:space:]]*pkg_config_libdir[[:space:]]*=' > "$ORIG_CROSS_INI"
+
+  rm -f "${ROOT}/build/android-bionic.cross.ini"
 }
 
 build_and_package() {
@@ -1016,12 +1019,6 @@ build_and_package() {
   ensure_android_libelf
   ensure_android_libdrm_stub
   ensure_android_rt_stub
-
-  # Reconfigurar Meson para que tome todos los flags/rutas de aarch64 de tu android.toml
-  if [ -d "${ROOT}/build/android-bionic" ]; then
-    meson setup --reconfigure "${ROOT}/build/android-bionic" "${ROOT}/work/mesa" \
-      --cross-file "${ORIG_CROSS_INI}" || rm -rf "${ROOT}/build/android-bionic"
-  fi
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     if [ -f "${ROOT}/build/android-bionic.log" ]; then
