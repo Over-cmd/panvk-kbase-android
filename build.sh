@@ -16,22 +16,31 @@ if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
   export PATH="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin:${PATH}"
 fi
 
+# Asegurar meson y ninja en el entorno del runner
+if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
+  if command -v pip3 >/dev/null 2>&1; then
+    pip3 install --break-system-packages -q meson ninja || pip3 install -q meson ninja
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq meson ninja-build pkg-config
+  fi
+  export PATH="${HOME}/.local/bin:${PATH}"
+fi
+
 P004="patches/jm-v7/004-bifrost-atom-stride-check-with-64-candidate.patch"
 KMOD="work/mesa/src/panfrost/lib/kmod/kbase_kmod.c"
-TMP_ORIG="/tmp/kbase_kmod_pre004.c"
-TMP_MOD="/tmp/kbase_kmod_post004.c"
 
-./scripts/fetch-mesa.sh
-
-if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
-  cp "${KMOD}" "${TMP_ORIG}"
-  cp "${KMOD}" "${TMP_MOD}"
+generate_clean_004() {
+  local tmp_orig="/tmp/kbase_kmod_004_orig.c"
+  local tmp_mod="/tmp/kbase_kmod_004_mod.c"
+  cp "${KMOD}" "${tmp_orig}"
+  cp "${KMOD}" "${tmp_mod}"
 
   python3 - <<PY
 import re
 from pathlib import Path
 
-src = Path("${TMP_MOD}").read_text(encoding="utf-8")
+mod_path = Path("${tmp_mod}")
+src = mod_path.read_text(encoding="utf-8")
 
 # 1) Campos en struct kbase_kmod_dev
 src, n1 = re.subn(
@@ -136,21 +145,27 @@ src, n4 = re.subn(
 )
 assert n4 == 1, "No se encontro return &kbase_dev->base;"
 
-Path("${TMP_MOD}").write_text(src, encoding="utf-8", newline="\n")
+mod_path.write_text(src, encoding="utf-8", newline="\n")
 PY
 
   {
     echo "diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c"
-    diff -u --label "a/src/panfrost/lib/kmod/kbase_kmod.c" --label "b/src/panfrost/lib/kmod/kbase_kmod.c" "${TMP_ORIG}" "${TMP_MOD}" || true
+    diff -u --label "a/src/panfrost/lib/kmod/kbase_kmod.c" --label "b/src/panfrost/lib/kmod/kbase_kmod.c" "${tmp_orig}" "${tmp_mod}" || true
   } > "${P004}"
 
   git -C work/mesa apply --check -v "$(pwd)/${P004}"
-  git -C work/mesa apply -v "$(pwd)/${P004}"
+}
 
-  # Si queda el parche 005 por aplicar, aplicarlo ahora
-  P005="patches/jm-v7/005-kbase-ion-fallback-for-placed-map-dma-buf.patch"
-  if [ -f "${P005}" ]; then
-    git -C work/mesa apply -v "$(pwd)/${P005}" || true
+./scripts/fetch-mesa.sh
+
+if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
+  if [ -f "${KMOD}" ]; then
+    generate_clean_004
+    rm -rf work/mesa
+    ./scripts/fetch-mesa.sh
+    ./scripts/apply-patches.sh --profile "${PROFILE}"
+  else
+    exit 1
   fi
 fi
 
