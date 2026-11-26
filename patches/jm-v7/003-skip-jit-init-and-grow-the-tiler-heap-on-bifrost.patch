@@ -1,10 +1,10 @@
 python3 - <<'EOF'
 from pathlib import Path
 
-patch_path = Path("patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch")
-patch_path.parent.mkdir(parents=True, exist_ok=True)
+p = Path("patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch")
+p.parent.mkdir(parents=True, exist_ok=True)
 
-content = "\n".join([
+patch_lines = [
     "From: abhay-byte <abhay02delhi@gmail.com>",
     "Date: 2026-10-16",
     "Subject: [PATCH jm-v7 003] kbase: skip MEM_JIT_INIT on Bifrost JM, GROW_ON_GPF tiler heap with 1 MiB commit",
@@ -69,9 +69,8 @@ content = "\n".join([
     " ",
     "       if (kmod_flags & PAN_KMOD_BO_FLAG_CSF_EVENT)",
     "          flags |= BASE_MEM_CSF_EVENT;",
-    "",
-])
+]
 
-patch_path.write_bytes(content.encode("utf-8"))
-print("Escrito:", patch_path, "bytes:", patch_path.stat().st_size)
+p.write_text("\n".join(patch_lines) + "\n", encoding="utf-8", newline="\n")
+print("Bytes:", p.stat().st_size, "Lines:", len(patch_lines))
 EOF
