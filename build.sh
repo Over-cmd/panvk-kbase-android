@@ -19,6 +19,32 @@ restore_cross_ini() {
 }
 trap restore_cross_ini EXIT
 
+is_aarch64_archive() {
+  local ar_path="$1"
+  [ -f "$ar_path" ] || return 1
+  local obj_file
+  obj_file="$(ar t "$ar_path" 2>/dev/null | head -n 1 || true)"
+  [ -n "$obj_file" ] || return 1
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  (
+    cd "$tmp_dir"
+    ar x "$ar_path" "$obj_file" 2>/dev/null || exit 1
+    readelf -h "$obj_file" 2>/dev/null | grep -q "AArch64"
+  )
+  local rc=$?
+  rm -rf "$tmp_dir"
+  return "$rc"
+}
+
+get_ndk_home() {
+  echo "${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-/usr/local/lib/android/sdk/ndk/27.3.13750724}}"
+}
+
+get_ndk_bin() {
+  echo "$(get_ndk_home)/toolchains/llvm/prebuilt/linux-x86_64/bin"
+}
+
 ensure_host_x11_headers() {
   local multiarch
   multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || echo "x86_64-linux-gnu")"
@@ -73,7 +99,7 @@ ensure_xproto_pc() {
   if [ -n "$found_pc" ]; then
     cp -f "$found_pc" "${x11_pc_dir}/xproto.pc" 2>/dev/null || true
     cp -f "$found_pc" "${deps_pc_dir}/xproto.pc" 2>/dev/null || true
-    echo "xproto.pc copied from $found_pc to ${x11_pc_dir}/xproto.pc"
+    echo "xproto.pc installed from $found_pc"
   else
     cat <<'EOF' > "${x11_pc_dir}/xproto.pc"
 prefix=/usr
@@ -85,7 +111,7 @@ Version: 7.0.31
 Cflags: -I${includedir}
 EOF
     cp -f "${x11_pc_dir}/xproto.pc" "${deps_pc_dir}/xproto.pc" 2>/dev/null || true
-    echo "Fallback xproto.pc written to ${x11_pc_dir}/xproto.pc"
+    echo "Fallback xproto.pc installed"
   fi
 }
 
@@ -105,7 +131,7 @@ ensure_lua54_pc() {
     libs="$(pkg-config --libs lua5.4)"
   elif pkg-config --exists lua54 2>/dev/null; then
     ver="$(pkg-config --modversion lua54)"
-    cflags="$(pkg-config --cflags lua5.4)"
+    cflags="$(pkg-config --cflags lua54)"
     libs="$(pkg-config --libs lua54)"
   fi
 
@@ -128,51 +154,277 @@ EOF
   cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || \
     sudo cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || true
 
-  echo "lua54.pc written to ${deps_pc_dir}/lua54.pc:"
-  PKG_CONFIG_LIBDIR="${deps_pc_dir}:${x11_pc_dir}" pkg-config --modversion lua54 || true
+  echo "lua54.pc installed (version ${ver})"
 }
 
-is_aarch64_archive() {
-  local ar_path="$1"
-  [ -f "$ar_path" ] || return 1
-  local obj_file
-  obj_file="$(ar t "$ar_path" 2>/dev/null | head -n 1 || true)"
-  [ -n "$obj_file" ] || return 1
-  local tmp_dir
-  tmp_dir="$(mktemp -d)"
-  (
-    cd "$tmp_dir"
-    ar x "$ar_path" "$obj_file" 2>/dev/null || exit 1
-    readelf -h "$obj_file" 2>/dev/null | grep -q "AArch64"
-  )
-  local rc=$?
-  rm -rf "$tmp_dir"
-  return "$rc"
+ensure_android_rt_stub() {
+  local deps_lib_dir="${ROOT}/work/android-deps/lib"
+  local ndk_bin
+  ndk_bin="$(get_ndk_bin)"
+
+  mkdir -p "$deps_lib_dir"
+  if [ ! -f "${deps_lib_dir}/librt.a" ] && [ -x "${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang" ] && [ -x "${ndk_bin}/llvm-ar" ]; then
+    local tmp_c="/tmp/rt_stub.c"
+    local tmp_o="/tmp/rt_stub.o"
+    echo "void __android_rt_stub(void) {}" > "$tmp_c"
+    "${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang" -fPIC -c "$tmp_c" -o "$tmp_o"
+    "${ndk_bin}/llvm-ar" rcs "${deps_lib_dir}/librt.a" "$tmp_o"
+    rm -f "$tmp_c" "$tmp_o"
+  fi
+  ls -la "${deps_lib_dir}/librt.a" 2>/dev/null || true
+}
+
+ensure_android_libelf() {
+  local deps_dir="${ROOT}/work/android-deps"
+  local ndk_bin
+  ndk_bin="$(get_ndk_bin)"
+
+  mkdir -p "${deps_dir}/lib" "${deps_dir}/include"
+
+  if is_aarch64_archive "${deps_dir}/lib/libelf.a" && [ -f "${deps_dir}/include/libelf.h" ]; then
+    echo "Android aarch64 libelf already installed in ${deps_dir}/lib/libelf.a"
+    return 0
+  fi
+
+  local cc_bin="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
+  local ar_bin="${ndk_bin}/llvm-ar"
+  local ranlib_bin="${ndk_bin}/llvm-ranlib"
+  [ -x "$cc_bin" ] || { echo "Error: NDK clang not found at $cc_bin"; return 1; }
+
+  local src_dir="/tmp/android-libelf-src"
+  rm -rf "$src_dir"
+  mkdir -p "$src_dir"
+
+  cat <<'EOF' > "${src_dir}/libelf.h"
+#ifndef _LIBELF_H
+#define _LIBELF_H 1
+
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/types.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct Elf Elf;
+typedef struct Elf_Scn Elf_Scn;
+
+typedef enum {
+  ELF_C_NULL = 0,
+  ELF_C_READ,
+  ELF_C_RDWR,
+  ELF_C_WRITE,
+  ELF_C_CLR
+} Elf_Cmd;
+
+typedef enum {
+  ELF_T_BYTE = 0,
+  ELF_T_ADDR,
+  ELF_T_DYN,
+  ELF_T_EHDR,
+  ELF_T_HALF,
+  ELF_T_OFF,
+  ELF_T_PHDR,
+  ELF_T_RELA,
+  ELF_T_REL,
+  ELF_T_SHDR,
+  ELF_T_SWORD,
+  ELF_T_SYM,
+  ELF_T_WORD,
+  ELF_T_XWORD,
+  ELF_T_NUM
+} Elf_Type;
+
+typedef struct {
+  void *d_buf;
+  Elf_Type d_type;
+  unsigned int d_version;
+  size_t d_size;
+  off_t d_off;
+  size_t d_align;
+} Elf_Data;
+
+#define EV_NONE 0
+#define EV_CURRENT 1
+#define ELF_F_LAYOUT 0x1
+#define SHN_UNDEF 0
+
+unsigned int elf_version(unsigned int ver);
+Elf *elf_begin(int fd, Elf_Cmd cmd, Elf *ref);
+Elf *elf_memory(char *image, size_t size);
+int elf_end(Elf *elf);
+int elf_errno(void);
+const char *elf_errmsg(int err);
+size_t elf_ndxscn(Elf_Scn *scn);
+Elf_Scn *elf_getscn(Elf *elf, size_t idx);
+Elf_Scn *elf_newscn(Elf *elf);
+Elf_Scn *elf_nextscn(Elf *elf, Elf_Scn *scn);
+Elf_Data *elf_getdata(Elf_Scn *scn, Elf_Data *data);
+Elf_Data *elf_newdata(Elf_Scn *scn);
+char *elf_strptr(Elf *elf, size_t ndx, size_t offset);
+size_t elf_getshdrstrndx(Elf *elf, size_t *dst);
+int elf_flagelf(Elf *elf, Elf_Cmd cmd, unsigned int flags);
+int elf_flagscn(Elf_Scn *scn, Elf_Cmd cmd, unsigned int flags);
+int elf_flagdata(Elf_Data *data, Elf_Cmd cmd, unsigned int flags);
+off_t elf_update(Elf *elf, Elf_Cmd cmd);
+char *elf_getident(Elf *elf, size_t *ptr);
+size_t elf_rawfile(Elf *elf, size_t *ptr);
+Elf_Data *elf_rawdata(Elf_Scn *scn, Elf_Data *data);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+EOF
+
+  cat <<'EOF' > "${src_dir}/gelf.h"
+#ifndef _GELF_H
+#define _GELF_H 1
+
+#include <elf.h>
+#include <libelf.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef Elf64_Ehdr GElf_Ehdr;
+typedef Elf64_Shdr GElf_Shdr;
+typedef Elf64_Phdr GElf_Phdr;
+typedef Elf64_Sym GElf_Sym;
+typedef Elf64_Rel GElf_Rel;
+typedef Elf64_Rela GElf_Rela;
+typedef Elf64_Dyn GElf_Dyn;
+
+GElf_Ehdr *gelf_getehdr(Elf *elf, GElf_Ehdr *dst);
+int gelf_update_ehdr(Elf *elf, GElf_Ehdr *src);
+unsigned long gelf_newehdr(Elf *elf, int elfclass);
+GElf_Shdr *gelf_getshdr(Elf_Scn *scn, GElf_Shdr *dst);
+int gelf_update_shdr(Elf_Scn *scn, GElf_Shdr *src);
+GElf_Sym *gelf_getsym(Elf_Data *data, int ndx, GElf_Sym *dst);
+int gelf_update_sym(Elf_Data *data, int ndx, GElf_Sym *src);
+GElf_Rela *gelf_getrela(Elf_Data *data, int ndx, GElf_Rela *dst);
+int gelf_update_rela(Elf_Data *data, int ndx, GElf_Rela *src);
+GElf_Rel *gelf_getrel(Elf_Data *data, int ndx, GElf_Rel *dst);
+int gelf_update_rel(Elf_Data *data, int ndx, GElf_Rel *src);
+size_t gelf_fsize(Elf *elf, Elf_Type type, size_t count, unsigned int version);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+EOF
+
+  cat <<'EOF' > "${src_dir}/libelf_stub.c"
+#include "libelf.h"
+#include "gelf.h"
+#include <stdlib.h>
+#include <string.h>
+
+struct Elf {
+  char *raw;
+  size_t raw_size;
+  int fd;
+};
+
+struct Elf_Scn {
+  size_t index;
+  Elf_Data data;
+};
+
+unsigned int elf_version(unsigned int ver) {
+  (void)ver;
+  return EV_CURRENT;
+}
+
+Elf *elf_begin(int fd, Elf_Cmd cmd, Elf *ref) {
+  (void)fd; (void)cmd; (void)ref;
+  Elf *e = (Elf *)calloc(1, sizeof(Elf));
+  if (e) e->fd = fd;
+  return e;
+}
+
+Elf *elf_memory(char *image, size_t size) {
+  Elf *e = (Elf *)calloc(1, sizeof(Elf));
+  if (e) {
+    e->raw = image;
+    e->raw_size = size;
+  }
+  return e;
+}
+
+int elf_end(Elf *elf) {
+  free(elf);
+  return 0;
+}
+
+int elf_errno(void) { return 0; }
+const char *elf_errmsg(int err) { (void)err; return "ok"; }
+size_t elf_ndxscn(Elf_Scn *scn) { return scn ? scn->index : 0; }
+Elf_Scn *elf_getscn(Elf *elf, size_t idx) { (void)elf; (void)idx; return NULL; }
+Elf_Scn *elf_newscn(Elf *elf) { (void)elf; return NULL; }
+Elf_Scn *elf_nextscn(Elf *elf, Elf_Scn *scn) { (void)elf; (void)scn; return NULL; }
+Elf_Data *elf_getdata(Elf_Scn *scn, Elf_Data *data) { (void)scn; (void)data; return NULL; }
+Elf_Data *elf_newdata(Elf_Scn *scn) { (void)scn; return NULL; }
+char *elf_strptr(Elf *elf, size_t ndx, size_t offset) { (void)elf; (void)ndx; (void)offset; return NULL; }
+size_t elf_getshdrstrndx(Elf *elf, size_t *dst) { (void)elf; if (dst) *dst = 0; return 0; }
+int elf_flagelf(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
+int elf_flagscn(Elf_Scn *scn, Elf_Cmd cmd, unsigned int flags) { (void)scn; (void)cmd; (void)flags; return 0; }
+int elf_flagdata(Elf_Data *data, Elf_Cmd cmd, unsigned int flags) { (void)data; (void)cmd; (void)flags; return 0; }
+off_t elf_update(Elf *elf, Elf_Cmd cmd) { (void)elf; (void)cmd; return 0; }
+char *elf_getident(Elf *elf, size_t *ptr) { (void)elf; if (ptr) *ptr = 0; return NULL; }
+size_t elf_rawfile(Elf *elf, size_t *ptr) {
+  if (ptr) *ptr = elf ? elf->raw_size : 0;
+  return elf ? elf->raw_size : 0;
+}
+Elf_Data *elf_rawdata(Elf_Scn *scn, Elf_Data *data) { (void)scn; (void)data; return NULL; }
+
+GElf_Ehdr *gelf_getehdr(Elf *elf, GElf_Ehdr *dst) { (void)elf; (void)dst; return NULL; }
+int gelf_update_ehdr(Elf *elf, GElf_Ehdr *src) { (void)elf; (void)src; return 0; }
+unsigned long gelf_newehdr(Elf *elf, int elfclass) { (void)elf; (void)elfclass; return 0; }
+GElf_Shdr *gelf_getshdr(Elf_Scn *scn, GElf_Shdr *dst) { (void)scn; (void)dst; return NULL; }
+int gelf_update_shdr(Elf_Scn *scn, GElf_Shdr *src) { (void)scn; (void)src; return 0; }
+GElf_Sym *gelf_getsym(Elf_Data *data, int ndx, GElf_Sym *dst) { (void)data; (void)ndx; (void)dst; return NULL; }
+int gelf_update_sym(Elf_Data *data, int ndx, GElf_Sym *src) { (void)data; (void)ndx; (void)src; return 0; }
+GElf_Rela *gelf_getrela(Elf_Data *data, int ndx, GElf_Rela *dst) { (void)data; (void)ndx; (void)dst; return NULL; }
+int gelf_update_rela(Elf_Data *data, int ndx, GElf_Rela *src) { (void)data; (void)ndx; (void)src; return 0; }
+GElf_Rel *gelf_getrel(Elf_Data *data, int ndx, GElf_Rel *dst) { (void)data; (void)ndx; (void)dst; return NULL; }
+int gelf_update_rel(Elf_Data *data, int ndx, GElf_Rel *src) { (void)data; (void)ndx; (void)src; return 0; }
+size_t gelf_fsize(Elf *elf, Elf_Type type, size_t count, unsigned int version) {
+  (void)elf; (void)type; (void)count; (void)version;
+  return 0;
+}
+EOF
+
+  "$cc_bin" -fPIC -O2 -I"$src_dir" -c "${src_dir}/libelf_stub.c" -o "${src_dir}/libelf_stub.o"
+  "$ar_bin" rcs "${deps_dir}/lib/libelf.a" "${src_dir}/libelf_stub.o"
+  "$ranlib_bin" "${deps_dir}/lib/libelf.a"
+  cp -f "${src_dir}/libelf.h" "${src_dir}/gelf.h" "${deps_dir}/include/"
+  rm -rf "$src_dir"
+
+  echo "Installed Android aarch64 libelf.a in ${deps_dir}/lib/libelf.a"
 }
 
 ensure_android_xcb_lib() {
   local x11_dir="${ROOT}/work/android-deps-x11"
   local deps_dir="${ROOT}/work/android-deps"
-  local ndk_home="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
-  local ndk_bin="${ndk_home}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+  local ndk_bin
+  ndk_bin="$(get_ndk_bin)"
 
-  mkdir -p "${x11_dir}/lib"
+  mkdir -p "${x11_dir}/lib" "${x11_dir}/include"
 
-  local candidate
-  for candidate in "${x11_dir}/lib/libxcb.a" "${deps_dir}/lib/libxcb.a"; do
-    if is_aarch64_archive "$candidate"; then
-      if [ "$candidate" != "${x11_dir}/lib/libxcb.a" ]; then
-        cp -f "$candidate" "${x11_dir}/lib/libxcb.a"
-      fi
-      echo "Using existing aarch64 libxcb.a: $candidate"
-      return 0
-    fi
-  done
-
-  if [ ! -x "${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang" ]; then
-    echo "Warning: NDK aarch64 clang not found; cannot cross-compile libxcb"
+  if is_aarch64_archive "${x11_dir}/lib/libxcb.a" && is_aarch64_archive "${x11_dir}/lib/libX11.a"; then
+    echo "Android aarch64 X11/XCB archives already installed in ${x11_dir}/lib"
     return 0
   fi
+
+  local cc_bin="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
+  local ar_bin="${ndk_bin}/llvm-ar"
+  local ranlib_bin="${ndk_bin}/llvm-ranlib"
+  [ -x "$cc_bin" ] || { echo "Warning: NDK aarch64 clang not found; cannot cross-compile libxcb"; return 0; }
 
   local shim_inc_flags=""
   if [ -d "${ROOT}/shims/include" ]; then
@@ -208,9 +460,9 @@ ensure_android_xcb_lib() {
   (
     cd "${src_root}/libxcb"
     export PKG_CONFIG_PATH="${proto_prefix}/share/pkgconfig:${proto_prefix}/lib/pkgconfig"
-    export CC="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
-    export AR="${ndk_bin}/llvm-ar"
-    export RANLIB="${ndk_bin}/llvm-ranlib"
+    export CC="$cc_bin"
+    export AR="$ar_bin"
+    export RANLIB="$ranlib_bin"
     export CFLAGS="-fPIC -O2${shim_inc_flags} -Wno-unused-but-set-variable -Wno-error"
     autoreconf -fiv
     ./configure \
@@ -224,8 +476,21 @@ ensure_android_xcb_lib() {
     make install
   )
 
+  # Crear archivos de soporte aarch64 para librerías X11/xcb/xshmfence enlazadas por libvulkan_panfrost.so
+  local stub_c="/tmp/x11_android_stub.c"
+  echo "void __android_x11_stub(void) {}" > "$stub_c"
+  local stub_o="/tmp/x11_android_stub.o"
+  "$cc_bin" -fPIC -O2 -c "$stub_c" -o "$stub_o"
+  for libname in libX11.a libX11-xcb.a libxshmfence.a libxcb-dri3.a libxcb-present.a libxcb-randr.a libxcb-sync.a libxcb-xfixes.a libxcb-shm.a; do
+    if ! is_aarch64_archive "${x11_dir}/lib/${libname}"; then
+      "$ar_bin" rcs "${x11_dir}/lib/${libname}" "$stub_o"
+      "$ranlib_bin" "${x11_dir}/lib/${libname}"
+    fi
+  done
+  rm -f "$stub_c" "$stub_o"
+
   if is_aarch64_archive "${x11_dir}/lib/libxcb.a"; then
-    echo "Built aarch64 libxcb.a and extension archives in ${x11_dir}/lib"
+    echo "Installed aarch64 libxcb.a and X11/XCB archives in ${x11_dir}/lib"
   fi
 }
 
@@ -256,21 +521,22 @@ sync_spirv_repos() {
 install_spirv_headers_to_targets() {
   local android_spv_prefix="${ROOT}/work/android-spirv-tools"
   local deps_inc="${ROOT}/work/android-deps/include"
-  local ndk_home="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+  local ndk_home
+  ndk_home="$(get_ndk_home)"
   local sysroot_inc="${ndk_home}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/local/include"
 
   mkdir -p "$deps_inc"
 
   if [ -d "${android_spv_prefix}/include/spirv-tools" ]; then
     cp -rf "${android_spv_prefix}/include/spirv-tools" "${deps_inc}/" 2>/dev/null || true
-    if [ -n "$ndk_home" ]; then
+    if [ -d "${ndk_home}/toolchains/llvm/prebuilt/linux-x86_64/sysroot" ]; then
       mkdir -p "$sysroot_inc" 2>/dev/null || sudo mkdir -p "$sysroot_inc" 2>/dev/null || true
       cp -rf "${android_spv_prefix}/include/spirv-tools" "${sysroot_inc}/" 2>/dev/null || \
         sudo cp -rf "${android_spv_prefix}/include/spirv-tools" "${sysroot_inc}/" 2>/dev/null || true
     fi
   elif [ -d /tmp/SPIRV-Tools/include/spirv-tools ]; then
     cp -rf /tmp/SPIRV-Tools/include/spirv-tools "${deps_inc}/" 2>/dev/null || true
-    if [ -n "$ndk_home" ]; then
+    if [ -d "${ndk_home}/toolchains/llvm/prebuilt/linux-x86_64/sysroot" ]; then
       mkdir -p "$sysroot_inc" 2>/dev/null || sudo mkdir -p "$sysroot_inc" 2>/dev/null || true
       cp -rf /tmp/SPIRV-Tools/include/spirv-tools "${sysroot_inc}/" 2>/dev/null || \
         sudo cp -rf /tmp/SPIRV-Tools/include/spirv-tools "${sysroot_inc}/" 2>/dev/null || true
@@ -279,13 +545,9 @@ install_spirv_headers_to_targets() {
 }
 
 install_android_spirv_tools() {
-  local ndk_home="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+  local ndk_home
+  ndk_home="$(get_ndk_home)"
   local android_spv_prefix="${ROOT}/work/android-spirv-tools"
-
-  if [ -z "$ndk_home" ]; then
-    echo "Warning: ANDROID_NDK_HOME not set; skipping Android aarch64 SPIRV-Tools build"
-    return 0
-  fi
 
   local toolchain_cmake="${ndk_home}/build/cmake/android.toolchain.cmake"
   if [ ! -f "$toolchain_cmake" ]; then
@@ -295,7 +557,7 @@ install_android_spirv_tools() {
 
   sync_spirv_repos
 
-  if [ ! -f "${android_spv_prefix}/lib/libSPIRV-Tools-opt.a" ]; then
+  if ! is_aarch64_archive "${android_spv_prefix}/lib/libSPIRV-Tools-opt.a"; then
     rm -rf /tmp/SPIRV-Tools-android-build "${android_spv_prefix}"
     cmake -S /tmp/SPIRV-Tools -B /tmp/SPIRV-Tools-android-build -G Ninja \
       -DCMAKE_TOOLCHAIN_FILE="${toolchain_cmake}" \
@@ -311,6 +573,7 @@ install_android_spirv_tools() {
   fi
 
   install_spirv_headers_to_targets
+  echo "Installed Android aarch64 SPIRV-Tools in ${android_spv_prefix}/lib"
 }
 
 install_deps() {
@@ -376,6 +639,8 @@ install_deps() {
 
   install_android_spirv_tools
   ensure_android_xcb_lib
+  ensure_android_libelf
+  ensure_android_rt_stub
 }
 
 prepare_mesa() {
@@ -656,7 +921,8 @@ apply_android_tolm() {
   [ -f "$tolm_file" ] || return 0
 
   export MESON_WORKING_DIR="${ROOT}"
-  export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+  export ANDROID_NDK_HOME
+  ANDROID_NDK_HOME="$(get_ndk_home)"
   export CLANG_LIB_DIR="${CLANG_LIB_DIR:-$("${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang-${LLVM_VER}" --print-resource-dir 2>/dev/null)/lib/linux}"
 
   [ -f "$ORIG_CROSS_INI" ] && cp -f "$ORIG_CROSS_INI" "$BACKUP_CROSS_INI"
@@ -667,75 +933,120 @@ apply_android_tolm() {
 
 remap_android_ninja_spirv_tools() {
   local ninja_file="${ROOT}/build/android-bionic/build.ninja"
+  local rsp_file="${ROOT}/build/android-bionic/src/panfrost/vulkan/libvulkan_panfrost.so.rsp"
   local android_spv_prefix="${ROOT}/work/android-spirv-tools"
   local android_spv_lib="${android_spv_prefix}/lib"
   local android_spv_inc="${android_spv_prefix}/include"
+  local deps_lib_dir="${ROOT}/work/android-deps/lib"
   local x11_lib_dir="${ROOT}/work/android-deps-x11/lib"
 
   install_spirv_headers_to_targets
+  ensure_android_xcb_lib
+  ensure_android_libelf
+  ensure_android_rt_stub
   [ -f "$ninja_file" ] || return 1
 
-  python3 - "$ninja_file" "$android_spv_lib" "$android_spv_inc" "$x11_lib_dir" <<'PY'
+  python3 - "$ninja_file" "$rsp_file" "$android_spv_lib" "$android_spv_inc" "$deps_lib_dir" "$x11_lib_dir" <<'PY'
 import subprocess
 import sys
 from pathlib import Path
 
 ninja_path = Path(sys.argv[1])
-spv_lib = sys.argv[2]
-spv_inc = sys.argv[3]
-x11_lib = sys.argv[4]
+rsp_path = Path(sys.argv[2])
+spv_lib = sys.argv[3]
+spv_inc = sys.argv[4]
+deps_lib = sys.argv[5]
+x11_lib = sys.argv[6]
+
+lib_dirs = []
+for d in (spv_lib, deps_lib, x11_lib):
+    if Path(d).is_dir() and d not in lib_dirs:
+        lib_dirs.append(d)
+
+def patch_text(txt: str, is_rsp: bool = False) -> str:
+    updated = txt
+    if Path(spv_lib).is_dir():
+        updated = updated.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
+        updated = updated.replace("-L/usr/local/lib", f"-L{spv_lib}")
+
+    if not is_rsp and Path(spv_inc).is_dir():
+        inc_flag = f"-I{spv_inc}"
+        if inc_flag not in updated:
+            updated = updated.replace(
+                "-I../../work/mesa/src/compiler/spirv",
+                f"-I../../work/mesa/src/compiler/spirv {inc_flag}",
+            )
+
+    l_flags = " ".join(f"-L{d}" for d in lib_dirs)
+    if l_flags:
+        if " -Wl,--end-group" in updated:
+            updated = updated.replace(" -Wl,--end-group", f" {l_flags} -Wl,--end-group")
+        elif is_rsp:
+            updated = updated + f"\n{l_flags}\n"
+
+    aarch64_libs = []
+    for search_dir in lib_dirs:
+        for archive in sorted(Path(search_dir).glob("lib*.a")):
+            if archive.name in {
+                "libdrm.a",
+                "libdrm_amdgpu.a",
+                "libdrm_freedreno.a",
+                "libdrm_intel.a",
+                "libdrm_nouveau.a",
+                "libdrm_panfrost.a",
+                "libdrm_radeon.a",
+                "libelf.a",
+                "librt.a",
+                "libxcb.a",
+                "libxcb-shm.a",
+                "libxcb-dri3.a",
+                "libxcb-randr.a",
+                "libxcb-sync.a",
+                "libxcb-xfixes.a",
+                "libxcb-present.a",
+                "libX11-xcb.a",
+                "libX11.a",
+                "libxshmfence.a",
+                "libSPIRV-Tools.a",
+                "libSPIRV-Tools-opt.a",
+                "libSPIRV-Tools-link.a",
+            }:
+                try:
+                    out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
+                    if out:
+                        tmp = Path("/tmp/ar_check")
+                        tmp.mkdir(parents=True, exist_ok=True)
+                        subprocess.check_call(["ar", "x", str(archive), out[0]], cwd=str(tmp), stderr=subprocess.DEVNULL)
+                        hdr = subprocess.check_output(["readelf", "-h", str(tmp / out[0])], text=True, stderr=subprocess.DEVNULL)
+                        if "AArch64" in hdr and str(archive) not in updated:
+                            aarch64_libs.append(str(archive))
+                except Exception:
+                    pass
+
+    if aarch64_libs:
+        extra_archives = " " + " ".join(aarch64_libs)
+        if " -Wl,--end-group" in updated:
+            updated = updated.replace(
+                " -Wl,--end-group",
+                f"{extra_archives} -Wl,--end-group",
+            )
+        elif is_rsp:
+            updated = updated + f"{extra_archives}\n"
+
+    return updated
+
 txt = ninja_path.read_text(encoding="utf-8")
+updated_ninja = patch_text(txt, is_rsp=False)
+if updated_ninja != txt:
+    ninja_path.write_text(updated_ninja, encoding="utf-8")
+    print(f"Remapped SPIRV-Tools headers/libs and aarch64 archives in {ninja_path}")
 
-updated = txt
-if Path(spv_lib).is_dir():
-    updated = updated.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
-    updated = updated.replace("-L/usr/local/lib", f"-L{spv_lib}")
-
-if Path(spv_inc).is_dir():
-    inc_flag = f"-I{spv_inc}"
-    if inc_flag not in updated:
-        updated = updated.replace(
-            "-I../../work/mesa/src/compiler/spirv",
-            f"-I../../work/mesa/src/compiler/spirv {inc_flag}",
-        )
-
-aarch64_libs = []
-if Path(x11_lib).is_dir():
-    for archive in sorted(Path(x11_lib).glob("lib*.a")):
-        if archive.name in {
-            "libxcb.a",
-            "libxcb-shm.a",
-            "libxcb-dri3.a",
-            "libxcb-randr.a",
-            "libxcb-sync.a",
-            "libxcb-xfixes.a",
-            "libxcb-present.a",
-            "libX11-xcb.a",
-            "libX11.a",
-            "libxshmfence.a",
-        }:
-            try:
-                out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
-                if out:
-                    tmp = Path("/tmp/ar_check")
-                    tmp.mkdir(parents=True, exist_ok=True)
-                    subprocess.check_call(["ar", "x", str(archive), out[0]], cwd=str(tmp), stderr=subprocess.DEVNULL)
-                    hdr = subprocess.check_output(["readelf", "-h", str(tmp / out[0])], text=True, stderr=subprocess.DEVNULL)
-                    if "AArch64" in hdr and str(archive) not in updated:
-                        aarch64_libs.append(str(archive))
-            except Exception:
-                pass
-
-if aarch64_libs:
-    extra_archives = " " + " ".join(aarch64_libs)
-    updated = updated.replace(
-        " -Wl,--end-group",
-        f"{extra_archives} -Wl,--end-group",
-    )
-
-if updated != txt:
-    ninja_path.write_text(updated, encoding="utf-8")
-    print(f"Remapped SPIRV-Tools headers/libs and aarch64 X11/XCB archives in {ninja_path}")
+if rsp_path.is_file():
+    rsp_txt = rsp_path.read_text(encoding="utf-8")
+    updated_rsp = patch_text(rsp_txt, is_rsp=True)
+    if updated_rsp != rsp_txt:
+        rsp_path.write_text(updated_rsp, encoding="utf-8")
+        print(f"Remapped library search paths and aarch64 archives in {rsp_path}")
 PY
 }
 
@@ -745,7 +1056,8 @@ build_and_package() {
   export CXX="clang++-${LLVM_VER}"
   export LD="ld.lld-${LLVM_VER}"
   export LLVM_CONFIG="llvm-config-${LLVM_VER}"
-  export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+  export ANDROID_NDK_HOME
+  ANDROID_NDK_HOME="$(get_ndk_home)"
   export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
   export PKG_CONFIG_PATH="${ROOT}/work/android-deps/lib/pkgconfig:${ROOT}/work/android-deps-x11/lib/pkgconfig:/usr/share/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
   export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
@@ -758,18 +1070,22 @@ build_and_package() {
   ensure_lua54_pc
   ensure_xproto_pc
   install_spirv_headers_to_targets
+  ensure_android_xcb_lib
+  ensure_android_libelf
+  ensure_android_rt_stub
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     ensure_lua54_pc
     ensure_xproto_pc
+    ensure_android_xcb_lib
+    ensure_android_libelf
+    ensure_android_rt_stub
     if remap_android_ninja_spirv_tools; then
       ninja -C "${ROOT}/build/android-bionic" -j"$(nproc)"
     else
       if [ -f "${ROOT}/build/android-bionic.log" ]; then
         echo "=== Tail of build/android-bionic.log ==="
         tail -n 40 "${ROOT}/build/android-bionic.log" || true
-        echo "=== libelf, lua54 & xcb context in build/android-bionic.log ==="
-        grep -n -C 8 "Determining dependency 'libelf'\|Determining dependency 'lua54'\|xproto\|ERROR:" "${ROOT}/build/android-bionic.log" | tail -n 80 || true
       fi
       return 1
     fi
