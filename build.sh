@@ -87,9 +87,10 @@ ensure_android_xcb_lib() {
   git clone --depth 1 --branch xcb-proto-1.17.0 https://gitlab.freedesktop.org/xorg/proto/xcbproto.git "${src_root}/xcbproto"
   (
     cd "${src_root}/xcbproto"
-    autoreconf -fiv >/dev/null
-    ./configure --prefix="$proto_prefix" >/dev/null
-    make -j"$(nproc)" install >/dev/null
+    autoreconf -fiv
+    ./configure --prefix="$proto_prefix"
+    make -j"$(nproc)"
+    make install
   )
 
   git clone --depth 1 --branch libxcb-1.17.0 https://gitlab.freedesktop.org/xorg/lib/libxcb.git "${src_root}/libxcb"
@@ -99,16 +100,17 @@ ensure_android_xcb_lib() {
     export CC="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
     export AR="${ndk_bin}/llvm-ar"
     export RANLIB="${ndk_bin}/llvm-ranlib"
-    export CFLAGS="-fPIC -O2"
-    autoreconf -fiv >/dev/null
+    export CFLAGS="-fPIC -O2 -Wno-unused-but-set-variable -Wno-error"
+    autoreconf -fiv
     ./configure \
       --host=aarch64-linux-android \
       --prefix="${x11_dir}" \
       --enable-static \
       --disable-shared \
       --disable-devel-docs \
-      --with-pic >/dev/null
-    make -j"$(nproc)" install >/dev/null
+      --with-pic
+    make -j"$(nproc)"
+    make install
   )
 
   if is_aarch64_archive "${x11_dir}/lib/libxcb.a"; then
