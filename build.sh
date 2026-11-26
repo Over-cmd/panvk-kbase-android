@@ -70,6 +70,8 @@ Cflags: ${cflags}
 Libs: ${libs}
 EOF
 
+  cp -f "${deps_pc_dir}/lua54.pc" "${x11_pc_dir}/lua54.pc" 2>/dev/null || true
+
   mkdir -p "$local_pc_dir" 2>/dev/null || sudo mkdir -p "$local_pc_dir" 2>/dev/null || true
   cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || \
     sudo cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || true
@@ -668,8 +670,10 @@ build_and_package() {
       ninja -C "${ROOT}/build/android-bionic" -j"$(nproc)"
     else
       if [ -f "${ROOT}/build/android-bionic.log" ]; then
+        echo "=== Tail of build/android-bionic.log ==="
+        tail -n 35 "${ROOT}/build/android-bionic.log" || true
         echo "=== Linker errors in build/android-bionic.log ==="
-        grep -n -C 5 "incompatible with aarch64linux\|SPIRV-Tools\|undefined symbol" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+        grep -n -C 5 "incompatible with aarch64linux\|SPIRV-Tools\|lua54\|undefined symbol" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
       fi
       return 1
     fi
