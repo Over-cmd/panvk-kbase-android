@@ -1033,6 +1033,34 @@ for d in (spv_lib, deps_lib, x11_lib):
     if Path(d).is_dir() and d not in lib_dirs:
         lib_dirs.append(d)
 
+whole_names = {
+    "libelf.a",
+    "librt.a",
+    "libxcb-shm.a",
+    "libxcb-dri3.a",
+    "libxcb-randr.a",
+    "libxcb-sync.a",
+    "libxcb-xfixes.a",
+    "libxcb-present.a",
+    "libX11-xcb.a",
+    "libX11.a",
+    "libxshmfence.a",
+}
+
+normal_names = {
+    "libdrm.a",
+    "libdrm_amdgpu.a",
+    "libdrm_freedreno.a",
+    "libdrm_intel.a",
+    "libdrm_nouveau.a",
+    "libdrm_panfrost.a",
+    "libdrm_radeon.a",
+    "libxcb.a",
+    "libSPIRV-Tools.a",
+    "libSPIRV-Tools-opt.a",
+    "libSPIRV-Tools-link.a",
+}
+
 def patch_text(txt: str, is_rsp: bool = False) -> str:
     updated = txt
     if Path(spv_lib).is_dir():
@@ -1047,61 +1075,45 @@ def patch_text(txt: str, is_rsp: bool = False) -> str:
                 f"-I../../work/mesa/src/compiler/spirv {inc_flag}",
             )
 
-    l_flags = " ".join(f"-L{d}" for d in lib_dirs)
-    if l_flags:
-        if " -Wl,--end-group" in updated:
-            updated = updated.replace(" -Wl,--end-group", f" {l_flags} -Wl,--end-group")
-        elif is_rsp:
-            updated = updated + f"\n{l_flags}\n"
+    l_flags = " ".join(f"-L{d}" for d in lib_dirs if f"-L{d}" not in updated)
+    whole_libs = []
+    normal_libs = []
 
-    aarch64_libs = []
     for search_dir in lib_dirs:
         for archive in sorted(Path(search_dir).glob("lib*.a")):
-            if archive.name in {
-                "libdrm.a",
-                "libdrm_amdgpu.a",
-                "libdrm_freedreno.a",
-                "libdrm_intel.a",
-                "libdrm_nouveau.a",
-                "libdrm_panfrost.a",
-                "libdrm_radeon.a",
-                "libelf.a",
-                "librt.a",
-                "libxcb.a",
-                "libxcb-shm.a",
-                "libxcb-dri3.a",
-                "libxcb-randr.a",
-                "libxcb-sync.a",
-                "libxcb-xfixes.a",
-                "libxcb-present.a",
-                "libX11-xcb.a",
-                "libX11.a",
-                "libxshmfence.a",
-                "libSPIRV-Tools.a",
-                "libSPIRV-Tools-opt.a",
-                "libSPIRV-Tools-link.a",
-            }:
-                try:
-                    out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
-                    if out:
-                        tmp = Path("/tmp/ar_check")
-                        tmp.mkdir(parents=True, exist_ok=True)
-                        subprocess.check_call(["ar", "x", str(archive), out[0]], cwd=str(tmp), stderr=subprocess.DEVNULL)
-                        hdr = subprocess.check_output(["readelf", "-h", str(tmp / out[0])], text=True, stderr=subprocess.DEVNULL)
-                        if "AArch64" in hdr and str(archive) not in updated:
-                            aarch64_libs.append(str(archive))
-                except Exception:
-                    pass
+            if archive.name not in (whole_names | normal_names):
+                continue
+            if str(archive) in updated:
+                continue
+            try:
+                out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
+                if out:
+                    tmp = Path("/tmp/ar_check")
+                    tmp.mkdir(parents=True, exist_ok=True)
+                    subprocess.check_call(["ar", "x", str(archive), out[0]], cwd=str(tmp), stderr=subprocess.DEVNULL)
+                    hdr = subprocess.check_output(["readelf", "-h", str(tmp / out[0])], text=True, stderr=subprocess.DEVNULL)
+                    if "AArch64" in hdr:
+                        if archive.name in whole_names:
+                            whole_libs.append(str(archive))
+                        else:
+                            normal_libs.append(str(archive))
+            except Exception:
+                pass
 
-    if aarch64_libs:
-        extra_archives = " -Wl,--whole-archive " + " ".join(aarch64_libs) + " -Wl,--no-whole-archive"
+    addition_parts = []
+    if l_flags:
+        addition_parts.append(l_flags)
+    if whole_libs:
+        addition_parts.append("-Wl,--whole-archive " + " ".join(whole_libs) + " -Wl,--no-whole-archive")
+    if normal_libs:
+        addition_parts.append(" ".join(normal_libs))
+
+    if addition_parts:
+        addition = " " + " ".join(addition_parts)
         if " -Wl,--end-group" in updated:
-            updated = updated.replace(
-                " -Wl,--end-group",
-                f"{extra_archives} -Wl,--end-group",
-            )
+            updated = updated.replace(" -Wl,--end-group", f"{addition} -Wl,--end-group", 1)
         elif is_rsp:
-            updated = updated + f"{extra_archives}\n"
+            updated = updated + f"\n{addition.strip()}\n"
 
     return updated
 
