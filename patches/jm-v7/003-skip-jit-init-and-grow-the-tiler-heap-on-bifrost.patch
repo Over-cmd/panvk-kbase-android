@@ -25,7 +25,7 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
 @@ -1427,6 +1439,16 @@
     if (kmod_flags & PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT)
        flags |= BASE_MEM_GROW_ON_GPF;
-+
+ 
 +   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let
 +    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */
 +   if (!kbase_dev->is_csf && pan_arch(dev->props.gpu_id) < 9 &&
