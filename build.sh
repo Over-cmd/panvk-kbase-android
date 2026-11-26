@@ -108,6 +108,7 @@ ensure_android_xcb_lib() {
       --enable-static \
       --disable-shared \
       --disable-devel-docs \
+      --without-auth \
       --with-pic
     make -j"$(nproc)"
     make install
