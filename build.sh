@@ -412,7 +412,6 @@ PY
 
 apply_android_tolm() {
   local tolm_file="${ROOT}/android.tolm"
-  local android_spv_prefix="${ROOT}/work/android-spirv-tools"
   [ -f "$tolm_file" ] || return 0
 
   export MESON_WORKING_DIR="${ROOT}"
@@ -423,31 +422,6 @@ apply_android_tolm() {
 
   envsubst '${ANDROID_NDK_HOME} ${MESON_WORKING_DIR} ${CLANG_LIB_DIR}' < "$tolm_file" \
     | grep -v '^[[:space:]]*pkg_config_libdir[[:space:]]*=' > "$ORIG_CROSS_INI"
-
-  if [ -d "${android_spv_prefix}/lib" ]; then
-    python3 - "$ORIG_CROSS_INI" "$android_spv_prefix" <<'PY'
-import sys
-from pathlib import Path
-
-ini_path = Path(sys.argv[1])
-spv_prefix = sys.argv[2]
-txt = ini_path.read_text(encoding="utf-8")
-
-extra_ldflags = f"'-L{spv_prefix}/lib'"
-extra_cppflags = f"'-I{spv_prefix}/include'"
-
-if "c_link_args" in txt:
-    txt = txt.replace("c_link_args = [", f"c_link_args = [{extra_ldflags}, ", 1)
-if "cpp_link_args" in txt:
-    txt = txt.replace("cpp_link_args = [", f"cpp_link_args = [{extra_ldflags}, ", 1)
-if "c_args" in txt:
-    txt = txt.replace("c_args = [", f"c_args = [{extra_cppflags}, ", 1)
-if "cpp_args" in txt:
-    txt = txt.replace("cpp_args = [", f"cpp_args = [{extra_cppflags}, ", 1)
-
-ini_path.write_text(txt, encoding="utf-8")
-PY
-  fi
 }
 
 build_and_package() {
@@ -459,20 +433,13 @@ build_and_package() {
   export LLVM_CONFIG="llvm-config-${LLVM_VER}"
   export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
   export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+  export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
 
   apply_android_tolm
 
-  # Limpiar build/android-bionic si existía con caché de host SPIRV-Tools para que Meson tome work/android-spirv-tools
-  if [ -d "${ROOT}/build/android-bionic" ] && [ -d "${android_spv_prefix}/lib" ]; then
+  if [ -d "${ROOT}/build/android-bionic" ]; then
     rm -rf "${ROOT}/build/android-bionic"
-  fi
-
-  if [ -d "${android_spv_prefix}/lib/pkgconfig" ]; then
-    export PKG_CONFIG_PATH="${android_spv_prefix}/lib/pkgconfig:${android_spv_prefix}/lib/aarch64-linux-android/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-    export CMAKE_PREFIX_PATH="${android_spv_prefix}:/usr/local:${CMAKE_PREFIX_PATH:-}"
-  else
-    export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-    export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
   fi
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
