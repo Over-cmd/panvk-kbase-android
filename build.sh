@@ -80,19 +80,19 @@ ensure_android_xcb_lib() {
   fi
 
   local shim_inc_flags=""
-  if [ -d "${ROOT}/shims/include/x11/X11" ]; then
-    shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include/x11"
-  elif [ -f "${ROOT}/shims/include/x11/Xauth.h" ]; then
-    local shim_x11_wrap="/tmp/shim-x11-wrap/X11"
-    mkdir -p "$shim_x11_wrap"
-    ln -sf "${ROOT}/shims/include/x11/Xauth.h" "${shim_x11_wrap}/Xauth.h"
-    shim_inc_flags="${shim_inc_flags} -I/tmp/shim-x11-wrap"
-  fi
   if [ -d "${ROOT}/shims/include" ]; then
     shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include"
   fi
   if [ -d "${ROOT}/shims/include/x11" ]; then
     shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include/x11"
+    if [ ! -e "${ROOT}/shims/include/x11/X11" ]; then
+      local shim_x11_wrap="/tmp/shim-x11-wrap/X11"
+      mkdir -p "$shim_x11_wrap"
+      for h in "${ROOT}/shims/include/x11/"*.h; do
+        [ -f "$h" ] && ln -sf "$h" "${shim_x11_wrap}/$(basename "$h")"
+      done
+      shim_inc_flags="${shim_inc_flags} -I/tmp/shim-x11-wrap"
+    fi
   fi
 
   local src_root="/tmp/android-xcb-src"
@@ -525,7 +525,8 @@ PY
 }
 
 apply_android_tolm() {
-  local tolm_file="${ROOT}/android.tolm"
+  local tolm_file="${ROOT}/android.toml"
+  [ -f "$tolm_file" ] || tolm_file="${ROOT}/android.tolm"
   [ -f "$tolm_file" ] || return 0
 
   export MESON_WORKING_DIR="${ROOT}"
