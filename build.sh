@@ -26,29 +26,24 @@ if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
   cp "${KMOD}" "${ORIG_KMOD}"
 
   python3 - <<'PY'
+import re
 from pathlib import Path
 
 kmod_path = Path("work/mesa/src/panfrost/lib/kmod/kbase_kmod.c")
 src = kmod_path.read_text(encoding="utf-8")
 
-# 1) Campo atom_seq_nr en struct kbase_kmod_dev
-a1 = """   unsigned atom_stride;
-   uint32_t last_event_code[KBASE_MAX_ATOMS];"""
-b1 = """   unsigned atom_stride;
-   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */
-   bool atom_seq_nr;
-   uint32_t last_event_code[KBASE_MAX_ATOMS];"""
+# 1) Insertar atom_seq_nr justo tras la linea "unsigned atom_stride;"
+src, n1 = re.subn(
+    r"(^[ \t]*unsigned atom_stride;[ \t]*\n)",
+    r"\1   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */\n   bool atom_seq_nr;\n",
+    src,
+    count=1,
+    flags=re.M,
+)
+assert n1 == 1, "No se encontro 'unsigned atom_stride;'"
 
-# 2) Funciones kbase_try_atom_stride y kbase_check_bifrost_atom_stride antes de kbase_kmod_dev_create
-a2 = """   return 64;
-}
-
-static struct pan_kmod_dev *
-kbase_kmod_dev_create("""
-b2 = """   return 64;
-}
-
-/* Submit one dependency-only atom (number 255) at the given stride and
+# 2) Insertar helpers antes de kbase_kmod_dev_create
+helpers = """/* Submit one dependency-only atom (number 255) at the given stride and
  * drain its event.  Returns false only if the kernel refuses the stride. */
 static bool
 kbase_try_atom_stride(int fd, unsigned stride, bool seq_nr)
@@ -101,56 +96,58 @@ kbase_check_bifrost_atom_stride(int fd, bool *seq_nr)
    return 56;
 }
 
-static struct pan_kmod_dev *
-kbase_kmod_dev_create("""
+"""
 
-# 3) Invocar kbase_check_bifrost_atom_stride tras el aviso de JIT_INIT
-a3 = """      mesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
-                "(tiler heap creation will not work)", strerror(errno));
-   }"""
-b3 = """      mesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
-                "(tiler heap creation will not work)", strerror(errno));
-   }
+src, n2 = re.subn(
+    r"(^static struct pan_kmod_dev \*\nkbase_kmod_dev_create\()",
+    helpers + r"\1",
+    src,
+    count=1,
+    flags=re.M,
+)
+assert n2 == 1, "No se encontro 'kbase_kmod_dev_create'"
 
-   bool atom_seq_nr = false;
-   if (!is_csf && atom_stride == 56 && raw_id &&
-       pan_arch(raw_id & 0xffffffffu) < 9)
-      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);"""
+# 3) Llamar a kbase_check_bifrost_atom_stride tras el bloque de JIT_INIT
+src, n3 = re.subn(
+    r'(\n[ \t]*mesa_logw\("kbase: KBASE_IOCTL_MEM_JIT_INIT failed:[^\n]*\n[^\n]*\n[ \t]*\}\n)',
+    r'\1\n   bool atom_seq_nr = false;\n   if (!is_csf && atom_stride == 56 && raw_id &&\n       pan_arch(raw_id & 0xffffffffu) < 9)\n      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n',
+    src,
+    count=1,
+)
+assert n3 == 1, "No se encontro el bloque de JIT_INIT"
 
-# 4) Asignar kbase_dev->atom_seq_nr
-a4 = """   if (!is_csf) {
-      kbase_dev->atom_stride = atom_stride;"""
-b4 = """   if (!is_csf) {
-      kbase_dev->atom_stride = atom_stride;
-      kbase_dev->atom_seq_nr = atom_seq_nr;"""
+# 4) Guardar atom_seq_nr tras asignar kbase_dev->atom_stride = atom_stride;
+src, n4 = re.subn(
+    r"(^[ \t]*kbase_dev->atom_stride = atom_stride;[ \t]*\n)",
+    r"\1      kbase_dev->atom_seq_nr = atom_seq_nr;\n",
+    src,
+    count=1,
+    flags=re.M,
+)
+assert n4 == 1, "No se encontro 'kbase_dev->atom_stride = atom_stride;'"
 
-# 5) Envolver atom con seq_nr en job_submit y job_submit_dep
-a5 = """   struct kbase_ioctl_job_submit sub = {
-      .addr = (uintptr_t)&atom,
-      .nr_atoms = 1,
-      .stride = kd->atom_stride,
-   };"""
-b5 = """   struct {
-      __u64 seq_nr;
-      struct base_jd_atom atom;
-   } w = { .atom = atom };
-   struct kbase_ioctl_job_submit sub = {
-      .addr = kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom,
-      .nr_atoms = 1,
-      .stride = kd->atom_stride,
-   };"""
+# 5) Envolver atom en los bloques de struct kbase_ioctl_job_submit con .addr = (uintptr_t)&atom,
+submit_pat = re.compile(
+    r"([ \t]*)(struct kbase_ioctl_job_submit sub = \{\n"
+    r"[ \t]*\.addr = \(uintptr_t\)&atom,\n"
+    r"[ \t]*\.nr_atoms = 1,\n"
+    r"[ \t]*\.stride = kd->atom_stride,\n"
+    r"[ \t]*\};)"
+)
+matches = list(submit_pat.finditer(src))
+assert len(matches) >= 2, f"Se esperaban >=2 bloques job_submit, hallados {len(matches)}"
 
-for name, needle in [("a1", a1), ("a2", a2), ("a3", a3), ("a4", a4), ("a5", a5)]:
-    assert needle in src, f"No se encontro ancla {name}"
+def repl_submit(m):
+    ind = m.group(1)
+    block = m.group(2).replace(".addr = (uintptr_t)&atom,", ".addr = kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom,")
+    wrapper = f"{ind}struct {{\n{ind}   __u64 seq_nr;\n{ind}   struct base_jd_atom atom;\n{ind}}} w = {{ .atom = atom }};\n"
+    return wrapper + ind + block
 
-updated = src.replace(a1, b1, 1)
-updated = updated.replace(a2, b2, 1)
-updated = updated.replace(a3, b3, 1)
-updated = updated.replace(a4, b4, 1)
-updated = updated.replace(a5, b5, 2)
+src, n5 = submit_pat.subn(repl_submit, src)
+assert n5 >= 2, "No se reemplazaron los bloques job_submit"
 
-kmod_path.write_text(updated, encoding="utf-8", newline="\n")
-print("Aplicados todos los cambios de 004 sobre kbase_kmod.c")
+kmod_path.write_text(src, encoding="utf-8", newline="\n")
+print(f"OK: n1={n1} n2={n2} n3={n3} n4={n4} n5={n5}")
 PY
 
   mkdir -p "$(dirname "$P004")"
