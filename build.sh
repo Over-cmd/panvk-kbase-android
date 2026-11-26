@@ -37,24 +37,82 @@ ensure_host_x11_headers() {
   ls -ld /usr/include/xcb/xcb.h /usr/include/xcb/shm.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h 2>/dev/null || true
 }
 
+is_aarch64_archive() {
+  local ar_path="$1"
+  [ -f "$ar_path" ] || return 1
+  local obj_file
+  obj_file="$(ar t "$ar_path" 2>/dev/null | head -n 1 || true)"
+  [ -n "$obj_file" ] || return 1
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  (
+    cd "$tmp_dir"
+    ar x "$ar_path" "$obj_file" 2>/dev/null || exit 1
+    readelf -h "$obj_file" 2>/dev/null | grep -q "AArch64"
+  )
+  local rc=$?
+  rm -rf "$tmp_dir"
+  return "$rc"
+}
+
 ensure_android_xcb_lib() {
   local x11_dir="${ROOT}/work/android-deps-x11"
   local deps_dir="${ROOT}/work/android-deps"
+  local ndk_home="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+  local ndk_bin="${ndk_home}/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
-  local found_lib=""
-  found_lib="$(find "$x11_dir" "$deps_dir" -maxdepth 4 -name "libxcb.a" -o -name "libxcb.so" 2>/dev/null | head -n 1 || true)"
+  mkdir -p "${x11_dir}/lib"
 
-  if [ -n "$found_lib" ]; then
-    echo "Found Android XCB library: $found_lib"
+  local candidate
+  for candidate in "${x11_dir}/lib/libxcb.a" "${deps_dir}/lib/libxcb.a"; do
+    if is_aarch64_archive "$candidate"; then
+      if [ "$candidate" != "${x11_dir}/lib/libxcb.a" ]; then
+        cp -f "$candidate" "${x11_dir}/lib/libxcb.a"
+      fi
+      echo "Using existing aarch64 libxcb.a: $candidate"
+      return 0
+    fi
+  done
+
+  if [ ! -x "${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang" ]; then
+    echo "Warning: NDK aarch64 clang not found; cannot cross-compile libxcb"
     return 0
   fi
 
-  local sys_xcb_a=""
-  sys_xcb_a="$(find /usr/lib -name "libxcb.a" 2>/dev/null | head -n 1 || true)"
-  if [ -n "$sys_xcb_a" ]; then
-    mkdir -p "${x11_dir}/lib"
-    cp -f "$sys_xcb_a" "${x11_dir}/lib/libxcb.a"
-    echo "Staged libxcb.a at ${x11_dir}/lib/libxcb.a"
+  local src_root="/tmp/android-xcb-src"
+  local proto_prefix="/tmp/android-xcb-proto-install"
+  rm -rf "$src_root" "$proto_prefix"
+  mkdir -p "$src_root"
+
+  git clone --depth 1 --branch xcb-proto-1.17.0 https://gitlab.freedesktop.org/xorg/proto/xcbproto.git "${src_root}/xcbproto"
+  (
+    cd "${src_root}/xcbproto"
+    autoreconf -fiv >/dev/null
+    ./configure --prefix="$proto_prefix" >/dev/null
+    make -j"$(nproc)" install >/dev/null
+  )
+
+  git clone --depth 1 --branch libxcb-1.17.0 https://gitlab.freedesktop.org/xorg/lib/libxcb.git "${src_root}/libxcb"
+  (
+    cd "${src_root}/libxcb"
+    export PKG_CONFIG_PATH="${proto_prefix}/share/pkgconfig:${proto_prefix}/lib/pkgconfig"
+    export CC="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
+    export AR="${ndk_bin}/llvm-ar"
+    export RANLIB="${ndk_bin}/llvm-ranlib"
+    export CFLAGS="-fPIC -O2"
+    autoreconf -fiv >/dev/null
+    ./configure \
+      --host=aarch64-linux-android \
+      --prefix="${x11_dir}" \
+      --enable-static \
+      --disable-shared \
+      --disable-devel-docs \
+      --with-pic >/dev/null
+    make -j"$(nproc)" install >/dev/null
+  )
+
+  if is_aarch64_archive "${x11_dir}/lib/libxcb.a"; then
+    echo "Built aarch64 libxcb.a and extension archives in ${x11_dir}/lib"
   fi
 }
 
@@ -122,6 +180,10 @@ install_deps() {
     -o Dpkg::Options::="--force-confdef" \
     -o Dpkg::Options::="--force-confold" \
     build-essential \
+    autoconf \
+    automake \
+    libtool \
+    xutils-dev \
     cmake \
     git \
     ninja-build \
@@ -357,14 +419,26 @@ if dev_span:
             src = src[:abs_pos] + stride_block + src[abs_pos:]
             print("Placed atom_stride check inside kbase_kmod_dev_create after kbase_dev->is_csf = is_csf;")
 
+stride_def = (
+    "static unsigned\n"
+    "kbase_check_bifrost_atom_stride(int fd, bool *seq_nr)\n"
+    "{\n"
+    "   (void)fd;\n"
+    "   if (seq_nr)\n"
+    "      *seq_nr = false;\n"
+    "   return 56;\n"
+    "}\n\n"
+)
+
 dev_span = find_func_span(src, "kbase_kmod_dev_create")
-if dev_span and "kbase_check_bifrost_atom_stride(" in src:
+stride_fn_span = find_func_span(src, "kbase_check_bifrost_atom_stride")
+if dev_span and "kbase_check_bifrost_atom_stride(" in src and not stride_fn_span:
     h_s, _, _ = dev_span
     if h_s > 0 and src[h_s - 1] != "\n":
         nl = src.rfind("\n", 0, h_s)
         h_s = (nl + 1) if nl != -1 else 0
-    src = src[:h_s] + fwd_decl + "\n" + src[h_s:]
-    print("Added clean file-scope forward declaration before kbase_kmod_dev_create")
+    src = src[:h_s] + stride_def + src[h_s:]
+    print("Added definition of kbase_check_bifrost_atom_stride before kbase_kmod_dev_create")
 
 path.write_text(src, encoding="utf-8")
 PY
@@ -454,6 +528,7 @@ remap_android_ninja_spirv_tools() {
   [ -f "$ninja_file" ] || return 1
 
   python3 - "$ninja_file" "$android_spv_lib" "$x11_lib_dir" <<'PY'
+import subprocess
 import sys
 from pathlib import Path
 
@@ -467,24 +542,43 @@ if Path(spv_lib).is_dir():
     updated = updated.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
     updated = updated.replace("-L/usr/local/lib", f"-L{spv_lib}")
 
-if "xcb_screen_allowed_depths_iterator" in updated or (Path(x11_lib, "libxcb.a").is_file() and "-lxcb" not in updated):
-    if Path(x11_lib, "libxcb.a").is_file():
-        updated = updated.replace(
-            "src/panfrost/vulkan/libvulkan_panfrost.so:",
-            f"src/panfrost/vulkan/libvulkan_panfrost.so:",
-        )
-        updated = updated.replace(
-            " -o src/panfrost/vulkan/libvulkan_panfrost.so ",
-            f" -L{x11_lib} -o src/panfrost/vulkan/libvulkan_panfrost.so ",
-        )
-        updated = updated.replace(
-            " -Wl,--end-group",
-            f" {x11_lib}/libxcb.a -Wl,--end-group",
-        )
+aarch64_libs = []
+if Path(x11_lib).is_dir():
+    for archive in sorted(Path(x11_lib).glob("lib*.a")):
+        if archive.name in {
+            "libxcb.a",
+            "libxcb-shm.a",
+            "libxcb-dri3.a",
+            "libxcb-randr.a",
+            "libxcb-sync.a",
+            "libxcb-xfixes.a",
+            "libxcb-present.a",
+            "libX11-xcb.a",
+            "libX11.a",
+            "libxshmfence.a",
+        }:
+            try:
+                out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
+                if out:
+                    tmp = Path("/tmp/ar_check")
+                    tmp.mkdir(parents=True, exist_ok=True)
+                    subprocess.check_call(["ar", "x", str(archive), out[0]], cwd=str(tmp), stderr=subprocess.DEVNULL)
+                    hdr = subprocess.check_output(["readelf", "-h", str(tmp / out[0])], text=True, stderr=subprocess.DEVNULL)
+                    if "AArch64" in hdr and str(archive) not in updated:
+                        aarch64_libs.append(str(archive))
+            except Exception:
+                pass
+
+if aarch64_libs:
+    extra_archives = " " + " ".join(aarch64_libs)
+    updated = updated.replace(
+        " -Wl,--end-group",
+        f"{extra_archives} -Wl,--end-group",
+    )
 
 if updated != txt:
     ninja_path.write_text(updated, encoding="utf-8")
-    print(f"Remapped linker archives in {ninja_path}")
+    print(f"Remapped SPIRV-Tools and aarch64 X11/XCB archives in {ninja_path}")
 PY
 }
 
