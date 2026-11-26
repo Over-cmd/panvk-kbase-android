@@ -19,8 +19,20 @@ fi
 ./scripts/fetch-mesa.sh
 
 if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
-  echo "=== CHECK 003 DRY-RUN ==="
-  git -C work/mesa apply --check -v "../../patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch" || true
+  P003="patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch"
+  echo "=== 1. APPLY-PATCHES SCRIPT ==="
+  cat -n scripts/apply-patches.sh || true
+
+  echo "=== 2. PATCH 003 METADATA & LINES ==="
+  ls -la "$P003" || true
+  nl -ba "$P003" || true
+
+  echo "=== 3. SEARCH TARGETS IN kbase_kmod.c ==="
+  grep -n -C 8 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
+  grep -n -C 8 "BASE_MEM_GROW_ON_GPF" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
+
+  echo "=== 4. DRY-RUN GIT APPLY ==="
+  git -C work/mesa apply --check -v "$(pwd)/$P003" || true
   exit 1
 fi
 
