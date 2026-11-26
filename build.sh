@@ -17,15 +17,7 @@ if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
 fi
 
 ./scripts/fetch-mesa.sh
-
-if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
-  echo "=== grep KBASE_IOCTL_MEM_JIT_INIT ==="
-  grep -n -C 8 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
-  echo "=== grep BASE_MEM_GROW_ON_GPF ==="
-  grep -n -C 8 "BASE_MEM_GROW_ON_GPF" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
-  exit 1
-fi
-
+./scripts/apply-patches.sh --profile "${PROFILE}"
 ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
 ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
