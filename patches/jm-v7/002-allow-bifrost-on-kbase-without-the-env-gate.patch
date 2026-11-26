@@ -1,6 +1,6 @@
 From: abhay-byte <abhay02delhi@gmail.com>
 Date: 2026-10-16
-Subject: [PATCH jm-v7 002] panvk: allow Bifrost v6/v7 on kbase without PAN_I_WANT_A_BROKEN_VULKAN_DRIVER biblioklept
+Subject: [PATCH jm-v7 002] panvk: allow Bifrost v6/v7 on kbase without PAN_I_WANT_A_BROKEN_VULKAN_DRIVER
 
 Purpose: drop the PAN_I_WANT_A_BROKEN_VULKAN_DRIVER gate for v6/v7 in
 panvk_physical_device_init_kbase() only (the DRM path keeps it) and log a
@@ -18,7 +18,6 @@ Validation test: vkCreateDevice on a G52 MC2 / G76 (pending)
  1 file changed, 2 insertions(+), 7 deletions(-)
 
 diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
-index 6369027c27d..6a79a7308e9 100644
 --- a/src/panfrost/vulkan/panvk_physical_device.c
 +++ b/src/panfrost/vulkan/panvk_physical_device.c
 @@ -1389,13 +1389,8 @@ panvk_physical_device_init_kbase(struct panvk_physical_device *device,
