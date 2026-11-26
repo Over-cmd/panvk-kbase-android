@@ -17,13 +17,6 @@ if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
 fi
 
 ./scripts/fetch-mesa.sh
-
-echo "=== PATCH 001 ==="
-cat patches/jm-v7/001-ignore-the-gpu-variant-on-bifrost.patch || true
-
-echo "=== pan_model.c around line 183 ==="
-nl -ba work/mesa/src/panfrost/model/pan_model.c | sed -n '140,240p' || true
-
 ./scripts/apply-patches.sh --profile "${PROFILE}"
 ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
