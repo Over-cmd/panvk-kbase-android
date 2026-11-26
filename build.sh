@@ -20,14 +20,12 @@ fi
 
 if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
   KMOD="work/mesa/src/panfrost/lib/kmod/kbase_kmod.c"
-  echo "=== GREP atom_stride ==="
-  grep -n -C 8 "atom_stride" "$KMOD" || true
-  echo "=== GREP KBASE_MAX_ATOMS ==="
-  grep -n -C 8 "KBASE_MAX_ATOMS" "$KMOD" || true
-  echo "=== GREP kbase_ioctl_job_submit ==="
-  grep -n -C 8 "kbase_ioctl_job_submit" "$KMOD" || true
-  echo "=== GREP kbase_kmod_dev_create ==="
-  grep -n -C 5 "kbase_kmod_dev_create(" "$KMOD" || true
+  echo "=== FILE LINES COUNT ==="
+  wc -l "$KMOD" || true
+  echo "=== STRUCTS IN KBASE_KMOD.C ==="
+  grep -n "^struct " "$KMOD" || true
+  echo "=== GREP stride / atom / SUBMIT ==="
+  grep -n -i -E "stride|atom|job_submit|jd_atom" "$KMOD" || true
   exit 1
 fi
 
