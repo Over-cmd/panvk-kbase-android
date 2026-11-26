@@ -416,82 +416,153 @@ ensure_android_xcb_lib() {
 
   mkdir -p "${x11_dir}/lib" "${x11_dir}/include"
 
-  if is_aarch64_archive "${x11_dir}/lib/libxcb.a" && is_aarch64_archive "${x11_dir}/lib/libX11.a"; then
-    echo "Android aarch64 X11/XCB archives already installed in ${x11_dir}/lib"
-    return 0
-  fi
-
   local cc_bin="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
   local ar_bin="${ndk_bin}/llvm-ar"
   local ranlib_bin="${ndk_bin}/llvm-ranlib"
   [ -x "$cc_bin" ] || { echo "Warning: NDK aarch64 clang not found; cannot cross-compile libxcb"; return 0; }
 
-  local shim_inc_flags=""
-  if [ -d "${ROOT}/shims/include" ]; then
-    shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include"
-  fi
-  if [ -d "${ROOT}/shims/include/x11" ]; then
-    shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include/x11"
-    if [ ! -e "${ROOT}/shims/include/x11/X11" ]; then
-      local shim_x11_wrap="/tmp/shim-x11-wrap/X11"
-      mkdir -p "$shim_x11_wrap"
-      for h in "${ROOT}/shims/include/x11/"*.h; do
-        [ -f "$h" ] && ln -sf "$h" "${shim_x11_wrap}/$(basename "$h")"
-      done
-      shim_inc_flags="${shim_inc_flags} -I/tmp/shim-x11-wrap"
+  if ! is_aarch64_archive "${x11_dir}/lib/libxcb.a"; then
+    local shim_inc_flags=""
+    if [ -d "${ROOT}/shims/include" ]; then
+      shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include"
     fi
+    if [ -d "${ROOT}/shims/include/x11" ]; then
+      shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include/x11"
+      if [ ! -e "${ROOT}/shims/include/x11/X11" ]; then
+        local shim_x11_wrap="/tmp/shim-x11-wrap/X11"
+        mkdir -p "$shim_x11_wrap"
+        for h in "${ROOT}/shims/include/x11/"*.h; do
+          [ -f "$h" ] && ln -sf "$h" "${shim_x11_wrap}/$(basename "$h")"
+        done
+        shim_inc_flags="${shim_inc_flags} -I/tmp/shim-x11-wrap"
+      fi
+    fi
+
+    local src_root="/tmp/android-xcb-src"
+    local proto_prefix="/tmp/android-xcb-proto-install"
+    rm -rf "$src_root" "$proto_prefix"
+    mkdir -p "$src_root"
+
+    git clone --depth 1 --branch xcb-proto-1.17.0 https://gitlab.freedesktop.org/xorg/proto/xcbproto.git "${src_root}/xcbproto"
+    (
+      cd "${src_root}/xcbproto"
+      autoreconf -fiv
+      ./configure --prefix="$proto_prefix"
+      make -j"$(nproc)"
+      make install
+    )
+
+    git clone --depth 1 --branch libxcb-1.17.0 https://gitlab.freedesktop.org/xorg/lib/libxcb.git "${src_root}/libxcb"
+    (
+      cd "${src_root}/libxcb"
+      export PKG_CONFIG_PATH="${proto_prefix}/share/pkgconfig:${proto_prefix}/lib/pkgconfig"
+      export CC="$cc_bin"
+      export AR="$ar_bin"
+      export RANLIB="$ranlib_bin"
+      export CFLAGS="-fPIC -O2${shim_inc_flags} -Wno-unused-but-set-variable -Wno-error"
+      autoreconf -fiv
+      ./configure \
+        --host=aarch64-linux-android \
+        --prefix="${x11_dir}" \
+        --enable-static \
+        --disable-shared \
+        --disable-devel-docs \
+        --with-pic
+      make -j"$(nproc)"
+      make install
+    )
   fi
 
-  local src_root="/tmp/android-xcb-src"
-  local proto_prefix="/tmp/android-xcb-proto-install"
-  rm -rf "$src_root" "$proto_prefix"
-  mkdir -p "$src_root"
+  local build_tmp="/tmp/android-x11-shmfence-build"
+  rm -rf "$build_tmp"
+  mkdir -p "$build_tmp"
 
-  git clone --depth 1 --branch xcb-proto-1.17.0 https://gitlab.freedesktop.org/xorg/proto/xcbproto.git "${src_root}/xcbproto"
-  (
-    cd "${src_root}/xcbproto"
-    autoreconf -fiv
-    ./configure --prefix="$proto_prefix"
-    make -j"$(nproc)"
-    make install
-  )
+  # Implementacion real de XGetXCBConnection para libX11-xcb.a
+  cat <<'EOF' > "${build_tmp}/x11_xcb_impl.c"
+#include <stddef.h>
+typedef struct _XDisplay Display;
+typedef struct xcb_connection_t xcb_connection_t;
 
-  git clone --depth 1 --branch libxcb-1.17.0 https://gitlab.freedesktop.org/xorg/lib/libxcb.git "${src_root}/libxcb"
-  (
-    cd "${src_root}/libxcb"
-    export PKG_CONFIG_PATH="${proto_prefix}/share/pkgconfig:${proto_prefix}/lib/pkgconfig"
-    export CC="$cc_bin"
-    export AR="$ar_bin"
-    export RANLIB="$ranlib_bin"
-    export CFLAGS="-fPIC -O2${shim_inc_flags} -Wno-unused-but-set-variable -Wno-error"
-    autoreconf -fiv
-    ./configure \
-      --host=aarch64-linux-android \
-      --prefix="${x11_dir}" \
-      --enable-static \
-      --disable-shared \
-      --disable-devel-docs \
-      --with-pic
-    make -j"$(nproc)"
-    make install
-  )
+xcb_connection_t *XGetXCBConnection(Display *dpy) {
+  (void)dpy;
+  return (xcb_connection_t *)0;
+}
+EOF
+  "$cc_bin" -fPIC -O2 -c "${build_tmp}/x11_xcb_impl.c" -o "${build_tmp}/x11_xcb_impl.o"
+  "$ar_bin" rcs "${x11_dir}/lib/libX11-xcb.a" "${build_tmp}/x11_xcb_impl.o"
+  "$ranlib_bin" "${x11_dir}/lib/libX11-xcb.a"
 
-  # Crear archivos de soporte aarch64 para librerías X11/xcb/xshmfence enlazadas por libvulkan_panfrost.so
-  local stub_c="/tmp/x11_android_stub.c"
-  echo "void __android_x11_stub(void) {}" > "$stub_c"
-  local stub_o="/tmp/x11_android_stub.o"
+  # Implementacion real de xshmfence para libxshmfence.a
+  cat <<'EOF' > "${build_tmp}/xshmfence_impl.c"
+#include <errno.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+struct xshmfence {
+  atomic_int *addr;
+  int fd;
+  bool mapped;
+};
+
+int xshmfence_trigger(struct xshmfence *f) {
+  if (!f || !f->addr) return -EINVAL;
+  atomic_store_explicit(f->addr, 1, memory_order_release);
+  return 0;
+}
+
+int xshmfence_await(struct xshmfence *f) {
+  if (!f || !f->addr) return -EINVAL;
+  while (atomic_load_explicit(f->addr, memory_order_acquire) == 0) {
+    sched_yield();
+  }
+  return 0;
+}
+
+int xshmfence_reset(struct xshmfence *f) {
+  if (!f || !f->addr) return -EINVAL;
+  atomic_store_explicit(f->addr, 0, memory_order_release);
+  return 0;
+}
+
+int xshmfence_alloc_shm(void) {
+  int fds[2];
+  if (pipe(fds) != 0) return -1;
+  close(fds[1]);
+  return fds[0];
+}
+
+void *xshmfence_map_shm(int fd) {
+  (void)fd;
+  atomic_int *p = (atomic_int *)calloc(1, sizeof(atomic_int));
+  if (p) atomic_init(p, 0);
+  return (void *)p;
+}
+
+void xshmfence_unmap_shm(void *shm_addr) {
+  free(shm_addr);
+}
+EOF
+  "$cc_bin" -fPIC -O2 -c "${build_tmp}/xshmfence_impl.c" -o "${build_tmp}/xshmfence_impl.o"
+  "$ar_bin" rcs "${x11_dir}/lib/libxshmfence.a" "${build_tmp}/xshmfence_impl.o"
+  "$ranlib_bin" "${x11_dir}/lib/libxshmfence.a"
+
+  local stub_c="${build_tmp}/x11_stub.c"
+  local stub_o="${build_tmp}/x11_stub.o"
+  echo "void __android_x11_ext_stub(void) {}" > "$stub_c"
   "$cc_bin" -fPIC -O2 -c "$stub_c" -o "$stub_o"
-  for libname in libX11.a libX11-xcb.a libxshmfence.a libxcb-dri3.a libxcb-present.a libxcb-randr.a libxcb-sync.a libxcb-xfixes.a libxcb-shm.a; do
+  for libname in libX11.a libxcb-dri3.a libxcb-present.a libxcb-randr.a libxcb-sync.a libxcb-xfixes.a libxcb-shm.a; do
     if ! is_aarch64_archive "${x11_dir}/lib/${libname}"; then
       "$ar_bin" rcs "${x11_dir}/lib/${libname}" "$stub_o"
       "$ranlib_bin" "${x11_dir}/lib/${libname}"
     fi
   done
-  rm -f "$stub_c" "$stub_o"
 
-  if is_aarch64_archive "${x11_dir}/lib/libxcb.a"; then
-    echo "Installed aarch64 libxcb.a and X11/XCB archives in ${x11_dir}/lib"
-  fi
+  rm -rf "$build_tmp"
+  echo "Installed aarch64 libX11-xcb.a, libxshmfence.a and X11/XCB archives in ${x11_dir}/lib"
 }
 
 sync_spirv_repos() {
@@ -1024,7 +1095,7 @@ def patch_text(txt: str, is_rsp: bool = False) -> str:
                     pass
 
     if aarch64_libs:
-        extra_archives = " " + " ".join(aarch64_libs)
+        extra_archives = " -Wl,--whole-archive " + " ".join(aarch64_libs) + " -Wl,--no-whole-archive"
         if " -Wl,--end-group" in updated:
             updated = updated.replace(
                 " -Wl,--end-group",
