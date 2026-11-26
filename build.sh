@@ -105,7 +105,7 @@ ensure_lua54_pc() {
     libs="$(pkg-config --libs lua5.4)"
   elif pkg-config --exists lua54 2>/dev/null; then
     ver="$(pkg-config --modversion lua54)"
-    cflags="$(pkg-config --cflags lua54)"
+    cflags="$(pkg-config --cflags lua5.4)"
     libs="$(pkg-config --libs lua54)"
   fi
 
@@ -253,6 +253,31 @@ sync_spirv_repos() {
   fi
 }
 
+install_spirv_headers_to_targets() {
+  local android_spv_prefix="${ROOT}/work/android-spirv-tools"
+  local deps_inc="${ROOT}/work/android-deps/include"
+  local ndk_home="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+  local sysroot_inc="${ndk_home}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/local/include"
+
+  mkdir -p "$deps_inc"
+
+  if [ -d "${android_spv_prefix}/include/spirv-tools" ]; then
+    cp -rf "${android_spv_prefix}/include/spirv-tools" "${deps_inc}/" 2>/dev/null || true
+    if [ -n "$ndk_home" ]; then
+      mkdir -p "$sysroot_inc" 2>/dev/null || sudo mkdir -p "$sysroot_inc" 2>/dev/null || true
+      cp -rf "${android_spv_prefix}/include/spirv-tools" "${sysroot_inc}/" 2>/dev/null || \
+        sudo cp -rf "${android_spv_prefix}/include/spirv-tools" "${sysroot_inc}/" 2>/dev/null || true
+    fi
+  elif [ -d /tmp/SPIRV-Tools/include/spirv-tools ]; then
+    cp -rf /tmp/SPIRV-Tools/include/spirv-tools "${deps_inc}/" 2>/dev/null || true
+    if [ -n "$ndk_home" ]; then
+      mkdir -p "$sysroot_inc" 2>/dev/null || sudo mkdir -p "$sysroot_inc" 2>/dev/null || true
+      cp -rf /tmp/SPIRV-Tools/include/spirv-tools "${sysroot_inc}/" 2>/dev/null || \
+        sudo cp -rf /tmp/SPIRV-Tools/include/spirv-tools "${sysroot_inc}/" 2>/dev/null || true
+    fi
+  fi
+}
+
 install_android_spirv_tools() {
   local ndk_home="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
   local android_spv_prefix="${ROOT}/work/android-spirv-tools"
@@ -284,6 +309,8 @@ install_android_spirv_tools() {
     cmake --build /tmp/SPIRV-Tools-android-build -j"$(nproc)"
     cmake --install /tmp/SPIRV-Tools-android-build
   fi
+
+  install_spirv_headers_to_targets
 }
 
 install_deps() {
@@ -640,25 +667,37 @@ apply_android_tolm() {
 
 remap_android_ninja_spirv_tools() {
   local ninja_file="${ROOT}/build/android-bionic/build.ninja"
-  local android_spv_lib="${ROOT}/work/android-spirv-tools/lib"
+  local android_spv_prefix="${ROOT}/work/android-spirv-tools"
+  local android_spv_lib="${android_spv_prefix}/lib"
+  local android_spv_inc="${android_spv_prefix}/include"
   local x11_lib_dir="${ROOT}/work/android-deps-x11/lib"
 
+  install_spirv_headers_to_targets
   [ -f "$ninja_file" ] || return 1
 
-  python3 - "$ninja_file" "$android_spv_lib" "$x11_lib_dir" <<'PY'
+  python3 - "$ninja_file" "$android_spv_lib" "$android_spv_inc" "$x11_lib_dir" <<'PY'
 import subprocess
 import sys
 from pathlib import Path
 
 ninja_path = Path(sys.argv[1])
 spv_lib = sys.argv[2]
-x11_lib = sys.argv[3]
+spv_inc = sys.argv[3]
+x11_lib = sys.argv[4]
 txt = ninja_path.read_text(encoding="utf-8")
 
 updated = txt
 if Path(spv_lib).is_dir():
     updated = updated.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
     updated = updated.replace("-L/usr/local/lib", f"-L{spv_lib}")
+
+if Path(spv_inc).is_dir():
+    inc_flag = f"-I{spv_inc}"
+    if inc_flag not in updated:
+        updated = updated.replace(
+            "-I../../work/mesa/src/compiler/spirv",
+            f"-I../../work/mesa/src/compiler/spirv {inc_flag}",
+        )
 
 aarch64_libs = []
 if Path(x11_lib).is_dir():
@@ -696,7 +735,7 @@ if aarch64_libs:
 
 if updated != txt:
     ninja_path.write_text(updated, encoding="utf-8")
-    print(f"Remapped SPIRV-Tools and aarch64 X11/XCB archives in {ninja_path}")
+    print(f"Remapped SPIRV-Tools headers/libs and aarch64 X11/XCB archives in {ninja_path}")
 PY
 }
 
@@ -718,6 +757,7 @@ build_and_package() {
   apply_android_tolm
   ensure_lua54_pc
   ensure_xproto_pc
+  install_spirv_headers_to_targets
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     ensure_lua54_pc
