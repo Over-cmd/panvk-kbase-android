@@ -18,13 +18,9 @@ fi
 
 ./scripts/fetch-mesa.sh
 
-echo "=== PATCH 003 FULL ==="
-cat patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch || true
-
 if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
-  echo "=== kbase_kmod.c JIT / GROW_ON_GPF ==="
-  grep -n -C 25 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
-  grep -n -C 25 "GROW_ON_GPF" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
+  echo "=== kbase_kmod.c jit_init ==="
+  grep -n -C 20 "jit_init" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
   exit 1
 fi
 
