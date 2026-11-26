@@ -72,6 +72,9 @@ EOF
   mkdir -p "$local_pc_dir" 2>/dev/null || sudo mkdir -p "$local_pc_dir" 2>/dev/null || true
   cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || \
     sudo cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || true
+
+  PKG_CONFIG_PATH="${deps_pc_dir}:${local_pc_dir}:/usr/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}" \
+    pkg-config --modversion lua54 || true
 }
 
 is_aarch64_archive() {
