@@ -459,6 +459,10 @@ build_and_package() {
   export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
   export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
 
+  if [ -n "${ANDROID_NDK_HOME}" ] && [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
+    export PATH="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin:${PATH}"
+  fi
+
   apply_android_tolm
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
