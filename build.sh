@@ -79,6 +79,22 @@ ensure_android_xcb_lib() {
     return 0
   fi
 
+  local shim_inc_flags=""
+  if [ -d "${ROOT}/shims/include/x11/X11" ]; then
+    shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include/x11"
+  elif [ -f "${ROOT}/shims/include/x11/Xauth.h" ]; then
+    local shim_x11_wrap="/tmp/shim-x11-wrap/X11"
+    mkdir -p "$shim_x11_wrap"
+    ln -sf "${ROOT}/shims/include/x11/Xauth.h" "${shim_x11_wrap}/Xauth.h"
+    shim_inc_flags="${shim_inc_flags} -I/tmp/shim-x11-wrap"
+  fi
+  if [ -d "${ROOT}/shims/include" ]; then
+    shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include"
+  fi
+  if [ -d "${ROOT}/shims/include/x11" ]; then
+    shim_inc_flags="${shim_inc_flags} -I${ROOT}/shims/include/x11"
+  fi
+
   local src_root="/tmp/android-xcb-src"
   local proto_prefix="/tmp/android-xcb-proto-install"
   rm -rf "$src_root" "$proto_prefix"
@@ -100,7 +116,7 @@ ensure_android_xcb_lib() {
     export CC="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
     export AR="${ndk_bin}/llvm-ar"
     export RANLIB="${ndk_bin}/llvm-ranlib"
-    export CFLAGS="-fPIC -O2 -Wno-unused-but-set-variable -Wno-error"
+    export CFLAGS="-fPIC -O2${shim_inc_flags} -Wno-unused-but-set-variable -Wno-error"
     autoreconf -fiv
     ./configure \
       --host=aarch64-linux-android \
@@ -108,7 +124,6 @@ ensure_android_xcb_lib() {
       --enable-static \
       --disable-shared \
       --disable-devel-docs \
-      --without-auth \
       --with-pic
     make -j"$(nproc)"
     make install
