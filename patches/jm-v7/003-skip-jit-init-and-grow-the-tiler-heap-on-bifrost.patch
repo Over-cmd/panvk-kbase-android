@@ -4,11 +4,11 @@ Subject: [PATCH jm-v7 003] kbase: skip MEM_JIT_INIT on Bifrost JM, GROW_ON_GPF t
 
 Purpose: KBASE_IOCTL_MEM_JIT_INIT fails with ENOMEM on G52 r1 kernels.
 Nothing panvk allocates on JM needs JIT or CUSTOM_VA (CSF tiler heap
-contexts are the only kernel-internal users), so for JM arch < 9 skip the
+contexts are the only kernel-internal users), so for JM arch less than 9 skip the
 ioctl and log "v%u JM, KBASE_IOCTL_MEM_JIT_INIT skipped". Arch is read
 from the gpuprops buffer already fetched (RAW_GPU_ID, else PRODUCT_ID).
 The JM tiler heap and indirect varying buffer are already GROW_ON_GPF
-(PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT, 2 MiB extension); on arch < 9 the
+(PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT, 2 MiB extension); on arch less than 9 the
 GPU-only ones now commit 1 MiB up front (JV: 256 pages) and log the
 committed/VA pages. v9 keeps JIT_INIT and its TILER_ALIGN_TOP path.
 Source/Reference: JimVulkan/mali-panvk src/panfrost/lib/kmod/kbase_kmod.c
@@ -27,7 +27,7 @@ the JIT skip line and "growable BO, GROW_ON_GPF"
 diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
-@@ -1196,9 +1196,18 @@
+@@ -1196,9 +1196,21 @@
        struct kbase_ioctl_mem_jit_init jit_init = {
           .va_pages = 1ull << 25,
           .max_allocations = 255,
@@ -51,10 +51,13 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
                     "(tiler heap creation will not work)", strerror(errno));
        }
  
-@@ -1427,5 +1436,16 @@
+@@ -1424,6 +1436,19 @@
+       if (kmod_flags & PAN_KMOD_BO_FLAG_IO_COHERENT)
+          flags |= BASE_MEM_COHERENT_SYSTEM;
+ 
        if (kmod_flags & PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT)
           flags |= BASE_MEM_GROW_ON_GPF;
- 
++
 +      /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let
 +       * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */
 +      if (!kbase_dev->is_csf && pan_arch(dev->props.gpu_id) < 9 &&
@@ -64,6 +67,6 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
 +                   " of %" PRIu64 " pages committed",
 +                   pan_arch(dev->props.gpu_id), commit_pages, va_pages);
 +      }
-+
+ 
        if (kmod_flags & PAN_KMOD_BO_FLAG_CSF_EVENT) {
           flags |= BASE_MEM_CSF_EVENT;
