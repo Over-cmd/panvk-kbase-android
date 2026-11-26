@@ -19,10 +19,16 @@ fi
 ./scripts/fetch-mesa.sh
 
 if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
-  echo "=== GREP JIT_INIT ==="
-  grep -n -C 10 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
-  echo "=== GREP GROW_ON_GPF ==="
-  grep -n -C 12 "BASE_MEM_GROW_ON_GPF" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
+  echo "=== EXACT LINES 1195..1206 ==="
+  python3 -c '
+with open("work/mesa/src/panfrost/lib/kmod/kbase_kmod.c", "rb") as f:
+    lines = f.read().splitlines()
+for idx in range(1194, min(1206, len(lines))):
+    print(f"{idx+1}: {lines[idx]!r}")
+print("=== EXACT LINES 1426..1435 ===")
+for idx in range(1425, min(1435, len(lines))):
+    print(f"{idx+1}: {lines[idx]!r}")
+'
   exit 1
 fi
 
