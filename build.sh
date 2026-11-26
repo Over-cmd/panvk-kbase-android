@@ -376,7 +376,7 @@ Elf_Data *elf_newdata(Elf_Scn *scn) { (void)scn; return NULL; }
 char *elf_strptr(Elf *elf, size_t ndx, size_t offset) { (void)elf; (void)ndx; (void)offset; return NULL; }
 size_t elf_getshdrstrndx(Elf *elf, size_t *dst) { (void)elf; if (dst) *dst = 0; return 0; }
 int elf_flagelf(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
-int elf_flagscn(Elf_Scn *scn, Elf_Cmd cmd, unsigned int flags) { (void)scn; (void)cmd; (void)flags; return 0; }
+int elf_flagscn(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
 int elf_flagdata(Elf_Data *data, Elf_Cmd cmd, unsigned int flags) { (void)data; (void)cmd; (void)flags; return 0; }
 off_t elf_update(Elf *elf, Elf_Cmd cmd) { (void)elf; (void)cmd; return 0; }
 char *elf_getident(Elf *elf, size_t *ptr) { (void)elf; if (ptr) *ptr = 0; return NULL; }
