@@ -17,11 +17,14 @@ if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
 fi
 
 P003="patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch"
-KMOD="src/panfrost/lib/kmod/kbase_kmod.c"
+KMOD="work/mesa/src/panfrost/lib/kmod/kbase_kmod.c"
+ORIG_KMOD="/tmp/kbase_kmod.c.orig"
 
 ./scripts/fetch-mesa.sh
 
 if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
+  cp "${KMOD}" "${ORIG_KMOD}"
+
   python3 - <<'PY'
 from pathlib import Path
 
@@ -74,9 +77,13 @@ kmod_path.write_text(patched, encoding="utf-8", newline="\n")
 PY
 
   mkdir -p "$(dirname "$P003")"
-  git -C work/mesa diff "${KMOD}" > "${P003}"
+  {
+    echo "diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c"
+    diff -u --label "a/src/panfrost/lib/kmod/kbase_kmod.c" --label "b/src/panfrost/lib/kmod/kbase_kmod.c" "${ORIG_KMOD}" "${KMOD}" || true
+  } > "${P003}"
 
-  git -C work/mesa checkout -- "${KMOD}"
+  # Restaurar kbase_kmod.c a su estado previo a 003 y verificar que git apply lo acepta
+  cp "${ORIG_KMOD}" "${KMOD}"
   git -C work/mesa apply --check -v "$(pwd)/${P003}"
 
   echo "=== CLEAN PATCH 003 START ==="
