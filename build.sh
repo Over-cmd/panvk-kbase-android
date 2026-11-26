@@ -376,7 +376,7 @@ Elf_Data *elf_newdata(Elf_Scn *scn) { (void)scn; return NULL; }
 char *elf_strptr(Elf *elf, size_t ndx, size_t offset) { (void)elf; (void)ndx; (void)offset; return NULL; }
 size_t elf_getshdrstrndx(Elf *elf, size_t *dst) { (void)elf; if (dst) *dst = 0; return 0; }
 int elf_flagelf(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
-int elf_flagscn(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
+int elf_flagscn(Elf_Scn *scn, Elf_Cmd cmd, unsigned int flags) { (void)scn; (void)cmd; (void)flags; return 0; }
 int elf_flagdata(Elf_Data *data, Elf_Cmd cmd, unsigned int flags) { (void)data; (void)cmd; (void)flags; return 0; }
 off_t elf_update(Elf *elf, Elf_Cmd cmd) { (void)elf; (void)cmd; return 0; }
 char *elf_getident(Elf *elf, size_t *ptr) { (void)elf; if (ptr) *ptr = 0; return NULL; }
@@ -988,11 +988,132 @@ apply_android_tolm() {
 
   [ -f "$ORIG_CROSS_INI" ] && [ ! -f "$BACKUP_CROSS_INI" ] && cp -f "$ORIG_CROSS_INI" "$BACKUP_CROSS_INI"
 
-  # Evita colisión con pkg_config_libdir que build-android.sh inyecta en [properties]
   envsubst '${ANDROID_NDK_HOME} ${MESON_WORKING_DIR} ${CLANG_LIB_DIR}' < "$tolm_file" \
     | grep -v -E '^[[:space:]]*pkg_config_libdir[[:space:]]*=' > "$ORIG_CROSS_INI"
+}
 
-  rm -f "${ROOT}/build/android-bionic.cross.ini"
+remap_android_ninja_spirv_tools() {
+  local ninja_file="${ROOT}/build/android-bionic/build.ninja"
+  local rsp_file="${ROOT}/build/android-bionic/src/panfrost/vulkan/libvulkan_panfrost.so.rsp"
+  local android_spv_prefix="${ROOT}/work/android-spirv-tools"
+  local android_spv_lib="${android_spv_prefix}/lib"
+  local android_spv_inc="${android_spv_prefix}/include"
+  local deps_lib_dir="${ROOT}/work/android-deps/lib"
+  local x11_lib_dir="${ROOT}/work/android-deps-x11/lib"
+
+  install_spirv_headers_to_targets
+  ensure_android_xcb_lib
+  ensure_android_libelf
+  ensure_android_libdrm_stub
+  ensure_android_rt_stub
+  [ -f "$ninja_file" ] || return 1
+
+  python3 - "$ninja_file" "$rsp_file" "$android_spv_lib" "$android_spv_inc" "$deps_lib_dir" "$x11_lib_dir" <<'PY'
+import subprocess
+import sys
+from pathlib import Path
+
+ninja_path = Path(sys.argv[1])
+rsp_path = Path(sys.argv[2])
+spv_lib = sys.argv[3]
+spv_inc = sys.argv[4]
+deps_lib = sys.argv[5]
+x11_lib = sys.argv[6]
+
+lib_dirs = []
+for d in (spv_lib, deps_lib, x11_lib):
+    if Path(d).is_dir() and d not in lib_dirs:
+        lib_dirs.append(d)
+
+whole_names = {
+    "libelf.a",
+    "libdrm.a",
+    "librt.a",
+    "libxcb-shm.a",
+    "libxcb-dri3.a",
+    "libxcb-randr.a",
+    "libxcb-sync.a",
+    "libxcb-xfixes.a",
+    "libxcb-present.a",
+    "libX11-xcb.a",
+    "libX11.a",
+    "libxshmfence.a",
+}
+
+normal_names = {
+    "libdrm_amdgpu.a",
+    "libdrm_freedreno.a",
+    "libdrm_intel.a",
+    "libdrm_nouveau.a",
+    "libdrm_panfrost.a",
+    "libdrm_radeon.a",
+    "libxcb.a",
+    "libSPIRV-Tools.a",
+    "libSPIRV-Tools-opt.a",
+    "libSPIRV-Tools-link.a",
+}
+
+def collect_aarch64_libs(existing_txt: str):
+    whole_libs = []
+    normal_libs = []
+    for search_dir in lib_dirs:
+        for archive in sorted(Path(search_dir).glob("lib*.a")):
+            if archive.name not in (whole_names | normal_names):
+                continue
+            if str(archive) in existing_txt:
+                continue
+            try:
+                out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
+                if out:
+                    tmp = Path("/tmp/ar_check")
+                    tmp.mkdir(parents=True, exist_ok=True)
+                    subprocess.check_call(["ar", "x", str(archive), out[0]], cwd=str(tmp), stderr=subprocess.DEVNULL)
+                    hdr = subprocess.check_output(["readelf", "-h", str(tmp / out[0])], text=True, stderr=subprocess.DEVNULL)
+                    if "AArch64" in hdr:
+                        if archive.name in whole_names:
+                            whole_libs.append(str(archive))
+                        else:
+                            normal_libs.append(str(archive))
+            except Exception:
+                pass
+    return whole_libs, normal_libs
+
+txt = ninja_path.read_text(encoding="utf-8")
+updated_ninja = txt
+if Path(spv_lib).is_dir():
+    updated_ninja = updated_ninja.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
+    updated_ninja = updated_ninja.replace("-L/usr/local/lib", f"-L{spv_lib}")
+
+if Path(spv_inc).is_dir():
+    inc_flag = f"-I{spv_inc}"
+    if inc_flag not in updated_ninja:
+        updated_ninja = updated_ninja.replace(
+            "-I../../work/mesa/src/compiler/spirv",
+            f"-I../../work/mesa/src/compiler/spirv {inc_flag}",
+        )
+
+if updated_ninja != txt:
+    ninja_path.write_text(updated_ninja, encoding="utf-8")
+    print(f"Updated {ninja_path}")
+
+if rsp_path.is_file():
+    rsp_txt = rsp_path.read_text(encoding="utf-8")
+    updated_rsp = rsp_txt
+    rsp_l_flags = " ".join(f"-L{d}" for d in lib_dirs if f"-L{d}" not in updated_rsp)
+    if rsp_l_flags:
+        updated_rsp = rsp_l_flags + "\n" + updated_rsp
+    r_whole, r_normal = collect_aarch64_libs(updated_rsp)
+    r_parts = []
+    if r_whole:
+        r_parts.append("-Wl,--whole-archive " + " ".join(r_whole) + " -Wl,--no-whole-archive")
+    if r_normal:
+        r_parts.append(" ".join(r_normal))
+    if r_parts:
+        updated_rsp = updated_rsp + "\n" + " ".join(r_parts) + "\n"
+    if updated_rsp != rsp_txt:
+        rsp_path.write_text(updated_rsp, encoding="utf-8")
+        print(f"Updated {rsp_path} with library search paths and aarch64 archives")
+PY
 }
 
 build_and_package() {
@@ -1021,11 +1142,21 @@ build_and_package() {
   ensure_android_rt_stub
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    if [ -f "${ROOT}/build/android-bionic.log" ]; then
-      echo "=== Tail of build/android-bionic.log ==="
-      tail -n 40 "${ROOT}/build/android-bionic.log" || true
+    ensure_lua54_pc
+    ensure_xproto_pc
+    ensure_android_xcb_lib
+    ensure_android_libelf
+    ensure_android_libdrm_stub
+    ensure_android_rt_stub
+    if remap_android_ninja_spirv_tools; then
+      ninja -C "${ROOT}/build/android-bionic" -j"$(nproc)"
+    else
+      if [ -f "${ROOT}/build/android-bionic.log" ]; then
+        echo "=== Tail of build/android-bionic.log ==="
+        tail -n 40 "${ROOT}/build/android-bionic.log" || true
+      fi
+      return 1
     fi
-    return 1
   fi
 
   ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
