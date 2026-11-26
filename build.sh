@@ -18,14 +18,16 @@ fi
 
 ./scripts/fetch-mesa.sh
 
-echo "=== PATCH 003 ==="
+echo "=== PATCH 003 FULL ==="
 cat patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch || true
 
-echo "=== kbase_kmod.c JIT / tiler heap ==="
-grep -n -C 20 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
-grep -n -C 20 "tiler" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c | head -n 60 || true
+if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
+  echo "=== kbase_kmod.c JIT / GROW_ON_GPF ==="
+  grep -n -C 25 "KBASE_IOCTL_MEM_JIT_INIT" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
+  grep -n -C 25 "GROW_ON_GPF" work/mesa/src/panfrost/lib/kmod/kbase_kmod.c || true
+  exit 1
+fi
 
-./scripts/apply-patches.sh --profile "${PROFILE}"
 ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
 ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
