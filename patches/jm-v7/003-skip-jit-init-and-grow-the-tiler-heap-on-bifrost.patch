@@ -27,7 +27,7 @@ the JIT skip line and "growable BO, GROW_ON_GPF"
 diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
-@@ -1196,9 +1196,21 @@
+@@ -1196,9 +1196,22 @@
        struct kbase_ioctl_mem_jit_init jit_init = {
           .va_pages = 1ull << 25,
           .max_allocations = 255,
@@ -51,7 +51,7 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
                     "(tiler heap creation will not work)", strerror(errno));
        }
  
-@@ -1424,6 +1436,19 @@
+@@ -1424,8 +1437,19 @@
        if (kmod_flags & PAN_KMOD_BO_FLAG_IO_COHERENT)
           flags |= BASE_MEM_COHERENT_SYSTEM;
  
