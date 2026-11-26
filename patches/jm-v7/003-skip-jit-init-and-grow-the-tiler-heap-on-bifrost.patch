@@ -1,53 +1,41 @@
-python3 - <<'EOF'
-from pathlib import Path
-
-patch_path = Path("patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch")
-patch_path.parent.mkdir(parents=True, exist_ok=True)
-
-lines = [
-    "diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c",
-    "--- a/src/panfrost/lib/kmod/kbase_kmod.c",
-    "+++ b/src/panfrost/lib/kmod/kbase_kmod.c",
-    "@@ -1198,7 +1198,19 @@",
-    "       .max_allocations = 255,",
-    "       .phys_pages = 1ull << 25,",
-    "    };",
-    "-   if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {",
-    "+   /* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA",
-    "+    * (the tiler heap is a SAME_VA GROW_ON_GPF BO), and JIT_INIT fails with",
-    "+    * ENOMEM on G52 r1 kernels, so skip it (as JimVulkan/mali-panvk, MIT). */",
-    "+   uint64_t raw_id = kbase_gpuprop_get(props_buf, props_size,",
-    "+                                       KBASE_GPUPROP_RAW_GPU_ID, 0);",
-    "+   if (!raw_id)",
-    "+      raw_id = kbase_gpuprop_get(props_buf, props_size,",
-    "+                                 KBASE_GPUPROP_PRODUCT_ID, 0) << 16;",
-    "+   if (!is_csf && raw_id && pan_arch(raw_id & 0xffffffffu) < 9) {",
-    "+      mesa_logi(\"kbase: v%u JM, KBASE_IOCTL_MEM_JIT_INIT skipped; tiler \"",
-    "+                \"heap is a GROW_ON_GPF region\",",
-    "+                pan_arch(raw_id & 0xffffffffu));",
-    "+   } else if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {",
-    "       mesa_logw(\"kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s \"",
-    "                 \"(tiler heap creation will not work)\", strerror(errno));",
-    "    }",
-    "@@ -1427,6 +1439,16 @@",
-    "    if (kmod_flags & PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT)",
-    "       flags |= BASE_MEM_GROW_ON_GPF;",
-    "+",
-    "+   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let",
-    "+    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */",
-    "+   if (!kbase_dev->is_csf && pan_arch(dev->props.gpu_id) < 9 &&",
-    "+       (kmod_flags & PAN_KMOD_BO_FLAG_NO_MMAP)) {",
-    "+      commit_pages = MIN2((1024 * 1024) / page_size, va_pages);",
-    "+      mesa_logi(\"kbase: v%u growable BO, GROW_ON_GPF, %\" PRIu64",
-    "+                \" of %\" PRIu64 \" pages committed\",",
-    "+                pan_arch(dev->props.gpu_id), commit_pages, va_pages);",
-    "+   }",
-    "+",
-    "    if (kmod_flags & PAN_KMOD_BO_FLAG_CSF_EVENT) {",
-    "       flags |= BASE_MEM_CSF_EVENT;",
-    "       flags &= ~BASE_MEM_COHERENT_LOCAL;",
-]
-
-patch_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-print("Escrito:", patch_path)
-EOF
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
+--- a/src/panfrost/lib/kmod/kbase_kmod.c
++++ b/src/panfrost/lib/kmod/kbase_kmod.c
+@@ -1198,7 +1198,19 @@
+       .max_allocations = 255,
+       .phys_pages = 1ull << 25,
+    };
+-   if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
++   /* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA
++    * (the tiler heap is a SAME_VA GROW_ON_GPF BO), and JIT_INIT fails with
++    * ENOMEM on G52 r1 kernels, so skip it (as JimVulkan/mali-panvk, MIT). */
++   uint64_t raw_id = kbase_gpuprop_get(props_buf, props_size,
++                                       KBASE_GPUPROP_RAW_GPU_ID, 0);
++   if (!raw_id)
++      raw_id = kbase_gpuprop_get(props_buf, props_size,
++                                 KBASE_GPUPROP_PRODUCT_ID, 0) << 16;
++   if (!is_csf && raw_id && pan_arch(raw_id & 0xffffffffu) < 9) {
++      mesa_logi("kbase: v%u JM, KBASE_IOCTL_MEM_JIT_INIT skipped; tiler "
++                "heap is a GROW_ON_GPF region",
++                pan_arch(raw_id & 0xffffffffu));
++   } else if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
+       mesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
+                 "(tiler heap creation will not work)", strerror(errno));
+    }
+@@ -1427,6 +1439,16 @@
+    if (kmod_flags & PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT)
+       flags |= BASE_MEM_GROW_ON_GPF;
++
++   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let
++    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */
++   if (!kbase_dev->is_csf && pan_arch(dev->props.gpu_id) < 9 &&
++       (kmod_flags & PAN_KMOD_BO_FLAG_NO_MMAP)) {
++      commit_pages = MIN2((1024 * 1024) / page_size, va_pages);
++      mesa_logi("kbase: v%u growable BO, GROW_ON_GPF, %" PRIu64
++                " of %" PRIu64 " pages committed",
++                pan_arch(dev->props.gpu_id), commit_pages, va_pages);
++   }
++
+    if (kmod_flags & PAN_KMOD_BO_FLAG_CSF_EVENT) {
+       flags |= BASE_MEM_CSF_EVENT;
+       flags &= ~BASE_MEM_COHERENT_LOCAL;
