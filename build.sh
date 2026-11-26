@@ -59,14 +59,14 @@ ensure_host_x11_headers() {
     sudo mkdir -p /usr/include/X11
     sudo ln -sfn "/usr/include/${multiarch}/X11/xshmfence.h" /usr/include/X11/xshmfence.h
   fi
-
-  ls -ld /usr/include/xcb/xcb.h /usr/include/xcb/shm.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h 2>/dev/null || true
 }
 
 ensure_xproto_pc() {
   local deps_pc_dir="${ROOT}/work/android-deps/lib/pkgconfig"
   local x11_pc_dir="${ROOT}/work/android-deps-x11/lib/pkgconfig"
   mkdir -p "$deps_pc_dir" "$x11_pc_dir"
+
+  [ -f "${x11_pc_dir}/xproto.pc" ] && [ -f "${deps_pc_dir}/xproto.pc" ] && return 0
 
   local found_pc=""
   for candidate in \
@@ -81,25 +81,9 @@ ensure_xproto_pc() {
     fi
   done
 
-  if [ -z "$found_pc" ]; then
-    sudo apt-get install -y --no-install-recommends x11proto-dev || true
-    for candidate in \
-      /usr/share/pkgconfig/xproto.pc \
-      /usr/lib/x86_64-linux-gnu/pkgconfig/xproto.pc \
-      /usr/local/share/pkgconfig/xproto.pc \
-      /usr/local/lib/pkgconfig/xproto.pc
-    do
-      if [ -f "$candidate" ]; then
-        found_pc="$candidate"
-        break
-      fi
-    done
-  fi
-
   if [ -n "$found_pc" ]; then
     cp -f "$found_pc" "${x11_pc_dir}/xproto.pc" 2>/dev/null || true
     cp -f "$found_pc" "${deps_pc_dir}/xproto.pc" 2>/dev/null || true
-    echo "xproto.pc installed from $found_pc"
   else
     cat <<'EOF' > "${x11_pc_dir}/xproto.pc"
 prefix=/usr
@@ -111,7 +95,6 @@ Version: 7.0.31
 Cflags: -I${includedir}
 EOF
     cp -f "${x11_pc_dir}/xproto.pc" "${deps_pc_dir}/xproto.pc" 2>/dev/null || true
-    echo "Fallback xproto.pc installed"
   fi
 }
 
@@ -149,12 +132,9 @@ Libs: ${libs}
 EOF
 
   cp -f "${deps_pc_dir}/lua54.pc" "${x11_pc_dir}/lua54.pc" 2>/dev/null || true
-
   mkdir -p "$local_pc_dir" 2>/dev/null || sudo mkdir -p "$local_pc_dir" 2>/dev/null || true
   cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || \
     sudo cp -f "${deps_pc_dir}/lua54.pc" "${local_pc_dir}/lua54.pc" 2>/dev/null || true
-
-  echo "lua54.pc installed (version ${ver})"
 }
 
 ensure_android_rt_stub() {
@@ -171,7 +151,6 @@ ensure_android_rt_stub() {
     "${ndk_bin}/llvm-ar" rcs "${deps_lib_dir}/librt.a" "$tmp_o"
     rm -f "$tmp_c" "$tmp_o"
   fi
-  ls -la "${deps_lib_dir}/librt.a" 2>/dev/null || true
 }
 
 ensure_android_libdrm_stub() {
@@ -198,7 +177,6 @@ EOF
     "${ndk_bin}/llvm-ar" rcs "${deps_lib_dir}/libdrm.a" "$tmp_o"
     rm -f "$tmp_c" "$tmp_o"
   fi
-  ls -la "${deps_lib_dir}/libdrm.a" 2>/dev/null || true
 }
 
 ensure_android_libelf() {
@@ -209,7 +187,6 @@ ensure_android_libelf() {
   mkdir -p "${deps_dir}/lib" "${deps_dir}/include"
 
   if is_aarch64_archive "${deps_dir}/lib/libelf.a" && [ -f "${deps_dir}/include/libelf.h" ]; then
-    echo "Android aarch64 libelf already installed in ${deps_dir}/lib/libelf.a"
     return 0
   fi
 
@@ -431,13 +408,10 @@ EOF
   "$ranlib_bin" "${deps_dir}/lib/libelf.a"
   cp -f "${src_dir}/libelf.h" "${src_dir}/gelf.h" "${deps_dir}/include/"
   rm -rf "$src_dir"
-
-  echo "Installed Android aarch64 libelf.a in ${deps_dir}/lib/libelf.a"
 }
 
 ensure_android_xcb_lib() {
   local x11_dir="${ROOT}/work/android-deps-x11"
-  local deps_dir="${ROOT}/work/android-deps"
   local ndk_bin
   ndk_bin="$(get_ndk_bin)"
 
@@ -446,7 +420,7 @@ ensure_android_xcb_lib() {
   local cc_bin="${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang"
   local ar_bin="${ndk_bin}/llvm-ar"
   local ranlib_bin="${ndk_bin}/llvm-ranlib"
-  [ -x "$cc_bin" ] || { echo "Warning: NDK aarch64 clang not found; cannot cross-compile libxcb"; return 0; }
+  [ -x "$cc_bin" ] || return 0
 
   if ! is_aarch64_archive "${x11_dir}/lib/libxcb.a"; then
     local shim_inc_flags=""
@@ -504,7 +478,8 @@ ensure_android_xcb_lib() {
   rm -rf "$build_tmp"
   mkdir -p "$build_tmp"
 
-  cat <<'EOF' > "${build_tmp}/x11_xcb_impl.c"
+  if ! is_aarch64_archive "${x11_dir}/lib/libX11-xcb.a"; then
+    cat <<'EOF' > "${build_tmp}/x11_xcb_impl.c"
 #include <stddef.h>
 typedef struct _XDisplay Display;
 typedef struct xcb_connection_t xcb_connection_t;
@@ -514,11 +489,13 @@ xcb_connection_t *XGetXCBConnection(Display *dpy) {
   return (xcb_connection_t *)0;
 }
 EOF
-  "$cc_bin" -fPIC -O2 -c "${build_tmp}/x11_xcb_impl.c" -o "${build_tmp}/x11_xcb_impl.o"
-  "$ar_bin" rcs "${x11_dir}/lib/libX11-xcb.a" "${build_tmp}/x11_xcb_impl.o"
-  "$ranlib_bin" "${x11_dir}/lib/libX11-xcb.a"
+    "$cc_bin" -fPIC -O2 -c "${build_tmp}/x11_xcb_impl.c" -o "${build_tmp}/x11_xcb_impl.o"
+    "$ar_bin" rcs "${x11_dir}/lib/libX11-xcb.a" "${build_tmp}/x11_xcb_impl.o"
+    "$ranlib_bin" "${x11_dir}/lib/libX11-xcb.a"
+  fi
 
-  cat <<'EOF' > "${build_tmp}/xshmfence_impl.c"
+  if ! is_aarch64_archive "${x11_dir}/lib/libxshmfence.a"; then
+    cat <<'EOF' > "${build_tmp}/xshmfence_impl.c"
 #include <errno.h>
 #include <sched.h>
 #include <stdatomic.h>
@@ -572,9 +549,10 @@ void xshmfence_unmap_shm(void *shm_addr) {
   free(shm_addr);
 }
 EOF
-  "$cc_bin" -fPIC -O2 -c "${build_tmp}/xshmfence_impl.c" -o "${build_tmp}/xshmfence_impl.o"
-  "$ar_bin" rcs "${x11_dir}/lib/libxshmfence.a" "${build_tmp}/xshmfence_impl.o"
-  "$ranlib_bin" "${x11_dir}/lib/libxshmfence.a"
+    "$cc_bin" -fPIC -O2 -c "${build_tmp}/xshmfence_impl.c" -o "${build_tmp}/xshmfence_impl.o"
+    "$ar_bin" rcs "${x11_dir}/lib/libxshmfence.a" "${build_tmp}/xshmfence_impl.o"
+    "$ranlib_bin" "${x11_dir}/lib/libxshmfence.a"
+  fi
 
   local stub_c="${build_tmp}/x11_stub.c"
   local stub_o="${build_tmp}/x11_stub.o"
@@ -588,7 +566,6 @@ EOF
   done
 
   rm -rf "$build_tmp"
-  echo "Installed aarch64 libX11-xcb.a, libxshmfence.a and X11/XCB archives in ${x11_dir}/lib"
 }
 
 sync_spirv_repos() {
@@ -603,7 +580,6 @@ sync_spirv_repos() {
     fi
 
     if [ -n "$pinned_rev" ]; then
-      echo "Syncing SPIRV-Headers to DEPS revision: ${pinned_rev}"
       mkdir -p /tmp/SPIRV-Headers
       git -C /tmp/SPIRV-Headers init -q
       git -C /tmp/SPIRV-Headers remote add origin https://github.com/KhronosGroup/SPIRV-Headers.git
@@ -647,10 +623,7 @@ install_android_spirv_tools() {
   local android_spv_prefix="${ROOT}/work/android-spirv-tools"
 
   local toolchain_cmake="${ndk_home}/build/cmake/android.toolchain.cmake"
-  if [ ! -f "$toolchain_cmake" ]; then
-    echo "Warning: NDK cmake toolchain not found at ${toolchain_cmake}"
-    return 0
-  fi
+  [ -f "$toolchain_cmake" ] || return 0
 
   sync_spirv_repos
 
@@ -670,7 +643,6 @@ install_android_spirv_tools() {
   fi
 
   install_spirv_headers_to_targets
-  echo "Installed Android aarch64 SPIRV-Tools in ${android_spv_prefix}/lib"
 }
 
 install_deps() {
@@ -732,7 +704,6 @@ install_deps() {
     sudo cmake --install /tmp/SPIRV-Tools/build
     sudo ldconfig
   fi
-  pkg-config --modversion SPIRV-Tools || true
 
   install_android_spirv_tools
   ensure_android_xcb_lib
@@ -755,7 +726,6 @@ prepare_mesa() {
       case "$base" in
         001-*|002-*|003-*|004-*) continue ;;
       esac
-      echo "Applying remaining jm-v7 patch: $base"
       git -C work/mesa apply --recount "$PWD/$p"
     done
   fi
@@ -773,7 +743,6 @@ from pathlib import Path
 path = Path(sys.argv[1])
 src = path.read_text(encoding="utf-8")
 
-fwd_decl = "static unsigned kbase_check_bifrost_atom_stride(int fd, bool *seq_nr);\n"
 src = re.sub(r"\n?static unsigned kbase_check_bifrost_atom_stride\(int fd, bool \*seq_nr\);\n?", "\n", src)
 src = re.sub(r"\n?static struct pan_kmod_dev \*\n\s*static struct pan_kmod_dev \*\n", "\nstatic struct pan_kmod_dev *\n", src)
 
@@ -828,7 +797,6 @@ if dev_span:
             line_s = src.rfind("\n", 0, abs_fn)
             ins = (line_s + 1) if line_s != -1 else abs_fn
             src = src[:ins] + "static struct pan_kmod_dev *\n" + src[ins:]
-            print("Restored return type for kbase_kmod_dev_create")
 
 grow_clean = (
     "   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let\n"
@@ -864,7 +832,6 @@ if bo_span:
     if "kbase_dev" not in prefix:
         kd_decl = "   struct kbase_kmod_dev *kbase_dev = container_of(dev, struct kbase_kmod_dev, base);\n"
     src = src[:abs_pos] + "\n" + kd_decl + grow_clean + "\n" + src[abs_pos:]
-    print("Relocated GROW_ON_GPF block inside kbase_kmod_bo_alloc")
 
 dev_span = find_func_span(src, "kbase_kmod_dev_create")
 stride_fn_span = find_func_span(src, "kbase_check_bifrost_atom_stride")
@@ -893,7 +860,6 @@ if dev_span:
                     cut_s = cand
         cut_e = call_m.end()
         src = src[:cut_s] + src[cut_e:]
-        print("Relocated misplaced atom_stride block out of foreign function")
         dev_span = find_func_span(src, "kbase_kmod_dev_create")
         if dev_span:
             _, dev_open, dev_close = dev_span
@@ -924,7 +890,6 @@ if dev_span:
                 "      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);\n"
             )
             src = src[:abs_pos] + stride_block + src[abs_pos:]
-            print("Placed atom_stride check inside kbase_kmod_dev_create after kbase_dev->is_csf = is_csf;")
 
 stride_def = (
     "static unsigned\n"
@@ -945,7 +910,6 @@ if dev_span and "kbase_check_bifrost_atom_stride(" in src and not stride_fn_span
         nl = src.rfind("\n", 0, h_s)
         h_s = (nl + 1) if nl != -1 else 0
     src = src[:h_s] + stride_def + src[h_s:]
-    print("Added definition of kbase_check_bifrost_atom_stride before kbase_kmod_dev_create")
 
 path.write_text(src, encoding="utf-8")
 PY
@@ -981,7 +945,6 @@ for line in lines:
         cval = m_case.group(1)
         if cval in seen_cases:
             skip_until_break = True
-            print(f"Removed duplicate case {cval} in panvk_physical_device.c")
             continue
         seen_cases.add(cval)
 
@@ -1007,7 +970,6 @@ for idx, f_start in enumerate(func_starts):
         else:
             repl = "return false;"
         new_src = new_src[:f_start] + body.replace("goto fail;", repl) + new_src[f_end:]
-        print(f"Replaced undeclared 'goto fail;' with '{repl}' in panvk_physical_device.c")
 
 path.write_text(new_src, encoding="utf-8")
 PY
@@ -1025,144 +987,9 @@ apply_android_tolm() {
 
   [ -f "$ORIG_CROSS_INI" ] && cp -f "$ORIG_CROSS_INI" "$BACKUP_CROSS_INI"
 
-  envsubst '${ANDROID_NDK_HOME} ${MESON_WORKING_DIR} ${CLANG_LIB_DIR}' < "$tolm_file" \
-    | grep -v '^[[:space:]]*pkg_config_libdir[[:space:]]*=' > "$ORIG_CROSS_INI"
-}
-
-remap_android_ninja_spirv_tools() {
-  local ninja_file="${ROOT}/build/android-bionic/build.ninja"
-  local rsp_file="${ROOT}/build/android-bionic/src/panfrost/vulkan/libvulkan_panfrost.so.rsp"
-  local android_spv_prefix="${ROOT}/work/android-spirv-tools"
-  local android_spv_lib="${android_spv_prefix}/lib"
-  local android_spv_inc="${android_spv_prefix}/include"
-  local deps_lib_dir="${ROOT}/work/android-deps/lib"
-  local x11_lib_dir="${ROOT}/work/android-deps-x11/lib"
-
-  install_spirv_headers_to_targets
-  ensure_android_xcb_lib
-  ensure_android_libelf
-  ensure_android_libdrm_stub
-  ensure_android_rt_stub
-  [ -f "$ninja_file" ] || return 1
-
-  python3 - "$ninja_file" "$rsp_file" "$android_spv_lib" "$android_spv_inc" "$deps_lib_dir" "$x11_lib_dir" <<'PY'
-import subprocess
-import sys
-from pathlib import Path
-
-ninja_path = Path(sys.argv[1])
-rsp_path = Path(sys.argv[2])
-spv_lib = sys.argv[3]
-spv_inc = sys.argv[4]
-deps_lib = sys.argv[5]
-x11_lib = sys.argv[6]
-
-lib_dirs = []
-for d in (spv_lib, deps_lib, x11_lib):
-    if Path(d).is_dir() and d not in lib_dirs:
-        lib_dirs.append(d)
-
-whole_names = {
-    "libelf.a",
-    "libdrm.a",
-    "librt.a",
-    "libxcb-shm.a",
-    "libxcb-dri3.a",
-    "libxcb-randr.a",
-    "libxcb-sync.a",
-    "libxcb-xfixes.a",
-    "libxcb-present.a",
-    "libX11-xcb.a",
-    "libX11.a",
-    "libxshmfence.a",
-}
-
-normal_names = {
-    "libdrm_amdgpu.a",
-    "libdrm_freedreno.a",
-    "libdrm_intel.a",
-    "libdrm_nouveau.a",
-    "libdrm_panfrost.a",
-    "libdrm_radeon.a",
-    "libxcb.a",
-    "libSPIRV-Tools.a",
-    "libSPIRV-Tools-opt.a",
-    "libSPIRV-Tools-link.a",
-}
-
-def collect_aarch64_libs(existing_txt: str):
-    whole_libs = []
-    normal_libs = []
-    for search_dir in lib_dirs:
-        for archive in sorted(Path(search_dir).glob("lib*.a")):
-            if archive.name not in (whole_names | normal_names):
-                continue
-            if str(archive) in existing_txt:
-                continue
-            try:
-                out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
-                if out:
-                    tmp = Path("/tmp/ar_check")
-                    tmp.mkdir(parents=True, exist_ok=True)
-                    subprocess.check_call(["ar", "x", str(archive), out[0]], cwd=str(tmp), stderr=subprocess.DEVNULL)
-                    hdr = subprocess.check_output(["readelf", "-h", str(tmp / out[0])], text=True, stderr=subprocess.DEVNULL)
-                    if "AArch64" in hdr:
-                        if archive.name in whole_names:
-                            whole_libs.append(str(archive))
-                        else:
-                            normal_libs.append(str(archive))
-            except Exception:
-                pass
-    return whole_libs, normal_libs
-
-txt = ninja_path.read_text(encoding="utf-8")
-updated_ninja = txt
-if Path(spv_lib).is_dir():
-    updated_ninja = updated_ninja.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
-    updated_ninja = updated_ninja.replace("-L/usr/local/lib", f"-L{spv_lib}")
-
-if Path(spv_inc).is_dir():
-    inc_flag = f"-I{spv_inc}"
-    if inc_flag not in updated_ninja:
-        updated_ninja = updated_ninja.replace(
-            "-I../../work/mesa/src/compiler/spirv",
-            f"-I../../work/mesa/src/compiler/spirv {inc_flag}",
-        )
-
-ninja_l_flags = " ".join(f"-L{d}" for d in lib_dirs if f"-L{d}" not in updated_ninja)
-n_whole, n_normal = collect_aarch64_libs(updated_ninja)
-n_parts = []
-if ninja_l_flags:
-    n_parts.append(ninja_l_flags)
-if n_whole:
-    n_parts.append("-Wl,--whole-archive " + " ".join(n_whole) + " -Wl,--no-whole-archive")
-if n_normal:
-    n_parts.append(" ".join(n_normal))
-if n_parts and " -Wl,--end-group" in updated_ninja:
-    updated_ninja = updated_ninja.replace(" -Wl,--end-group", " " + " ".join(n_parts) + " -Wl,--end-group", 1)
-
-if updated_ninja != txt:
-    ninja_path.write_text(updated_ninja, encoding="utf-8")
-    print(f"Updated {ninja_path}")
-
-if rsp_path.is_file():
-    rsp_txt = rsp_path.read_text(encoding="utf-8")
-    updated_rsp = rsp_txt
-    rsp_l_flags = " ".join(f"-L{d}" for d in lib_dirs if f"-L{d}" not in updated_rsp)
-    if rsp_l_flags:
-        updated_rsp = rsp_l_flags + "\n" + updated_rsp
-    r_whole, r_normal = collect_aarch64_libs(updated_rsp)
-    r_parts = []
-    if r_whole:
-        r_parts.append("-Wl,--whole-archive " + " ".join(r_whole) + " -Wl,--no-whole-archive")
-    if r_normal:
-        r_parts.append(" ".join(r_normal))
-    if r_parts:
-        updated_rsp = updated_rsp + "\n" + " ".join(r_parts) + "\n"
-    if updated_rsp != rsp_txt:
-        rsp_path.write_text(updated_rsp, encoding="utf-8")
-        print(f"Updated {rsp_path} with library search paths and aarch64 archives")
-PY
+  # Conservar íntegramente tu android.toml expandiendo solo las variables de entorno
+  envsubst '${ANDROID_NDK_HOME} ${MESON_WORKING_DIR} ${CLANG_LIB_DIR}' < "$tolm_file" > "$ORIG_CROSS_INI"
+  echo "Applied ${tolm_file} -> ${ORIG_CROSS_INI}"
 }
 
 build_and_package() {
@@ -1190,22 +1017,18 @@ build_and_package() {
   ensure_android_libdrm_stub
   ensure_android_rt_stub
 
+  # Reconfigurar Meson para que tome todos los flags/rutas de aarch64 de tu android.toml
+  if [ -d "${ROOT}/build/android-bionic" ]; then
+    meson setup --reconfigure "${ROOT}/build/android-bionic" "${ROOT}/work/mesa" \
+      --cross-file "${ORIG_CROSS_INI}" || rm -rf "${ROOT}/build/android-bionic"
+  fi
+
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    ensure_lua54_pc
-    ensure_xproto_pc
-    ensure_android_xcb_lib
-    ensure_android_libelf
-    ensure_android_libdrm_stub
-    ensure_android_rt_stub
-    if remap_android_ninja_spirv_tools; then
-      ninja -C "${ROOT}/build/android-bionic" -j"$(nproc)"
-    else
-      if [ -f "${ROOT}/build/android-bionic.log" ]; then
-        echo "=== Tail of build/android-bionic.log ==="
-        tail -n 40 "${ROOT}/build/android-bionic.log" || true
-      fi
-      return 1
+    if [ -f "${ROOT}/build/android-bionic.log" ]; then
+      echo "=== Tail of build/android-bionic.log ==="
+      tail -n 40 "${ROOT}/build/android-bionic.log" || true
     fi
+    return 1
   fi
 
   ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
