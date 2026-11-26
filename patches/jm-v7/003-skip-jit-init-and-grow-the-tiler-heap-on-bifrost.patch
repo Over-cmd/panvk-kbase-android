@@ -51,7 +51,8 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
                     "(tiler heap creation will not work)", strerror(errno));
        }
  
-@@ -1427,5 +1439,16 @@
+@@ -1426,6 +1438,16 @@
+ 
        if (kmod_flags & PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT)
           flags |= BASE_MEM_GROW_ON_GPF;
  
@@ -66,4 +67,3 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
 +      }
 +
        if (kmod_flags & PAN_KMOD_BO_FLAG_CSF_EVENT) {
-          flags |= BASE_MEM_CSF_EVENT;
