@@ -424,9 +424,32 @@ apply_android_tolm() {
     | grep -v '^[[:space:]]*pkg_config_libdir[[:space:]]*=' > "$ORIG_CROSS_INI"
 }
 
+remap_android_ninja_spirv_tools() {
+  local ninja_file="${ROOT}/build/android-bionic/build.ninja"
+  local android_spv_lib="${ROOT}/work/android-spirv-tools/lib"
+
+  [ -f "$ninja_file" ] || return 1
+  [ -d "$android_spv_lib" ] || return 1
+
+  python3 - "$ninja_file" "$android_spv_lib" <<'PY'
+import sys
+from pathlib import Path
+
+ninja_path = Path(sys.argv[1])
+spv_lib = sys.argv[2]
+txt = ninja_path.read_text(encoding="utf-8")
+
+updated = txt.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
+updated = updated.replace("-L/usr/local/lib", f"-L{spv_lib}")
+
+if updated != txt:
+    ninja_path.write_text(updated, encoding="utf-8")
+    print(f"Remapped SPIRV-Tools archive references in {ninja_path} to {spv_lib}")
+PY
+}
+
 build_and_package() {
   cd "$ROOT"
-  local android_spv_prefix="${ROOT}/work/android-spirv-tools"
   export CC="clang-${LLVM_VER}"
   export CXX="clang++-${LLVM_VER}"
   export LD="ld.lld-${LLVM_VER}"
@@ -438,16 +461,16 @@ build_and_package() {
 
   apply_android_tolm
 
-  if [ -d "${ROOT}/build/android-bionic" ]; then
-    rm -rf "${ROOT}/build/android-bionic"
-  fi
-
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-    if [ -f "${ROOT}/build/android-bionic.log" ]; then
-      echo "=== Linker errors in build/android-bionic.log ==="
-      grep -n -C 5 "incompatible with aarch64linux\|SPIRV-Tools" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+    if remap_android_ninja_spirv_tools; then
+      ninja -C "${ROOT}/build/android-bionic" -j"$(nproc)"
+    else
+      if [ -f "${ROOT}/build/android-bionic.log" ]; then
+        echo "=== Linker errors in build/android-bionic.log ==="
+        grep -n -C 5 "incompatible with aarch64linux\|SPIRV-Tools" "${ROOT}/build/android-bionic.log" | tail -n 60 || true
+      fi
+      return 1
     fi
-    return 1
   fi
 
   ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
