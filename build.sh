@@ -1009,6 +1009,7 @@ remap_android_ninja_spirv_tools() {
   [ -f "$ninja_file" ] || return 1
 
   python3 - "$ninja_file" "$rsp_file" "$android_spv_lib" "$android_spv_inc" "$deps_lib_dir" "$x11_lib_dir" <<'PY'
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -1053,6 +1054,27 @@ normal_names = {
     "libSPIRV-Tools-link.a",
 }
 
+def is_a64(archive: Path) -> bool:
+    try:
+        out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
+        if not out:
+            return False
+        tmp = Path("/tmp/ar_check")
+        tmp.mkdir(parents=True, exist_ok=True)
+        subprocess.check_call(["ar", "x", str(archive), out[0]], cwd=str(tmp), stderr=subprocess.DEVNULL)
+        hdr = subprocess.check_output(["readelf", "-h", str(tmp / out[0])], text=True, stderr=subprocess.DEVNULL)
+        return "AArch64" in hdr
+    except Exception:
+        return False
+
+def find_archive(lib_stem: str) -> str | None:
+    fname = f"lib{lib_stem}.a"
+    for d in lib_dirs:
+        cand = Path(d) / fname
+        if cand.is_file() and is_a64(cand):
+            return str(cand)
+    return None
+
 def collect_aarch64_libs(existing_txt: str):
     whole_libs = []
     normal_libs = []
@@ -1062,20 +1084,11 @@ def collect_aarch64_libs(existing_txt: str):
                 continue
             if str(archive) in existing_txt:
                 continue
-            try:
-                out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
-                if out:
-                    tmp = Path("/tmp/ar_check")
-                    tmp.mkdir(parents=True, exist_ok=True)
-                    subprocess.check_call(["ar", "x", str(archive), out[0]], cwd=str(tmp), stderr=subprocess.DEVNULL)
-                    hdr = subprocess.check_output(["readelf", "-h", str(tmp / out[0])], text=True, stderr=subprocess.DEVNULL)
-                    if "AArch64" in hdr:
-                        if archive.name in whole_names:
-                            whole_libs.append(str(archive))
-                        else:
-                            normal_libs.append(str(archive))
-            except Exception:
-                pass
+            if is_a64(archive):
+                if archive.name in whole_names:
+                    whole_libs.append(str(archive))
+                else:
+                    normal_libs.append(str(archive))
     return whole_libs, normal_libs
 
 txt = ninja_path.read_text(encoding="utf-8")
@@ -1099,9 +1112,22 @@ if updated_ninja != txt:
 if rsp_path.is_file():
     rsp_txt = rsp_path.read_text(encoding="utf-8")
     updated_rsp = rsp_txt
+
+    def repl_lflag(m):
+        stem = m.group(1)
+        resolved = find_archive(stem)
+        if resolved:
+            if f"lib{stem}.a" in whole_names:
+                return f"-Wl,--whole-archive {resolved} -Wl,--no-whole-archive"
+            return resolved
+        return m.group(0)
+
+    updated_rsp = re.sub(r"(?<![A-Za-z0-9_-])-l([A-Za-z0-9_+-]+)", repl_lflag, updated_rsp)
+
     rsp_l_flags = " ".join(f"-L{d}" for d in lib_dirs if f"-L{d}" not in updated_rsp)
     if rsp_l_flags:
         updated_rsp = rsp_l_flags + "\n" + updated_rsp
+
     r_whole, r_normal = collect_aarch64_libs(updated_rsp)
     r_parts = []
     if r_whole:
@@ -1110,9 +1136,10 @@ if rsp_path.is_file():
         r_parts.append(" ".join(r_normal))
     if r_parts:
         updated_rsp = updated_rsp + "\n" + " ".join(r_parts) + "\n"
+
     if updated_rsp != rsp_txt:
         rsp_path.write_text(updated_rsp, encoding="utf-8")
-        print(f"Updated {rsp_path} with library search paths and aarch64 archives")
+        print(f"Updated {rsp_path} with resolved aarch64 archives")
 PY
 }
 
