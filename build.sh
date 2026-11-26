@@ -17,9 +17,6 @@ if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
 fi
 
 ./scripts/fetch-mesa.sh
-
-grep -n -C 12 "PAN_I_WANT_A_BROKEN_VULKAN_DRIVER" work/mesa/src/panfrost/vulkan/panvk_physical_device.c || true
-
 ./scripts/apply-patches.sh --profile "${PROFILE}"
 ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
