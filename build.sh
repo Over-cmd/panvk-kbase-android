@@ -19,18 +19,8 @@ fi
 ./scripts/fetch-mesa.sh
 
 if ! ./scripts/apply-patches.sh --profile "${PROFILE}"; then
-  echo "=== LIST PATCHES IN PROFILE ==="
-  find patches -maxdepth 3 -type f -name "*.patch" | sort || true
-  echo "=== EXACT LINES kbase_kmod.c around 1190..1215 and 1420..1436 ==="
-  python3 -c '
-p = "work/mesa/src/panfrost/lib/kmod/kbase_kmod.c"
-with open(p, "rb") as f:
-    lines = f.read().splitlines()
-for start, end in [(1190, 1215), (1420, 1436)]:
-    print(f"--- {p} [{start}..{end}] ---")
-    for i in range(max(0, start-1), min(len(lines), end)):
-        print(f"{i+1}: {lines[i]!r}")
-'
+  echo "=== CHECK 003 DRY-RUN ==="
+  git -C work/mesa apply --check -v "../../patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch" || true
   exit 1
 fi
 
