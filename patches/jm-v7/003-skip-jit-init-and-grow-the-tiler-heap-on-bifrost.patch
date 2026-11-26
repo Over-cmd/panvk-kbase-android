@@ -1,5 +1,10 @@
 python3 - <<'EOF'
-patch_lines = [
+from pathlib import Path
+
+patch_path = Path("patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch")
+patch_path.parent.mkdir(parents=True, exist_ok=True)
+
+content = "\n".join([
     "From: abhay-byte <abhay02delhi@gmail.com>",
     "Date: 2026-10-16",
     "Subject: [PATCH jm-v7 003] kbase: skip MEM_JIT_INIT on Bifrost JM, GROW_ON_GPF tiler heap with 1 MiB commit",
@@ -21,16 +26,13 @@ patch_lines = [
     "diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c",
     "--- a/src/panfrost/lib/kmod/kbase_kmod.c",
     "+++ b/src/panfrost/lib/kmod/kbase_kmod.c",
-    "@@ -1196,10 +1196,22 @@",
+    "@@ -1196,9 +1196,22 @@",
     "       struct kbase_ioctl_mem_jit_init jit_init = {",
     "          .va_pages = 1ull << 25,",
     "          .max_allocations = 255,",
     "          .phys_pages = 1ull << 25,",
     "       };",
     "-      if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {",
-    "-         mesa_logw(\"kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s \"",
-    "-                   \"(tiler heap creation will not work)\", strerror(errno));",
-    "-      }",
     "+      /* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA",
     "+       * (the tiler heap is a SAME_VA GROW_ON_GPF BO), and JIT_INIT fails with",
     "+       * ENOMEM on G52 r1 kernels, so skip it (as JimVulkan/mali-panvk, MIT). */",
@@ -44,11 +46,11 @@ patch_lines = [
     "+                   \"heap is a GROW_ON_GPF region\",",
     "+                   pan_arch(raw_id & 0xffffffffu));",
     "+      } else if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {",
-    "+         mesa_logw(\"kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s \"",
-    "+                   \"(tiler heap creation will not work)\", strerror(errno));",
-    "+      }",
+    "          mesa_logw(\"kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s \"",
+    "                    \"(tiler heap creation will not work)\", strerror(errno));",
+    "       }",
     " ",
-    "@@ -1424,7 +1436,18 @@",
+    "@@ -1424,8 +1437,18 @@",
     "       if (kmod_flags & PAN_KMOD_BO_FLAG_IO_COHERENT)",
     "          flags |= BASE_MEM_COHERENT_SYSTEM;",
     " ",
@@ -67,14 +69,9 @@ patch_lines = [
     " ",
     "       if (kmod_flags & PAN_KMOD_BO_FLAG_CSF_EVENT)",
     "          flags |= BASE_MEM_CSF_EVENT;",
-]
+    "",
+])
 
-target = "patches/jm-v7/003-skip-jit-init-and-grow-the-tiler-heap-on-bifrost.patch"
-with open(target, "w", encoding="utf-8", newline="\n") as f:
-    f.write("\n".join(patch_lines) + "\n")
-
-with open(target, encoding="utf-8") as f:
-    content = f.read()
-assert '"""' not in content, "Aun hay comillas triples"
-print("OK: escrito sin comillas triples, lineas:", len(patch_lines))
+patch_path.write_bytes(content.encode("utf-8"))
+print("Escrito:", patch_path, "bytes:", patch_path.stat().st_size)
 EOF
