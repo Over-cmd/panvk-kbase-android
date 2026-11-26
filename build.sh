@@ -37,6 +37,58 @@ ensure_host_x11_headers() {
   ls -ld /usr/include/xcb/xcb.h /usr/include/xcb/shm.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h 2>/dev/null || true
 }
 
+ensure_xproto_pc() {
+  local deps_pc_dir="${ROOT}/work/android-deps/lib/pkgconfig"
+  local x11_pc_dir="${ROOT}/work/android-deps-x11/lib/pkgconfig"
+  mkdir -p "$deps_pc_dir" "$x11_pc_dir"
+
+  local found_pc=""
+  for candidate in \
+    /usr/share/pkgconfig/xproto.pc \
+    /usr/lib/x86_64-linux-gnu/pkgconfig/xproto.pc \
+    /usr/local/share/pkgconfig/xproto.pc \
+    /usr/local/lib/pkgconfig/xproto.pc
+  do
+    if [ -f "$candidate" ]; then
+      found_pc="$candidate"
+      break
+    fi
+  done
+
+  if [ -z "$found_pc" ]; then
+    sudo apt-get install -y --no-install-recommends x11proto-dev || true
+    for candidate in \
+      /usr/share/pkgconfig/xproto.pc \
+      /usr/lib/x86_64-linux-gnu/pkgconfig/xproto.pc \
+      /usr/local/share/pkgconfig/xproto.pc \
+      /usr/local/lib/pkgconfig/xproto.pc
+    do
+      if [ -f "$candidate" ]; then
+        found_pc="$candidate"
+        break
+      fi
+    done
+  fi
+
+  if [ -n "$found_pc" ]; then
+    cp -f "$found_pc" "${x11_pc_dir}/xproto.pc" 2>/dev/null || true
+    cp -f "$found_pc" "${deps_pc_dir}/xproto.pc" 2>/dev/null || true
+    echo "xproto.pc copied from $found_pc to ${x11_pc_dir}/xproto.pc"
+  else
+    cat <<'EOF' > "${x11_pc_dir}/xproto.pc"
+prefix=/usr
+includedir=${prefix}/include
+
+Name: XProto
+Description: X11 core protocol headers
+Version: 7.0.31
+Cflags: -I${includedir}
+EOF
+    cp -f "${x11_pc_dir}/xproto.pc" "${deps_pc_dir}/xproto.pc" 2>/dev/null || true
+    echo "Fallback xproto.pc written to ${x11_pc_dir}/xproto.pc"
+  fi
+}
+
 ensure_lua54_pc() {
   local deps_pc_dir="${ROOT}/work/android-deps/lib/pkgconfig"
   local x11_pc_dir="${ROOT}/work/android-deps-x11/lib/pkgconfig"
@@ -245,6 +297,7 @@ install_deps() {
     automake \
     libtool \
     xutils-dev \
+    x11proto-dev \
     cmake \
     git \
     ninja-build \
@@ -276,6 +329,7 @@ install_deps() {
 
   ensure_host_x11_headers
   ensure_lua54_pc
+  ensure_xproto_pc
 
   python3 -m pip install --upgrade pip
   pip install mako PyYAML meson ninja packaging
@@ -654,7 +708,7 @@ build_and_package() {
   export LLVM_CONFIG="llvm-config-${LLVM_VER}"
   export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
   export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
-  export PKG_CONFIG_PATH="${ROOT}/work/android-deps/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export PKG_CONFIG_PATH="${ROOT}/work/android-deps/lib/pkgconfig:${ROOT}/work/android-deps-x11/lib/pkgconfig:/usr/share/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
   export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH:-}"
 
   if [ -n "${ANDROID_NDK_HOME}" ] && [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
@@ -663,17 +717,19 @@ build_and_package() {
 
   apply_android_tolm
   ensure_lua54_pc
+  ensure_xproto_pc
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
     ensure_lua54_pc
+    ensure_xproto_pc
     if remap_android_ninja_spirv_tools; then
       ninja -C "${ROOT}/build/android-bionic" -j"$(nproc)"
     else
       if [ -f "${ROOT}/build/android-bionic.log" ]; then
         echo "=== Tail of build/android-bionic.log ==="
         tail -n 40 "${ROOT}/build/android-bionic.log" || true
-        echo "=== libelf & lua54 context in build/android-bionic.log ==="
-        grep -n -C 8 "Determining dependency 'libelf'\|Determining dependency 'lua54'\|ERROR:" "${ROOT}/build/android-bionic.log" | tail -n 80 || true
+        echo "=== libelf, lua54 & xcb context in build/android-bionic.log ==="
+        grep -n -C 8 "Determining dependency 'libelf'\|Determining dependency 'lua54'\|xproto\|ERROR:" "${ROOT}/build/android-bionic.log" | tail -n 80 || true
       fi
       return 1
     fi
