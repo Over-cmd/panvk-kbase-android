@@ -163,7 +163,7 @@ ensure_android_rt_stub() {
   ndk_bin="$(get_ndk_bin)"
 
   mkdir -p "$deps_lib_dir"
-  if [ ! -f "${deps_lib_dir}/librt.a" ] && [ -x "${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang" ] && [ -x "${ndk_bin}/llvm-ar" ]; then
+  if ! is_aarch64_archive "${deps_lib_dir}/librt.a" && [ -x "${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang" ] && [ -x "${ndk_bin}/llvm-ar" ]; then
     local tmp_c="/tmp/rt_stub.c"
     local tmp_o="/tmp/rt_stub.o"
     echo "void __android_rt_stub(void) {}" > "$tmp_c"
@@ -172,6 +172,33 @@ ensure_android_rt_stub() {
     rm -f "$tmp_c" "$tmp_o"
   fi
   ls -la "${deps_lib_dir}/librt.a" 2>/dev/null || true
+}
+
+ensure_android_libdrm_stub() {
+  local deps_lib_dir="${ROOT}/work/android-deps/lib"
+  local ndk_bin
+  ndk_bin="$(get_ndk_bin)"
+
+  mkdir -p "$deps_lib_dir"
+  if ! is_aarch64_archive "${deps_lib_dir}/libdrm.a" && [ -x "${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang" ] && [ -x "${ndk_bin}/llvm-ar" ]; then
+    local tmp_c="/tmp/drm_stub.c"
+    local tmp_o="/tmp/drm_stub.o"
+    cat <<'EOF' > "$tmp_c"
+#include <stddef.h>
+#include <stdint.h>
+
+void __android_drm_stub(void) {}
+int drmIoctl(int fd, unsigned long request, void *arg) { (void)fd; (void)request; (void)arg; return -1; }
+int drmGetCap(int fd, uint64_t capability, uint64_t *value) { (void)fd; (void)capability; (void)value; return -1; }
+char *drmGetDeviceNameFromFd2(int fd) { (void)fd; return NULL; }
+int drmGetDevices2(uint32_t flags, void *devices, int max_devices) { (void)flags; (void)devices; (void)max_devices; return 0; }
+void drmFreeDevices(void *devices, int count) { (void)devices; (void)count; }
+EOF
+    "${ndk_bin}/aarch64-linux-android${ANDROID_API}-clang" -fPIC -c "$tmp_c" -o "$tmp_o"
+    "${ndk_bin}/llvm-ar" rcs "${deps_lib_dir}/libdrm.a" "$tmp_o"
+    rm -f "$tmp_c" "$tmp_o"
+  fi
+  ls -la "${deps_lib_dir}/libdrm.a" 2>/dev/null || true
 }
 
 ensure_android_libelf() {
@@ -710,6 +737,7 @@ install_deps() {
   install_android_spirv_tools
   ensure_android_xcb_lib
   ensure_android_libelf
+  ensure_android_libdrm_stub
   ensure_android_rt_stub
 }
 
@@ -1013,6 +1041,7 @@ remap_android_ninja_spirv_tools() {
   install_spirv_headers_to_targets
   ensure_android_xcb_lib
   ensure_android_libelf
+  ensure_android_libdrm_stub
   ensure_android_rt_stub
   [ -f "$ninja_file" ] || return 1
 
@@ -1035,6 +1064,7 @@ for d in (spv_lib, deps_lib, x11_lib):
 
 whole_names = {
     "libelf.a",
+    "libdrm.a",
     "librt.a",
     "libxcb-shm.a",
     "libxcb-dri3.a",
@@ -1048,7 +1078,6 @@ whole_names = {
 }
 
 normal_names = {
-    "libdrm.a",
     "libdrm_amdgpu.a",
     "libdrm_freedreno.a",
     "libdrm_intel.a",
@@ -1120,16 +1149,17 @@ if rsp_path.is_file():
     rsp_txt = rsp_path.read_text(encoding="utf-8")
     updated_rsp = rsp_txt
     rsp_l_flags = " ".join(f"-L{d}" for d in lib_dirs if f"-L{d}" not in updated_rsp)
+    if rsp_l_flags:
+        updated_rsp = rsp_l_flags + "\n" + updated_rsp
     r_whole, r_normal = collect_aarch64_libs(updated_rsp)
     r_parts = []
-    if rsp_l_flags:
-        r_parts.append(rsp_l_flags)
     if r_whole:
         r_parts.append("-Wl,--whole-archive " + " ".join(r_whole) + " -Wl,--no-whole-archive")
     if r_normal:
         r_parts.append(" ".join(r_normal))
     if r_parts:
         updated_rsp = updated_rsp + "\n" + " ".join(r_parts) + "\n"
+    if updated_rsp != rsp_txt:
         rsp_path.write_text(updated_rsp, encoding="utf-8")
         print(f"Updated {rsp_path} with library search paths and aarch64 archives")
 PY
@@ -1157,6 +1187,7 @@ build_and_package() {
   install_spirv_headers_to_targets
   ensure_android_xcb_lib
   ensure_android_libelf
+  ensure_android_libdrm_stub
   ensure_android_rt_stub
 
   if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
@@ -1164,6 +1195,7 @@ build_and_package() {
     ensure_xproto_pc
     ensure_android_xcb_lib
     ensure_android_libelf
+    ensure_android_libdrm_stub
     ensure_android_rt_stub
     if remap_android_ninja_spirv_tools; then
       ninja -C "${ROOT}/build/android-bionic" -j"$(nproc)"
