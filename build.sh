@@ -166,8 +166,7 @@ PY
   git -C work/mesa apply --check -v "${OUT_PATCH}"
 
   echo "=== PATCH 004 BASE64 START ==="
-  base64 -w 0 "${OUT_PATCH}"
-  echo ""
+  base64 -w 76 "${OUT_PATCH}"
   echo "=== PATCH 004 BASE64 END ==="
   exit 1
 fi
