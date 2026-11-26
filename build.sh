@@ -265,7 +265,7 @@ Elf_Data *elf_newdata(Elf_Scn *scn);
 char *elf_strptr(Elf *elf, size_t ndx, size_t offset);
 size_t elf_getshdrstrndx(Elf *elf, size_t *dst);
 int elf_flagelf(Elf *elf, Elf_Cmd cmd, unsigned int flags);
-int elf_flagscn(Elf_Scn *scn, Elf_Cmd cmd, unsigned int flags);
+int elf_flagscn(Elf *elf, Elf_Cmd cmd, unsigned int flags);
 int elf_flagdata(Elf_Data *data, Elf_Cmd cmd, unsigned int flags);
 off_t elf_update(Elf *elf, Elf_Cmd cmd);
 char *elf_getident(Elf *elf, size_t *ptr);
@@ -372,8 +372,8 @@ Elf_Data *elf_newdata(Elf_Scn *scn) { (void)scn; return NULL; }
 char *elf_strptr(Elf *elf, size_t ndx, size_t offset) { (void)elf; (void)ndx; (void)offset; return NULL; }
 size_t elf_getshdrstrndx(Elf *elf, size_t *dst) { (void)elf; if (dst) *dst = 0; return 0; }
 int elf_flagelf(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
-int elf_flagscn(Elf_Scn *scn, Elf_Cmd cmd, unsigned int flags) { (void)scn; (void)cmd; (void)flags; return 0; }
-int elf_flagdata(Elf_Data *data, Elf_Cmd cmd, unsigned int flags) { (void)data; (void)cmd; (void)flags; return 0; }
+int elf_flagscn(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
+int elf_flagdata(Elf *elf, Elf_Cmd cmd, unsigned int flags) { (void)elf; (void)cmd; (void)flags; return 0; }
 off_t elf_update(Elf *elf, Elf_Cmd cmd) { (void)elf; (void)cmd; return 0; }
 char *elf_getident(Elf *elf, size_t *ptr) { (void)elf; if (ptr) *ptr = 0; return NULL; }
 size_t elf_rawfile(Elf *elf, size_t *ptr) {
@@ -1061,29 +1061,14 @@ normal_names = {
     "libSPIRV-Tools-link.a",
 }
 
-def patch_text(txt: str, is_rsp: bool = False) -> str:
-    updated = txt
-    if Path(spv_lib).is_dir():
-        updated = updated.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
-        updated = updated.replace("-L/usr/local/lib", f"-L{spv_lib}")
-
-    if not is_rsp and Path(spv_inc).is_dir():
-        inc_flag = f"-I{spv_inc}"
-        if inc_flag not in updated:
-            updated = updated.replace(
-                "-I../../work/mesa/src/compiler/spirv",
-                f"-I../../work/mesa/src/compiler/spirv {inc_flag}",
-            )
-
-    l_flags = " ".join(f"-L{d}" for d in lib_dirs if f"-L{d}" not in updated)
+def collect_aarch64_libs(existing_txt: str):
     whole_libs = []
     normal_libs = []
-
     for search_dir in lib_dirs:
         for archive in sorted(Path(search_dir).glob("lib*.a")):
             if archive.name not in (whole_names | normal_names):
                 continue
-            if str(archive) in updated:
+            if str(archive) in existing_txt:
                 continue
             try:
                 out = subprocess.check_output(["ar", "t", str(archive)], text=True, stderr=subprocess.DEVNULL).splitlines()
@@ -1099,36 +1084,54 @@ def patch_text(txt: str, is_rsp: bool = False) -> str:
                             normal_libs.append(str(archive))
             except Exception:
                 pass
-
-    addition_parts = []
-    if l_flags:
-        addition_parts.append(l_flags)
-    if whole_libs:
-        addition_parts.append("-Wl,--whole-archive " + " ".join(whole_libs) + " -Wl,--no-whole-archive")
-    if normal_libs:
-        addition_parts.append(" ".join(normal_libs))
-
-    if addition_parts:
-        addition = " " + " ".join(addition_parts)
-        if " -Wl,--end-group" in updated:
-            updated = updated.replace(" -Wl,--end-group", f"{addition} -Wl,--end-group", 1)
-        elif is_rsp:
-            updated = updated + f"\n{addition.strip()}\n"
-
-    return updated
+    return whole_libs, normal_libs
 
 txt = ninja_path.read_text(encoding="utf-8")
-updated_ninja = patch_text(txt, is_rsp=False)
+updated_ninja = txt
+if Path(spv_lib).is_dir():
+    updated_ninja = updated_ninja.replace("/usr/local/lib/libSPIRV-Tools", f"{spv_lib}/libSPIRV-Tools")
+    updated_ninja = updated_ninja.replace("-L/usr/local/lib", f"-L{spv_lib}")
+
+if Path(spv_inc).is_dir():
+    inc_flag = f"-I{spv_inc}"
+    if inc_flag not in updated_ninja:
+        updated_ninja = updated_ninja.replace(
+            "-I../../work/mesa/src/compiler/spirv",
+            f"-I../../work/mesa/src/compiler/spirv {inc_flag}",
+        )
+
+ninja_l_flags = " ".join(f"-L{d}" for d in lib_dirs if f"-L{d}" not in updated_ninja)
+n_whole, n_normal = collect_aarch64_libs(updated_ninja)
+n_parts = []
+if ninja_l_flags:
+    n_parts.append(ninja_l_flags)
+if n_whole:
+    n_parts.append("-Wl,--whole-archive " + " ".join(n_whole) + " -Wl,--no-whole-archive")
+if n_normal:
+    n_parts.append(" ".join(n_normal))
+if n_parts and " -Wl,--end-group" in updated_ninja:
+    updated_ninja = updated_ninja.replace(" -Wl,--end-group", " " + " ".join(n_parts) + " -Wl,--end-group", 1)
+
 if updated_ninja != txt:
     ninja_path.write_text(updated_ninja, encoding="utf-8")
-    print(f"Remapped SPIRV-Tools headers/libs and aarch64 archives in {ninja_path}")
+    print(f"Updated {ninja_path}")
 
 if rsp_path.is_file():
     rsp_txt = rsp_path.read_text(encoding="utf-8")
-    updated_rsp = patch_text(rsp_txt, is_rsp=True)
-    if updated_rsp != rsp_txt:
+    updated_rsp = rsp_txt
+    rsp_l_flags = " ".join(f"-L{d}" for d in lib_dirs if f"-L{d}" not in updated_rsp)
+    r_whole, r_normal = collect_aarch64_libs(updated_rsp)
+    r_parts = []
+    if rsp_l_flags:
+        r_parts.append(rsp_l_flags)
+    if r_whole:
+        r_parts.append("-Wl,--whole-archive " + " ".join(r_whole) + " -Wl,--no-whole-archive")
+    if r_normal:
+        r_parts.append(" ".join(r_normal))
+    if r_parts:
+        updated_rsp = updated_rsp + "\n" + " ".join(r_parts) + "\n"
         rsp_path.write_text(updated_rsp, encoding="utf-8")
-        print(f"Remapped library search paths and aarch64 archives in {rsp_path}")
+        print(f"Updated {rsp_path} with library search paths and aarch64 archives")
 PY
 }
 
