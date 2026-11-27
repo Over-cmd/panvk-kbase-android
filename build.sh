@@ -70,7 +70,7 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
   X11_INC_FLAGS="-I/usr/include"
   [ -d "${X11_SHIMS_INCLUDE:-}/include" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_SHIMS_INCLUDE}/include"
 
-  X11_CFLAGS="-fPIC -Wno-implicit-function-declaration -Wno-implicit-int -Wno-error=implicit-function-declaration"
+  X11_CFLAGS="-fPIC"
 
   X11_SRC_DIR="${RUNNER_TEMP:-/tmp}/android-x11-src"
   rm -rf "$X11_SRC_DIR"
@@ -82,8 +82,9 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
     autoreconf -fiv
     CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
       CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" \
+      ac_cv_c_undeclared_builtin_options="none needed" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" --enable-shared --disable-static || {
-      grep -n -C 8 "error:" config.log >&2 || true
+      grep -n -C 25 "cannot detect" config.log >&2 || true
       exit 1
     }
     make -j"${PANVK_JOBS:-$(nproc)}"
@@ -96,10 +97,11 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
     autoreconf -fiv
     CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
       CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" \
+      ac_cv_c_undeclared_builtin_options="none needed" \
       PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" \
       --enable-shared --disable-static --disable-devel-docs --without-doxygen || {
-      grep -n -C 8 "error:" config.log >&2 || true
+      grep -n -C 25 "cannot detect" config.log >&2 || true
       exit 1
     }
     make -j"${PANVK_JOBS:-$(nproc)}"
