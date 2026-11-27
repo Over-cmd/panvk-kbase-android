@@ -49,6 +49,7 @@ if command -v apt-get >/dev/null 2>&1; then
     xcb-proto \
     libpthread-stubs0-dev \
     libbsd-dev \
+    libxau-dev \
     libxcb1-dev \
     libx11-dev \
     libxshmfence-dev \
@@ -58,8 +59,8 @@ if command -v apt-get >/dev/null 2>&1; then
   sudo apt-get install -y -qq python3-xcbgen 2>/dev/null || true
 fi
 
-# Compilar libxshmfence y libxcb reales para Android aarch64 en work/android-deps-x11
-if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFIX}/lib/libxshmfence.so" ]; then
+# Compilar libXau, libxshmfence y libxcb reales para Android aarch64 en work/android-deps-x11
+if [ ! -f "${ANDROID_X11_PREFIX}/lib/libXau.so" ] || [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFIX}/lib/libxshmfence.so" ]; then
   NDK_BIN_DIR="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
   TARGET_TRIPLE="aarch64-linux-android${ANDROID_API}"
   NDK_CC="${NDK_BIN_DIR}/${TARGET_TRIPLE}-clang"
@@ -94,15 +95,31 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
 #endif
 EOF
 
-  X11_INC_FLAGS="-I${X11_CLEAN_INC} -DMAXINT=INT_MAX"
+  X11_INC_FLAGS="-I${X11_CLEAN_INC} -I${ANDROID_X11_PREFIX}/include -DMAXINT=INT_MAX"
   X11_CFLAGS="-fPIC"
+  X11_LDFLAGS="-L${ANDROID_X11_PREFIX}/lib"
+
+  git clone --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxau.git "$X11_SRC_DIR/libxau"
+  (
+    cd "$X11_SRC_DIR/libxau"
+    autoreconf -fiv
+    CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
+      CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" LDFLAGS="$X11_LDFLAGS" \
+      ac_cv_c_undeclared_builtin_options="none needed" \
+      ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" --enable-shared --disable-static || {
+      grep -n -C 25 "cannot detect" config.log >&2 || true
+      exit 1
+    }
+    make -j"${PANVK_JOBS:-$(nproc)}"
+    make install
+  )
 
   git clone --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxshmfence.git "$X11_SRC_DIR/libxshmfence"
   (
     cd "$X11_SRC_DIR/libxshmfence"
     autoreconf -fiv
     CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
-      CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" \
+      CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" LDFLAGS="$X11_LDFLAGS" \
       ac_cv_c_undeclared_builtin_options="none needed" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" --enable-shared --disable-static || {
       grep -n -C 25 "cannot detect" config.log >&2 || true
@@ -128,9 +145,9 @@ EOF
     cd "$X11_SRC_DIR/libxcb"
     autoreconf -fiv
     CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
-      CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" \
+      CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" LDFLAGS="$X11_LDFLAGS" \
       ac_cv_c_undeclared_builtin_options="none needed" \
-      PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
+      PKG_CONFIG_PATH="${ANDROID_X11_PREFIX}/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" \
       --enable-shared --disable-static --disable-devel-docs --without-doxygen || {
       grep -n -C 25 "cannot detect" config.log >&2 || true
