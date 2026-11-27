@@ -1,7 +1,7 @@
 diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
-@@ -75,6 +75,9 @@ struct kbase_kmod_dev {
+@@ -75,6 +75,8 @@ struct kbase_kmod_dev {
     /* True for the CSF flavour of kbase (arch >= 10), false for JM. */
     bool is_csf;
  
@@ -12,7 +12,7 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
     /* CSF interface information (CSF only), queried from
      * KBASE_IOCTL_CS_GET_GLB_IFACE and stored in the panthor uAPI layout
      * so CSF-generic code can consume either backend. */
-@@ -564,6 +567,59 @@ kbase_kmod_alias_destroy(struct pan_kmod_dev *dev, uint64_t va, uint64_t size,
+@@ -564,6 +566,59 @@ kbase_kmod_alias_destroy(struct pan_kmod_dev *dev, uint64_t va, uint64_t size,
     munmap((void *)(uintptr_t)va, size * nents);
  }
  
@@ -72,7 +72,10 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
  static struct pan_kmod_dev *
  kbase_kmod_dev_create(int fd, uint32_t flags,
                        UNUSED const struct pan_kmod_driver *drv_info,
-@@ -644,6 +700,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+@@ -645,6 +700,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+                 pan_arch(raw_id & 0xffffffffu));
+    } else if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
+       mesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
                  "(tiler heap creation will not work)", strerror(errno));
     }
  
@@ -82,10 +85,10 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
 +       pan_arch(raw_id & 0xffffffffu) < 9)
 +      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);
 +
-    struct kbase_kmod_dev *kbase_dev =
-       pan_kmod_alloc(allocator, sizeof(*kbase_dev));
-    if (!kbase_dev) {
-@@ -684,6 +745,10 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+    /* Initialise the EXEC_VA zone so that GPU-executable allocations
+     * (shader BOs) are possible.  4G of executable VA (0x100000 pages)
+     * matches what panfork uses.  On CSF uAPI >= 1.9 the zone is set up
+@@ -668,6 +728,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
        return NULL;
     }
  
@@ -97,7 +100,7 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
     /* Report the kernel uAPI version from the handshake (the caller can't
      * use drmGetVersion() on a kbase fd, so drv_info is either NULL or a
      * zeroed fallback). */
-@@ -1220,8 +1285,20 @@ kbase_kmod_job_submit(struct pan_kmod_dev *dev, uint64_t jc,
+@@ -1220,8 +1285,12 @@ kbase_kmod_job_submit(struct pan_kmod_dev *dev, uint64_t jc,
        atom.core_req |= BASE_JD_REQ_EXTERNAL_RESOURCES;
     }
  
@@ -111,7 +114,7 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
        .nr_atoms = 1,
        .stride = kd->atom_stride,
     };
-@@ -1267,8 +1344,20 @@ kbase_kmod_job_submit_dep(struct pan_kmod_dev *dev, uint64_t jc,
+@@ -1267,8 +1336,12 @@ kbase_kmod_job_submit_dep(struct pan_kmod_dev *dev, uint64_t jc,
        atom.pre_dep[i].dependency_type = use ? types[i] : 0;
     }
  
