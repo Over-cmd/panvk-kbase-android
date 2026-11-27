@@ -8,6 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/work/android-deps-x11}"
 INC="${X11_INCLUDE:-/usr/include}"
 ALT_INC="${X11_ALT_INCLUDE:-/usr/include/x86_64-linux-gnu}"
+SHIMS_INC="${X11_SHIMS_INCLUDE:-$ROOT/shims}"
 
 find_hdr() {
   rel="$1"
@@ -15,6 +16,8 @@ find_hdr() {
     printf '%s\n' "$INC/$rel"
   elif [ -n "$ALT_INC" ] && [ -f "$ALT_INC/$rel" ]; then
     printf '%s\n' "$ALT_INC/$rel"
+  elif [ -n "$SHIMS_INC" ] && [ -f "$SHIMS_INC/$rel" ]; then
+    printf '%s\n' "$SHIMS_INC/$rel"
   else
     return 1
   fi
@@ -25,7 +28,7 @@ XLIB_XCB_H="$(find_hdr "X11/Xlib-xcb.h" || true)"
 SHMFENCE_H="$(find_hdr "X11/xshmfence.h" || true)"
 
 [ -n "$XCB_H" ] && [ -n "$XLIB_XCB_H" ] && [ -n "$SHMFENCE_H" ] || {
-  echo "need host libxcb, libx11 and libxshmfence headers under $INC or $ALT_INC" >&2
+  echo "need host libxcb, libx11 and libxshmfence headers under $INC, $ALT_INC or $SHIMS_INC" >&2
   exit 1
 }
 
@@ -36,10 +39,16 @@ if [ -d "$INC/xcb" ]; then
   cp -r "$INC/xcb/." "$OUT/include/xcb/"
 elif [ -d "$ALT_INC/xcb" ]; then
   cp -r "$ALT_INC/xcb/." "$OUT/include/xcb/"
+elif [ -d "$SHIMS_INC/xcb" ]; then
+  cp -r "$SHIMS_INC/xcb/." "$OUT/include/xcb/"
 fi
 
 if [ -d "$INC/X11" ]; then
   cp -r "$INC/X11/." "$OUT/include/X11/"
+elif [ -d "$ALT_INC/X11" ]; then
+  cp -r "$ALT_INC/X11/." "$OUT/include/X11/"
+elif [ -d "$SHIMS_INC/X11" ]; then
+  cp -r "$SHIMS_INC/X11/." "$OUT/include/X11/"
 fi
 
 cp -f "$XLIB_XCB_H" "$OUT/include/X11/Xlib-xcb.h"
