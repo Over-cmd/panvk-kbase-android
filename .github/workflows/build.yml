@@ -1,54 +1,40 @@
-name: Build PanVK Bifrost JM (Android)
+name: Build PanVK Mali-G52 (.adpkg)
 
 on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
   workflow_dispatch:
-    inputs:
-      profile:
-        description: "Build profile"
-        required: true
-        default: "g52-v7-jm"
-      llvm_ver:
-        description: "LLVM version"
-        required: true
-        default: "21"
-      android_api:
-        description: "Android API level"
-        required: true
-        default: "30"
 
-permissions:
-  contents: read
+env:
+  PROFILE: "g52-v7-jm"
+  PANVK_RELEASE: "26.3.0-devel-G52"
+  LLVM_VER: "21"
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
+  build-panvk-g52:
+    name: Build PanVK Mali-G52 (g52-v7-jm)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run build script
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build and package PanVK Mali-G52
         env:
-          PROFILE: ${{ inputs.profile }}
-          LLVM_VER: ${{ inputs.llvm_ver }}
-          ANDROID_API: ${{ inputs.android_api }}
-        run: |
-          chmod +x ./build.sh
-          ./build.sh
+          PANVK_RELEASE: ${{ env.PANVK_RELEASE }}
+        run: bash ./build.sh
 
-      - name: Upload kbase_kmod.c on failure
-        if: failure()
+      - name: Upload .adpkg and driver artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kbase-kmod-debug-${{ inputs.profile }}
-          path: work/mesa/src/panfrost/lib/kmod/kbase_kmod.c
-          if-no-files-found: ignore
-
-      - name: Upload built driver and package
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: panvk-android-${{ inputs.profile }}
+          name: panvk-g52-v7-jm-aarch64-adpkg
           path: |
-            dist/android-${{ inputs.profile }}/libvulkan_panfrost.so
-            dist/android-${{ inputs.profile }}/*.adpkg
-          if-no-files-found: ignore
+            dist/**/*.adpkg
+            dist/android-${{ env.PROFILE }}/libvulkan_panfrost.so
+          if-no-files-found: error
