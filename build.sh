@@ -46,7 +46,10 @@ if command -v apt-get >/dev/null 2>&1; then
     automake \
     libtool \
     xutils-dev \
+    xorgproto \
     xcb-proto \
+    libpthread-stubs0-dev \
+    libbsd-dev \
     libxcb1-dev \
     libx11-dev \
     libxshmfence-dev \
@@ -58,6 +61,7 @@ fi
 # Compilar libxshmfence y libxcb reales para Android aarch64 en work/android-deps-x11
 if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFIX}/lib/libxshmfence.so" ]; then
   NDK_BIN_DIR="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+  SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
   TARGET_TRIPLE="aarch64-linux-android${ANDROID_API}"
   NDK_CC="${NDK_BIN_DIR}/${TARGET_TRIPLE}-clang"
   NDK_CXX="${NDK_BIN_DIR}/${TARGET_TRIPLE}-clang++"
@@ -65,10 +69,12 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
   NDK_RANLIB="${NDK_BIN_DIR}/llvm-ranlib"
   NDK_LD="${NDK_BIN_DIR}/ld.lld"
 
-  X11_INC_FLAGS="-I/usr/include"
+  X11_INC_FLAGS="--sysroot=${SYSROOT} -I/usr/include"
   [ -d "${X11_INCLUDE:-}" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_INCLUDE}"
   [ -d "${X11_ALT_INCLUDE:-}" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_ALT_INCLUDE}"
   [ -d "${X11_SHIMS_INCLUDE:-}/include" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_SHIMS_INCLUDE}/include"
+
+  X11_CFLAGS="-fPIC -Wno-implicit-function-declaration -Wno-implicit-int -Wno-error=implicit-function-declaration"
 
   X11_SRC_DIR="${RUNNER_TEMP:-/tmp}/android-x11-src"
   rm -rf "$X11_SRC_DIR"
@@ -79,8 +85,11 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
     cd "$X11_SRC_DIR/libxshmfence"
     autoreconf -fiv
     CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
-      CPPFLAGS="$X11_INC_FLAGS" \
-      ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" --enable-shared --disable-static
+      CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" \
+      ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" --enable-shared --disable-static || {
+      tail -n 30 config.log >&2 || true
+      exit 1
+    }
     make -j"${PANVK_JOBS:-$(nproc)}"
     make install
   )
@@ -90,10 +99,13 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
     cd "$X11_SRC_DIR/libxcb"
     autoreconf -fiv
     CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
-      CPPFLAGS="$X11_INC_FLAGS" \
+      CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" \
       PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" \
-      --enable-shared --disable-static --disable-devel-docs --without-doxygen
+      --enable-shared --disable-static --disable-devel-docs --without-doxygen || {
+      tail -n 30 config.log >&2 || true
+      exit 1
+    }
     make -j"${PANVK_JOBS:-$(nproc)}"
     make install
   )
