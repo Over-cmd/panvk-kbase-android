@@ -67,14 +67,20 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
   NDK_RANLIB="${NDK_BIN_DIR}/llvm-ranlib"
   NDK_LD="${NDK_BIN_DIR}/ld.lld"
 
-  X11_INC_FLAGS="-I/usr/include"
-  [ -d "${X11_SHIMS_INCLUDE:-}/include" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_SHIMS_INCLUDE}/include"
-
-  X11_CFLAGS="-fPIC"
-
   X11_SRC_DIR="${RUNNER_TEMP:-/tmp}/android-x11-src"
+  X11_CLEAN_INC="${X11_SRC_DIR}/x11-inc"
   rm -rf "$X11_SRC_DIR"
-  mkdir -p "$X11_SRC_DIR" "${ANDROID_X11_PREFIX}/lib/pkgconfig"
+  mkdir -p "$X11_SRC_DIR" "$X11_CLEAN_INC/X11" "$X11_CLEAN_INC/xcb" "${ANDROID_X11_PREFIX}/lib/pkgconfig"
+
+  # Copiar solo cabeceras X11/XCB (nunca /usr/include completo para no mezclar glibc con Bionic)
+  for base in "${X11_INCLUDE:-/usr/include}" "${X11_ALT_INCLUDE:-}" "${X11_SHIMS_INCLUDE:-}/include" "${X11_SHIMS_INCLUDE:-}"; do
+    [ -n "$base" ] || continue
+    [ -d "$base/X11" ] && cp -rn "$base/X11/." "$X11_CLEAN_INC/X11/" 2>/dev/null || true
+    [ -d "$base/xcb" ] && cp -rn "$base/xcb/." "$X11_CLEAN_INC/xcb/" 2>/dev/null || true
+  done
+
+  X11_INC_FLAGS="-I${X11_CLEAN_INC}"
+  X11_CFLAGS="-fPIC"
 
   git clone --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxshmfence.git "$X11_SRC_DIR/libxshmfence"
   (
