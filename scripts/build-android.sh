@@ -35,7 +35,7 @@ DEPS_PCDIR="$ROOT/work/android-deps/lib/pkgconfig"
 X11_DIR="$ROOT/work/android-deps-x11"
 X11_PCDIR="$X11_DIR/lib/pkgconfig"
 X11_LIBDIR="$X11_DIR/lib"
-if [ ! -f "$X11_PCDIR/xcb.pc" ] || [ ! -f "$X11_LIBDIR/libxcb.a" ] || [ ! -f "$X11_LIBDIR/libxshmfence.a" ]; then
+if [ ! -f "$X11_PCDIR/xcb.pc" ] || [ ! -f "$X11_LIBDIR/libxcb.so" ] || [ ! -f "$X11_LIBDIR/libxshmfence.so" ]; then
   "$ROOT/scripts/prepare-x11-headers.sh" "$X11_DIR" >&2
 fi
 SPIRV_PREFIX="${ANDROID_SPIRV_TOOLS_PREFIX:-/usr/local/android-aarch64}"
@@ -98,6 +98,19 @@ MESON_ARGS="
 "
 meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
   $MESON_ARGS >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
+if [ -f "$BDIR/build.ninja" ] && [ -d "$X11_LIBDIR" ]; then
+  python3 - "$BDIR/build.ninja" "$X11_LIBDIR" <<'EOF'
+import os, sys
+ninja_path, x11_libdir = sys.argv[1], sys.argv[2]
+data = open(ninja_path).read()
+for name in os.listdir(x11_libdir):
+    if name.endswith(".so"):
+        host_so = f"/usr/lib/x86_64-linux-gnu/{name}"
+        stub_so = os.path.join(x11_libdir, name)
+        data = data.replace(host_so, stub_so)
+open(ninja_path, "w").write(data)
+EOF
+fi
 ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: ninja (log $LOG)" >&2; exit 1; }
 SO="$(find "$BDIR" -name libvulkan_panfrost.so | head -n1)"
 [ -n "$SO" ] || { echo "BUILD-FAIL: libvulkan_panfrost.so not produced" >&2; exit 1; }
