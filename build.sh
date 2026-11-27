@@ -55,6 +55,7 @@ if command -v apt-get >/dev/null 2>&1; then
     "libllvmspirvlib-${LLVM_VER}-dev" \
     "libclang-${LLVM_VER}-dev" \
     "libclang-cpp${LLVM_VER}-dev"
+  sudo apt-get install -y -qq python3-xcbgen 2>/dev/null || true
 fi
 
 # Compilar libxshmfence y libxcb reales para Android aarch64 en work/android-deps-x11
@@ -110,6 +111,17 @@ EOF
     make -j"${PANVK_JOBS:-$(nproc)}"
     make install
   )
+
+  # Localizar xcbgen para PYTHONPATH si está fuera del sys.path por defecto de python3
+  XCBGEN_PARENT=""
+  for d in $(find /usr -type d -name "xcbgen" 2>/dev/null); do
+    parent="$(dirname "$d")"
+    case ":${XCBGEN_PARENT}:" in
+      *":${parent}:"*) ;;
+      *) XCBGEN_PARENT="${XCBGEN_PARENT:+${XCBGEN_PARENT}:}${parent}" ;;
+    esac
+  done
+  [ -n "$XCBGEN_PARENT" ] && export PYTHONPATH="${XCBGEN_PARENT}${PYTHONPATH:+:${PYTHONPATH}}"
 
   git clone --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxcb.git "$X11_SRC_DIR/libxcb"
   (
