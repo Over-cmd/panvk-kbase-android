@@ -37,19 +37,15 @@ if command -v apt-get >/dev/null 2>&1; then
     "libclang-${LLVM_VER}-dev" \
     "libclang-cpp${LLVM_VER}-dev"
 
-  SHMFENCE_FOUND="$(find /usr/include -name 'xshmfence.h' -print -quit 2>/dev/null || true)"
-  if [ -n "${SHMFENCE_FOUND}" ] && [ ! -e /usr/include/X11/xshmfence.h ]; then
-    sudo mkdir -p /usr/include/X11
-    sudo ln -sf "${SHMFENCE_FOUND}" /usr/include/X11/xshmfence.h
+  X11_INC="${X11_INCLUDE:-/usr/include}"
+  echo "X11_INC=${X11_INC}"
+  SHMFENCE_FOUND="$(find /usr -name 'xshmfence.h' -print -quit 2>/dev/null || true)"
+  echo "SHMFENCE_FOUND=${SHMFENCE_FOUND:-none}"
+  if [ -n "${SHMFENCE_FOUND}" ]; then
+    sudo mkdir -p "${X11_INC}/X11"
+    sudo ln -sf "${SHMFENCE_FOUND}" "${X11_INC}/X11/xshmfence.h"
   fi
-
-  for hdr in /usr/include/xcb/xcb.h /usr/include/X11/Xlib-xcb.h /usr/include/X11/xshmfence.h; do
-    if [ -e "$hdr" ]; then
-      echo "HDR OK: $hdr"
-    else
-      echo "HDR MISSING: $hdr"
-    fi
-  done
+  ls -la "${X11_INC}/xcb/xcb.h" "${X11_INC}/X11/Xlib-xcb.h" "${X11_INC}/X11/xshmfence.h" 2>&1 || true
 fi
 
 if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
