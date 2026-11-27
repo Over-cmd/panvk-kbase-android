@@ -1,17 +1,19 @@
 diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
-@@ -75,6 +75,8 @@ struct kbase_kmod_dev {
-    struct kbase_atom_slot atoms[KBASE_MAX_ATOMS];
-    uint64_t next_atom_number;
-    unsigned atom_stride;
+@@ -75,6 +75,9 @@ struct kbase_kmod_dev {
+    /* True for the CSF flavour of kbase (arch >= 10), false for JM. */
+    bool is_csf;
+ 
++   unsigned atom_stride;
 +   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */
 +   bool atom_seq_nr;
-    uint32_t last_event_code[KBASE_MAX_ATOMS];
-    bool atom_failed[KBASE_MAX_ATOMS];
-    uint64_t last_done_atom_ctx[KBASE_MAX_ATOMS];
-@@ -564,6 +566,59 @@ kbase_probe_atom_stride(int fd)
-    return 64;
++
+    /* CSF interface information (CSF only), queried from
+     * KBASE_IOCTL_CS_GET_GLB_IFACE and stored in the panthor uAPI layout
+     * so CSF-generic code can consume either backend. */
+@@ -564,6 +567,59 @@ kbase_kmod_alias_destroy(struct pan_kmod_dev *dev, uint64_t va, uint64_t size,
+    munmap((void *)(uintptr_t)va, size * nents);
  }
  
 +/* Submit one dependency-only atom (number 255) at the given stride and
@@ -70,10 +72,11 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
  static struct pan_kmod_dev *
  kbase_kmod_dev_create(int fd, uint32_t flags,
                        UNUSED const struct pan_kmod_driver *drv_info,
-@@ -644,6 +699,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+@@ -644,6 +700,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
                  "(tiler heap creation will not work)", strerror(errno));
     }
  
++   unsigned atom_stride = 56;
 +   bool atom_seq_nr = false;
 +   if (!is_csf && atom_stride == 56 && raw_id &&
 +       pan_arch(raw_id & 0xffffffffu) < 9)
@@ -82,15 +85,19 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
     struct kbase_kmod_dev *kbase_dev =
        pan_kmod_alloc(allocator, sizeof(*kbase_dev));
     if (!kbase_dev) {
-@@ -684,6 +744,7 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
-    list_inithead(&kbase_dev->nc_bos);
-    if (!is_csf) {
-       kbase_dev->atom_stride = atom_stride;
-+      kbase_dev->atom_seq_nr = atom_seq_nr;
-       simple_mtx_init(&kbase_dev->atoms_lock, mtx_plain);
-       simple_mtx_init(&kbase_dev->atoms_read_lock, mtx_plain);
+@@ -684,6 +745,10 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+       return NULL;
     }
-@@ -1220,8 +1281,12 @@ kbase_kmod_job_submit(struct pan_kmod_dev *dev, uint64_t jc,
+ 
++   if (!is_csf) {
++      kbase_dev->atom_stride = atom_stride;
++      kbase_dev->atom_seq_nr = atom_seq_nr;
++   }
++
+    /* Report the kernel uAPI version from the handshake (the caller can't
+     * use drmGetVersion() on a kbase fd, so drv_info is either NULL or a
+     * zeroed fallback). */
+@@ -1220,8 +1285,20 @@ kbase_kmod_job_submit(struct pan_kmod_dev *dev, uint64_t jc,
        atom.core_req |= BASE_JD_REQ_EXTERNAL_RESOURCES;
     }
  
@@ -104,7 +111,7 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
        .nr_atoms = 1,
        .stride = kd->atom_stride,
     };
-@@ -1267,8 +1332,12 @@ kbase_kmod_job_submit_dep(struct pan_kmod_dev *dev, uint64_t jc,
+@@ -1267,8 +1344,20 @@ kbase_kmod_job_submit_dep(struct pan_kmod_dev *dev, uint64_t jc,
        atom.pre_dep[i].dependency_type = use ? types[i] : 0;
     }
  
