@@ -98,17 +98,25 @@ MESON_ARGS="
 "
 meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
   $MESON_ARGS >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
-if [ -f "$BDIR/build.ninja" ] && [ -d "$X11_LIBDIR" ]; then
-  python3 - "$BDIR/build.ninja" "$X11_LIBDIR" <<'EOF'
+if [ -d "$BDIR" ] && [ -d "$X11_LIBDIR" ]; then
+  python3 - "$BDIR" "$X11_LIBDIR" <<'EOF'
 import os, sys
-ninja_path, x11_libdir = sys.argv[1], sys.argv[2]
-data = open(ninja_path).read()
+bdir, x11_libdir = sys.argv[1], sys.argv[2]
+replacements = {}
 for name in os.listdir(x11_libdir):
     if name.endswith(".so"):
-        host_so = f"/usr/lib/x86_64-linux-gnu/{name}"
-        stub_so = os.path.join(x11_libdir, name)
-        data = data.replace(host_so, stub_so)
-open(ninja_path, "w").write(data)
+        replacements[f"/usr/lib/x86_64-linux-gnu/{name}"] = os.path.join(x11_libdir, name)
+if replacements:
+    for root, _, files in os.walk(bdir):
+        for fn in files:
+            if fn == "build.ninja" or fn.endswith(".rsp"):
+                fp = os.path.join(root, fn)
+                data = open(fp, "r", errors="replace").read()
+                new_data = data
+                for old, new in replacements.items():
+                    new_data = new_data.replace(old, new)
+                if new_data != data:
+                    open(fp, "w").write(new_data)
 EOF
 fi
 ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: ninja (log $LOG)" >&2; exit 1; }
