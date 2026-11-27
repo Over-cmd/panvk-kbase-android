@@ -81,15 +81,30 @@ for pc in xcb xcb-randr xcb-dri3 xcb-present xcb-shm xcb-sync xcb-xfixes x11-xcb
     "$OUT" "$pc" "$v" > "$OUT/lib/pkgconfig/$pc.pc"
 done
 
-NDK_BIN_DIR="$(ls -d "${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME:-${ANDROID_HOME:-/opt/android-sdk}/ndk}}"/*/toolchains/llvm/prebuilt/linux-x86_64/bin 2>/dev/null | sort -V | tail -n1)"
-if [ -n "$NDK_BIN_DIR" ] && [ -x "$NDK_BIN_DIR/aarch64-linux-android${ANDROID_API:-30}-clang" ] && [ -x "$NDK_BIN_DIR/llvm-ar" ]; then
+NDK_BASE="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-${ANDROID_HOME:-/opt/android-sdk}/ndk}}}"
+NDK_BIN_DIR="$(ls -d "$NDK_BASE"/toolchains/llvm/prebuilt/linux-*/bin "$NDK_BASE"/*/toolchains/llvm/prebuilt/linux-*/bin 2>/dev/null | sort -V | tail -n1 || true)"
+API_NUM="${ANDROID_API:-30}"
+CLANG_BIN=""
+AR_BIN=""
+if [ -n "$NDK_BIN_DIR" ] && [ -x "$NDK_BIN_DIR/aarch64-linux-android${API_NUM}-clang" ]; then
+  CLANG_BIN="$NDK_BIN_DIR/aarch64-linux-android${API_NUM}-clang"
+elif command -v "aarch64-linux-android${API_NUM}-clang" >/dev/null 2>&1; then
+  CLANG_BIN="$(command -v "aarch64-linux-android${API_NUM}-clang")"
+fi
+if [ -n "$NDK_BIN_DIR" ] && [ -x "$NDK_BIN_DIR/llvm-ar" ]; then
+  AR_BIN="$NDK_BIN_DIR/llvm-ar"
+elif command -v llvm-ar >/dev/null 2>&1; then
+  AR_BIN="$(command -v llvm-ar)"
+fi
+
+if [ -n "$CLANG_BIN" ] && [ -n "$AR_BIN" ]; then
   STUB_C="$(mktemp /tmp/x11_stub_XXXXXX.c)"
   STUB_O="$(mktemp /tmp/x11_stub_XXXXXX.o)"
   printf 'int __panvk_x11_dlopen_stub(void) { return 0; }\n' > "$STUB_C"
-  "$NDK_BIN_DIR/aarch64-linux-android${ANDROID_API:-30}-clang" -target "aarch64-linux-android${ANDROID_API:-30}" -fPIC -c "$STUB_C" -o "$STUB_O"
+  "$CLANG_BIN" -target "aarch64-linux-android${API_NUM}" -fPIC -c "$STUB_C" -o "$STUB_O"
   for lib in xcb xcb-randr xcb-dri3 xcb-present xcb-shm xcb-sync xcb-xfixes X11-xcb xshmfence; do
-    "$NDK_BIN_DIR/llvm-ar" rcs "$OUT/lib/lib${lib}.a" "$STUB_O"
-    "$NDK_BIN_DIR/aarch64-linux-android${ANDROID_API:-30}-clang" -target "aarch64-linux-android${ANDROID_API:-30}" -shared -fPIC -Wl,-soname,"lib${lib}.so" "$STUB_C" -o "$OUT/lib/lib${lib}.so"
+    "$AR_BIN" rcs "$OUT/lib/lib${lib}.a" "$STUB_O"
+    "$CLANG_BIN" -target "aarch64-linux-android${API_NUM}" -shared -fPIC -Wl,-soname,"lib${lib}.so" "$STUB_C" -o "$OUT/lib/lib${lib}.so"
   done
   rm -f "$STUB_C" "$STUB_O"
 fi
