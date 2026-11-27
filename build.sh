@@ -60,7 +60,6 @@ fi
 # Compilar libxshmfence y libxcb reales para Android aarch64 en work/android-deps-x11
 if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFIX}/lib/libxshmfence.so" ]; then
   NDK_BIN_DIR="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-  SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
   TARGET_TRIPLE="aarch64-linux-android${ANDROID_API}"
   NDK_CC="${NDK_BIN_DIR}/${TARGET_TRIPLE}-clang"
   NDK_CXX="${NDK_BIN_DIR}/${TARGET_TRIPLE}-clang++"
@@ -68,9 +67,7 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
   NDK_RANLIB="${NDK_BIN_DIR}/llvm-ranlib"
   NDK_LD="${NDK_BIN_DIR}/ld.lld"
 
-  X11_INC_FLAGS="--sysroot=${SYSROOT} -I/usr/include"
-  [ -d "${X11_INCLUDE:-}" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_INCLUDE}"
-  [ -d "${X11_ALT_INCLUDE:-}" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_ALT_INCLUDE}"
+  X11_INC_FLAGS="-I/usr/include"
   [ -d "${X11_SHIMS_INCLUDE:-}/include" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_SHIMS_INCLUDE}/include"
 
   X11_CFLAGS="-fPIC -Wno-implicit-function-declaration -Wno-implicit-int -Wno-error=implicit-function-declaration"
@@ -86,7 +83,7 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
     CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
       CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" --enable-shared --disable-static || {
-      tail -n 30 config.log >&2 || true
+      grep -n -C 8 "error:" config.log >&2 || true
       exit 1
     }
     make -j"${PANVK_JOBS:-$(nproc)}"
@@ -102,7 +99,7 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
       PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" \
       --enable-shared --disable-static --disable-devel-docs --without-doxygen || {
-      tail -n 30 config.log >&2 || true
+      grep -n -C 8 "error:" config.log >&2 || true
       exit 1
     }
     make -j"${PANVK_JOBS:-$(nproc)}"
