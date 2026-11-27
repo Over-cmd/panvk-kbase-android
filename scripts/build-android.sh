@@ -81,16 +81,17 @@ for key in ("c_link_args", "cpp_link_args", "c_args", "cpp_args"):
 
 x11_libs = []
 if os.path.isdir(x11_libdir):
-    for libname, flag in [
-        ("libxcb.so", "-lxcb"),
-        ("libxcb-randr.so", "-lxcb-randr"),
-        ("libxcb-shm.so", "-lxcb-shm"),
-        ("libxshmfence.so", "-lxshmfence"),
-        ("libXau.so", "-lXau"),
-        ("libXdmcp.so", "-lXdmcp"),
+    for libname in [
+        "libxcb.so",
+        "libxcb-randr.so",
+        "libxcb-shm.so",
+        "libxshmfence.so",
+        "libXau.so",
+        "libXdmcp.so",
     ]:
-        if os.path.exists(os.path.join(x11_libdir, libname)):
-            x11_libs.append(flag)
+        full = os.path.join(x11_libdir, libname)
+        if os.path.exists(full):
+            x11_libs.append(full)
 
 base_c_links = [f"-L{x11_libdir}"]
 if os.path.isdir(os.path.join(spirv_prefix, "lib")):
@@ -166,7 +167,12 @@ if replacements:
                     open(fp, "w").write(new_data)
 EOF
 fi
-ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: ninja (log $LOG)" >&2; exit 1; }
+ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || {
+  grep -n -C 5 "FAILED:" "$LOG" 2>/dev/null || true
+  tail -n 25 "$LOG"
+  echo "BUILD-FAIL: ninja (log $LOG)" >&2
+  exit 1
+}
 SO="$(find "$BDIR" -name libvulkan_panfrost.so | head -n1)"
 [ -n "$SO" ] || { echo "BUILD-FAIL: libvulkan_panfrost.so not produced" >&2; exit 1; }
 cp "$SO" "$DDIR/"
