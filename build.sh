@@ -25,6 +25,8 @@ export ANDROID_SPIRV_TOOLS_PREFIX="${ANDROID_SPIRV_PREFIX}"
 export ANDROID_PKG_CONFIG_PATH="${ANDROID_SPIRV_PREFIX}/lib/pkgconfig${ANDROID_PKG_CONFIG_PATH:+:${ANDROID_PKG_CONFIG_PATH}}"
 
 ANDROID_X11_PREFIX="${ROOT_DIR}/work/android-deps-x11"
+export ANDROID_X11_PREFIX
+export X11_PREFIX="${ANDROID_X11_PREFIX}"
 
 if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
   export PATH="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin:${PATH}"
@@ -50,6 +52,7 @@ if command -v apt-get >/dev/null 2>&1; then
     libpthread-stubs0-dev \
     libbsd-dev \
     libxau-dev \
+    libxdmcp-dev \
     libxcb1-dev \
     libx11-dev \
     libxshmfence-dev \
@@ -59,8 +62,11 @@ if command -v apt-get >/dev/null 2>&1; then
   sudo apt-get install -y -qq python3-xcbgen 2>/dev/null || true
 fi
 
-# Compilar libXau, libxshmfence y libxcb reales para Android aarch64 en work/android-deps-x11
-if [ ! -f "${ANDROID_X11_PREFIX}/lib/libXau.so" ] || [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFIX}/lib/libxshmfence.so" ]; then
+# Compilar libXau, libXdmcp, libxshmfence y libxcb reales para Android aarch64 en work/android-deps-x11
+if [ ! -f "${ANDROID_X11_PREFIX}/lib/libXau.so" ] || \
+   [ ! -f "${ANDROID_X11_PREFIX}/lib/libXdmcp.so" ] || \
+   [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || \
+   [ ! -f "${ANDROID_X11_PREFIX}/lib/libxshmfence.so" ]; then
   NDK_BIN_DIR="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
   TARGET_TRIPLE="aarch64-linux-android${ANDROID_API}"
   NDK_CC="${NDK_BIN_DIR}/${TARGET_TRIPLE}-clang"
@@ -114,6 +120,21 @@ EOF
     make install
   )
 
+  git clone --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxdmcp.git "$X11_SRC_DIR/libxdmcp"
+  (
+    cd "$X11_SRC_DIR/libxdmcp"
+    autoreconf -fiv
+    CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
+      CPPFLAGS="$X11_INC_FLAGS" CFLAGS="$X11_CFLAGS" LDFLAGS="$X11_LDFLAGS" \
+      ac_cv_c_undeclared_builtin_options="none needed" \
+      ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" --enable-shared --disable-static --disable-docs || {
+      grep -n -C 25 "cannot detect" config.log >&2 || true
+      exit 1
+    }
+    make -j"${PANVK_JOBS:-$(nproc)}"
+    make install
+  )
+
   git clone --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxshmfence.git "$X11_SRC_DIR/libxshmfence"
   (
     cd "$X11_SRC_DIR/libxshmfence"
@@ -160,6 +181,8 @@ EOF
   # Asegurar que las cabeceras de X11/XCB queden disponibles en ${ANDROID_X11_PREFIX}/include
   "${ROOT_DIR}/scripts/prepare-x11-headers.sh" "$ANDROID_X11_PREFIX" || true
 fi
+
+export ANDROID_PKG_CONFIG_PATH="${ANDROID_X11_PREFIX}/lib/pkgconfig:${ANDROID_PKG_CONFIG_PATH}"
 
 SRC_DIR="${RUNNER_TEMP:-/tmp}/spirv-tools-src"
 if [ ! -d "$SRC_DIR/.git" ]; then
