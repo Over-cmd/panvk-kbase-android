@@ -34,24 +34,38 @@ DEPS_PCDIR="$ROOT/work/android-deps/lib/pkgconfig"
 # X11 WSI: headers + pkg-config only, libxcb & co. are dlopened at runtime (csf-v11/083).
 X11_PCDIR="$ROOT/work/android-deps-x11/lib/pkgconfig"
 [ -f "$X11_PCDIR/xcb.pc" ] || "$ROOT/scripts/prepare-x11-headers.sh" "$ROOT/work/android-deps-x11" >&2
+SPIRV_PREFIX="${ANDROID_SPIRV_TOOLS_PREFIX:-/usr/local/android-aarch64}"
+SPIRV_PCDIR="$SPIRV_PREFIX/lib/pkgconfig"
 if [ -d "$DEPS_PCDIR" ]; then
-  python3 - "$BDIR.cross.ini" "$DEPS_PCDIR" "$X11_PCDIR" <<'EOF'
-import sys
-p, d, x = sys.argv[1], sys.argv[2], sys.argv[3]
+  python3 - "$BDIR.cross.ini" "$DEPS_PCDIR" "$X11_PCDIR" "$SPIRV_PCDIR" <<'EOF'
+import os, sys
+p, d, x, s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 t = open(p).read()
-line = f"pkg_config_libdir = ['{d}', '{x}']\n"
+dirs = [d, x] + ([s] if os.path.isdir(s) else [])
+quoted = ", ".join(f"'{item}'" for item in dirs)
+line = f"pkg_config_libdir = [{quoted}]\n"
 assert '[properties]' in t
 t = t.replace('[properties]', '[properties]\n' + line, 1)
 open(p, 'w').write(t)
 EOF
 fi
-export PKG_CONFIG_PATH="$DEPS_PCDIR:${PKG_CONFIG_PATH:-}"
+if [ -d "$SPIRV_PCDIR" ]; then
+  export PKG_CONFIG_PATH="$SPIRV_PCDIR:$DEPS_PCDIR:${PKG_CONFIG_PATH:-}"
+else
+  export PKG_CONFIG_PATH="$DEPS_PCDIR:${PKG_CONFIG_PATH:-}"
+fi
 mkdir -p "$DDIR"
 # Legacy opt-in: PANVK_KBASE_RELEASE=<name> sets the release string reported in driverInfo on trees up to
 # rc5g-114 (patch csf-v11/099: "PanVK-kbase <name> (Mesa ...)"). Trees with jm-v7-wip 0120 report
 # driverInfo like upstream Mesa ("Mesa <VERSION> (git-<sha>)") and ignore the define.
 if [ -n "${PANVK_KBASE_RELEASE:-}" ]; then
   printf "\n[built-in options]\nc_args = ['-DPANVK_KBASE_RELEASE=\"%s\"']\ncpp_args = ['-DPANVK_KBASE_RELEASE=\"%s\"']\n" "$PANVK_KBASE_RELEASE" "$PANVK_KBASE_RELEASE" >> "$BDIR.cross.ini"
+fi
+if [ -d "$SPIRV_PREFIX/lib" ]; then
+  if ! grep -q '^\[built-in options\]' "$BDIR.cross.ini"; then
+    printf "\n[built-in options]\n" >> "$BDIR.cross.ini"
+  fi
+  printf "c_link_args = ['-L%s/lib']\ncpp_link_args = ['-L%s/lib', '-static-libstdc++']\n" "$SPIRV_PREFIX" "$SPIRV_PREFIX" >> "$BDIR.cross.ini"
 fi
 # Host codegen tools (mesa_clc, vtn_bindgen2, panfrost_compile) must come from a native build:
 # default is derived from MESA (see bootstrap-host-tools.sh) and HOST_TOOLS overrides it.
@@ -67,13 +81,20 @@ if [ -f "$BDIR/build.ninja" ]; then
 fi
 printf '%s' "$REL_NOW" > "$BDIR/.panvk_release"
 LOG="$BDIR.log"; RECONF=""; [ -f "$BDIR/build.ninja" ] && RECONF="--reconfigure"
-meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
-  -Dbuildtype=release -Dplatforms=android,x11 -Dandroid-stub=true -Dandroid-strict=false \
-  -Dgallium-drivers= -Dvulkan-drivers=panfrost -Dpanfrost-kmds=kbase \
-  -Dmesa-clc=system -Dprecomp-compiler=system -Dxlib-lease=disabled \
-  -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false \
-  -Dglx=disabled -Dgbm=disabled -Dlibunwind=disabled -Dzstd=disabled \
-  -Dcpp_link_args=-static-libstdc++ >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
+MESON_ARGS="
+  -Dbuildtype=release -Dplatforms=android,x11 -Dandroid-stub=true -Dandroid-strict=false
+  -Dgallium-drivers= -Dvulkan-drivers=panfrost -Dpanfrost-kmds=kbase
+  -Dmesa-clc=system -Dprecomp-compiler=system -Dxlib-lease=disabled
+  -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false
+  -Dglx=disabled -Dgbm=disabled -Dlibunwind=disabled -Dzstd=disabled
+"
+if [ -d "$SPIRV_PREFIX/lib" ]; then
+  meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
+    $MESON_ARGS >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
+else
+  meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
+    $MESON_ARGS -Dcpp_link_args=-static-libstdc++ >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
+fi
 ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: ninja (log $LOG)" >&2; exit 1; }
 SO="$(find "$BDIR" -name libvulkan_panfrost.so | head -n1)"
 [ -n "$SO" ] || { echo "BUILD-FAIL: libvulkan_panfrost.so not produced" >&2; exit 1; }
