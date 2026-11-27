@@ -30,6 +30,9 @@ if command -v apt-get >/dev/null 2>&1; then
     python3-packaging \
     glslang-tools \
     git \
+    libxcb1-dev \
+    libx11-dev \
+    libxshmfence-dev \
     "libllvmspirvlib-${LLVM_VER}-dev" \
     "libclang-${LLVM_VER}-dev" \
     "libclang-cpp${LLVM_VER}-dev"
