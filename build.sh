@@ -62,6 +62,20 @@ if command -v apt-get >/dev/null 2>&1; then
   sudo apt-get install -y -qq python3-xcbgen 2>/dev/null || true
 fi
 
+# Reconstruir android-deps-x11 si falta alguna librería o si libxcb.so no exporta xcb_depth_visuals_iterator
+REBUILD_X11=0
+for lib in libXau.so libXdmcp.so libxcb.so libxshmfence.so; do
+  [ -f "${ANDROID_X11_PREFIX}/lib/${lib}" ] || REBUILD_X11=1
+done
+if [ "$REBUILD_X11" -eq 0 ]; then
+  if ! llvm-nm -D "${ANDROID_X11_PREFIX}/lib/libxcb.so" 2>/dev/null | grep -q "xcb_depth_visuals_iterator"; then
+    REBUILD_X11=1
+  fi
+fi
+if [ "$REBUILD_X11" -eq 1 ]; then
+  rm -rf "${ANDROID_X11_PREFIX}"
+fi
+
 # Compilar libXau, libXdmcp, libxshmfence y libxcb reales para Android aarch64 en work/android-deps-x11
 if [ ! -f "${ANDROID_X11_PREFIX}/lib/libXau.so" ] || \
    [ ! -f "${ANDROID_X11_PREFIX}/lib/libXdmcp.so" ] || \
@@ -239,6 +253,10 @@ fi
 
 ./scripts/fetch-mesa.sh
 ./scripts/apply-patches.sh --profile "${PROFILE}"
-./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
+if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
+  echo "=== Diagnóstico de enlace en build/android-bionic.log ==="
+  grep -n -C 15 "undefined symbol:" "${ROOT_DIR}/build/android-bionic.log" 2>/dev/null || tail -n 30 "${ROOT_DIR}/build/android-bionic.log" || true
+  exit 1
+fi
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
 ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
