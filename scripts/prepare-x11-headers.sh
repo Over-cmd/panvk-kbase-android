@@ -80,4 +80,18 @@ for pc in xcb xcb-randr xcb-dri3 xcb-present xcb-shm xcb-sync xcb-xfixes x11-xcb
   printf 'prefix=%s\nincludedir=${prefix}/include\nName: %s\nDescription: headers only (runtime dlopen)\nVersion: %s\nCflags: -I${includedir}\nLibs:\n' \
     "$OUT" "$pc" "$v" > "$OUT/lib/pkgconfig/$pc.pc"
 done
+
+mkdir -p "$OUT/lib"
+NDK_BIN_DIR="$(ls -d "${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME:-${ANDROID_HOME:-/opt/android-sdk}/ndk}}"/*/toolchains/llvm/prebuilt/linux-x86_64/bin 2>/dev/null | sort -V | tail -n1)"
+if [ -n "$NDK_BIN_DIR" ] && [ -x "$NDK_BIN_DIR/aarch64-linux-android${ANDROID_API:-30}-clang" ] && [ -x "$NDK_BIN_DIR/llvm-ar" ]; then
+  STUB_C="$(mktemp /tmp/x11_stub_XXXXXX.c)"
+  STUB_O="$(mktemp /tmp/x11_stub_XXXXXX.o)"
+  printf 'int __panvk_x11_dlopen_stub(void) { return 0; }\n' > "$STUB_C"
+  "$NDK_BIN_DIR/aarch64-linux-android${ANDROID_API:-30}-clang" -target "aarch64-linux-android${ANDROID_API:-30}" -fPIC -c "$STUB_C" -o "$STUB_O"
+  for lib in xcb xcb-randr xcb-dri3 xcb-present xcb-shm xcb-sync xcb-xfixes X11-xcb xshmfence; do
+    "$NDK_BIN_DIR/llvm-ar" rcs "$OUT/lib/lib${lib}.a" "$STUB_O"
+  done
+  rm -f "$STUB_C" "$STUB_O"
+fi
+
 echo "OK x11 headers=$OUT xcb=$XCB"
