@@ -1,55 +1,76 @@
-#!/bin/sh
-set -eu
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${1:-$ROOT/work/android-deps-x11}"
-INC="${X11_INCLUDE:-/usr/include}"
-ALT_INC="${X11_ALT_INCLUDE:-/usr/include/x86_64-linux-gnu}"
+#!/usr/bin/env bash
+set -euo pipefail
 
-find_hdr() {
-  rel="$1"
-  if [ -f "$INC/$rel" ]; then
-    printf '%s\n' "$INC/$rel"
-  elif [ -n "$ALT_INC" ] && [ -f "$ALT_INC/$rel" ]; then
-    printf '%s\n' "$ALT_INC/$rel"
-  else
-    return 1
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="${SCRIPT_DIR}"
+
+PROFILE="${PROFILE:-g52-v7-jm}"
+LLVM_VER="${LLVM_VER:-21}"
+ANDROID_API="${ANDROID_API:-30}"
+
+export CC="clang-${LLVM_VER}"
+export CXX="clang++-${LLVM_VER}"
+export LD="ld.lld-${LLVM_VER}"
+export LLVM_CONFIG="llvm-config-${LLVM_VER}"
+export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+export CMAKE_PREFIX_PATH="/usr/local${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-/usr/local/lib/android/sdk/ndk/27.3.13750724}}"
+export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+export X11_INCLUDE="${X11_INCLUDE:-/usr/include}"
+export X11_ALT_INCLUDE="${X11_ALT_INCLUDE:-/usr/include/x86_64-linux-gnu}"
+export X11_SHIMS_INCLUDE="${X11_SHIMS_INCLUDE:-${ROOT_DIR}/shims}"
+
+if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
+  export PATH="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin:${PATH}"
+fi
+
+if command -v apt-get >/dev/null 2>&1; then
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq \
+    libdrm-dev \
+    pkg-config \
+    ninja-build \
+    cmake \
+    python3-mako \
+    python3-yaml \
+    python3-packaging \
+    glslang-tools \
+    git \
+    libxcb1-dev \
+    libx11-dev \
+    libxshmfence-dev \
+    "libllvmspirvlib-${LLVM_VER}-dev" \
+    "libclang-${LLVM_VER}-dev" \
+    "libclang-cpp${LLVM_VER}-dev"
+fi
+
+if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
+  SRC_DIR="${RUNNER_TEMP:-/tmp}/spirv-tools-src"
+  BUILD_DIR="${RUNNER_TEMP:-/tmp}/spirv-tools-build"
+  rm -rf "$SRC_DIR" "$BUILD_DIR"
+  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git "$SRC_DIR"
+  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git "$SRC_DIR/external/spirv-headers"
+  cmake -G Ninja -S "$SRC_DIR" -B "$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DSPIRV_WERROR=OFF \
+    -DSPIRV-Headers_SOURCE_DIR="$SRC_DIR/external/spirv-headers"
+  ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BUILD_DIR"
+  sudo ninja -C "$BUILD_DIR" install
+  sudo ldconfig
+fi
+
+if ! command -v meson >/dev/null 2>&1; then
+  if command -v pip3 >/dev/null 2>&1; then
+    pip3 install --break-system-packages -q meson || pip3 install -q meson
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y -qq meson
   fi
-}
-
-XCB_H="$(find_hdr "xcb/xcb.h" || true)"
-XLIB_XCB_H="$(find_hdr "X11/Xlib-xcb.h" || true)"
-SHMFENCE_H="$(find_hdr "X11/xshmfence.h" || true)"
-
-if [ -z "$XCB_H" ] || [ -z "$XLIB_XCB_H" ] || [ -z "$SHMFENCE_H" ]; then
-  echo "need host libxcb, libx11 and libxshmfence headers under $INC or $ALT_INC" >&2
-  echo "  xcb/xcb.h: ${XCB_H:-MISSING}" >&2
-  echo "  X11/Xlib-xcb.h: ${XLIB_XCB_H:-MISSING}" >&2
-  echo "  X11/xshmfence.h: ${SHMFENCE_H:-MISSING}" >&2
-  find /usr/include -maxdepth 3 \( -name "xcb.h" -o -name "Xlib-xcb.h" -o -name "*shmfence*.h" \) 2>/dev/null >&2 || true
-  exit 1
+  export PATH="${HOME}/.local/bin:${PATH}"
 fi
 
-rm -rf "$OUT"
-mkdir -p "$OUT/include/xcb" "$OUT/include/X11" "$OUT/lib/pkgconfig"
-
-if [ -d "$INC/xcb" ]; then
-  cp -r "$INC/xcb/." "$OUT/include/xcb/"
-elif [ -d "$ALT_INC/xcb" ]; then
-  cp -r "$ALT_INC/xcb/." "$OUT/include/xcb/"
-fi
-
-if [ -d "$INC/X11" ]; then
-  cp -r "$INC/X11/." "$OUT/include/X11/"
-fi
-
-cp -f "$XLIB_XCB_H" "$OUT/include/X11/Xlib-xcb.h"
-cp -f "$SHMFENCE_H" "$OUT/include/X11/xshmfence.h"
-
-ver() { pkg-config --modversion "$1" 2>/dev/null || echo "$2"; }
-XCB="$(ver xcb 1.17.0)"
-for pc in xcb xcb-randr xcb-dri3 xcb-present xcb-shm xcb-sync xcb-xfixes x11-xcb xshmfence; do
-  case $pc in x11-xcb) v="$(ver x11-xcb 1.8.12)";; xshmfence) v="$(ver xshmfence 1.3.3)";; *) v="$XCB";; esac
-  printf 'prefix=%s\nincludedir=${prefix}/include\nName: %s\nDescription: headers only (runtime dlopen)\nVersion: %s\nCflags: -I${includedir}\nLibs:\n' \
-    "$OUT" "$pc" "$v" > "$OUT/lib/pkgconfig/$pc.pc"
-done
-echo "OK x11 headers=$OUT xcb=$XCB"
+./scripts/fetch-mesa.sh
+./scripts/apply-patches.sh --profile "${PROFILE}"
+./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
+./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
+./scripts/package-android-adpkg.sh --profile "${PROFILE}"
