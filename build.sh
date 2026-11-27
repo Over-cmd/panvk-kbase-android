@@ -25,7 +25,9 @@ if command -v apt-get >/dev/null 2>&1; then
     python3-mako \
     python3-yaml \
     python3-packaging \
-    glslang-tools
+    glslang-tools \
+    "libllvmspirvlib-${LLVM_VER}-dev" || \
+  sudo apt-get install -y -qq libllvmspirvlib-dev || true
 fi
 
 if ! command -v meson >/dev/null 2>&1; then
