@@ -200,9 +200,9 @@ echo "=== Verificando símbolos XCB en ${ANDROID_X11_PREFIX}/lib/libxcb.so ==="
 llvm-nm -D "${ANDROID_X11_PREFIX}/lib/libxcb.so" 2>/dev/null | grep -E "xcb_depth_visuals_iterator|xcb_visualtype_next" || true
 
 unset PYTHONPATH || true
+unset LIBRARY_PATH || true
+unset LDFLAGS || true
 export ANDROID_PKG_CONFIG_PATH="${ANDROID_X11_PREFIX}/lib/pkgconfig:${ANDROID_PKG_CONFIG_PATH}"
-export LIBRARY_PATH="${ANDROID_X11_PREFIX}/lib:${ANDROID_SPIRV_PREFIX}/lib${LIBRARY_PATH:+:${LIBRARY_PATH}}"
-export LDFLAGS="-L${ANDROID_X11_PREFIX}/lib -L${ANDROID_SPIRV_PREFIX}/lib ${LDFLAGS:-}"
 
 SRC_DIR="${RUNNER_TEMP:-/tmp}/spirv-tools-src"
 if [ ! -d "$SRC_DIR/.git" ]; then
