@@ -254,8 +254,10 @@ fi
 ./scripts/fetch-mesa.sh
 ./scripts/apply-patches.sh --profile "${PROFILE}"
 if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-  echo "=== Diagnóstico de enlace en build/android-bionic.log ==="
-  grep -n -C 15 "undefined symbol:" "${ROOT_DIR}/build/android-bionic.log" 2>/dev/null || tail -n 30 "${ROOT_DIR}/build/android-bionic.log" || true
+  echo "=== Últimas 60 líneas de build/android-bionic.log ==="
+  tail -n 60 "${ROOT_DIR}/build/android-bionic.log" 2>/dev/null || true
+  echo "=== Errores filtrados en build/android-bionic.log ==="
+  grep -n -E "ERROR:|FAILED:|error:|undefined symbol:|undefined reference" "${ROOT_DIR}/build/android-bionic.log" 2>/dev/null | grep -v "Wl,-v" | tail -n 30 || true
   exit 1
 fi
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
