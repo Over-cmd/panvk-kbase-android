@@ -5,7 +5,6 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
     /* True for the CSF flavour of kbase (arch >= 10), false for JM. */
     bool is_csf;
  
-+   unsigned atom_stride;
 +   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */
 +   bool atom_seq_nr;
 +
@@ -88,43 +87,19 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
     /* Initialise the EXEC_VA zone so that GPU-executable allocations
      * (shader BOs) are possible.  4G of executable VA (0x100000 pages)
      * matches what panfork uses.  On CSF uAPI >= 1.9 the zone is set up
-@@ -668,6 +728,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
-       return NULL;
+@@ -658,12 +718,16 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+    struct kbase_kmod_dev *kbase_dev =
+       pan_kmod_alloc(allocator, sizeof(*kbase_dev));
+    if (!kbase_dev) {
+       mesa_loge("kbase: failed to allocate kbase_kmod_dev");
+       free(props_buf);
+       goto err_unmap_tracking;
     }
  
 +   if (!is_csf) {
-+      kbase_dev->atom_stride = atom_stride;
 +      kbase_dev->atom_seq_nr = atom_seq_nr;
 +   }
 +
     /* Report the kernel uAPI version from the handshake (the caller can't
      * use drmGetVersion() on a kbase fd, so drv_info is either NULL or a
      * zeroed fallback). */
-@@ -1220,8 +1285,12 @@ kbase_kmod_job_submit(struct pan_kmod_dev *dev, uint64_t jc,
-       atom.core_req |= BASE_JD_REQ_EXTERNAL_RESOURCES;
-    }
- 
-+   struct {
-+      __u64 seq_nr;
-+      struct base_jd_atom atom;
-+   } w = { .atom = atom };
-    struct kbase_ioctl_job_submit sub = {
--      .addr = (uintptr_t)&atom,
-+      .addr = kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom,
-       .nr_atoms = 1,
-       .stride = kd->atom_stride,
-    };
-@@ -1267,8 +1336,12 @@ kbase_kmod_job_submit_dep(struct pan_kmod_dev *dev, uint64_t jc,
-       atom.pre_dep[i].dependency_type = use ? types[i] : 0;
-    }
- 
-+   struct {
-+      __u64 seq_nr;
-+      struct base_jd_atom atom;
-+   } w = { .atom = atom };
-    struct kbase_ioctl_job_submit sub = {
--      .addr = (uintptr_t)&atom,
-+      .addr = kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom,
-       .nr_atoms = 1,
-       .stride = kd->atom_stride,
-    };
