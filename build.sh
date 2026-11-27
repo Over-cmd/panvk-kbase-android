@@ -65,6 +65,11 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
   NDK_RANLIB="${NDK_BIN_DIR}/llvm-ranlib"
   NDK_LD="${NDK_BIN_DIR}/ld.lld"
 
+  X11_INC_FLAGS="-I/usr/include"
+  [ -d "${X11_INCLUDE:-}" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_INCLUDE}"
+  [ -d "${X11_ALT_INCLUDE:-}" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_ALT_INCLUDE}"
+  [ -d "${X11_SHIMS_INCLUDE:-}/include" ] && X11_INC_FLAGS="$X11_INC_FLAGS -I${X11_SHIMS_INCLUDE}/include"
+
   X11_SRC_DIR="${RUNNER_TEMP:-/tmp}/android-x11-src"
   rm -rf "$X11_SRC_DIR"
   mkdir -p "$X11_SRC_DIR" "${ANDROID_X11_PREFIX}/lib/pkgconfig"
@@ -74,6 +79,7 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
     cd "$X11_SRC_DIR/libxshmfence"
     autoreconf -fiv
     CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
+      CPPFLAGS="$X11_INC_FLAGS" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" --enable-shared --disable-static
     make -j"${PANVK_JOBS:-$(nproc)}"
     make install
@@ -84,6 +90,7 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
     cd "$X11_SRC_DIR/libxcb"
     autoreconf -fiv
     CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
+      CPPFLAGS="$X11_INC_FLAGS" \
       PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" \
       --enable-shared --disable-static --disable-devel-docs --without-doxygen
