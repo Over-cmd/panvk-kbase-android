@@ -31,7 +31,7 @@ sed "s/aarch64-linux-android[0-9]*-clang/$CC_TRIPLE/g" "$ROOT/meson/android-aarc
 # files (zlib, libudev, ...) can never leak host paths into the link.
 DEPS_PCDIR="$ROOT/work/android-deps/lib/pkgconfig"
 [ -f "$DEPS_PCDIR/libdrm.pc" ] || "$ROOT/scripts/build-android-deps.sh" --api "$API" --ndk "$NDK" >&2
-# X11 WSI: headers + pkg-config only, libxcb & co. are dlopened at runtime (csf-v11/083).
+# X11 WSI: headers + pkg-config + link against aarch64 libxcb / libxshmfence when built.
 X11_DIR="$ROOT/work/android-deps-x11"
 X11_PCDIR="$X11_DIR/lib/pkgconfig"
 X11_LIBDIR="$X11_DIR/lib"
@@ -68,12 +68,17 @@ fi
 if ! grep -q '^\[built-in options\]' "$BDIR.cross.ini"; then
   printf "\n[built-in options]\n" >> "$BDIR.cross.ini"
 fi
+
+X11_LIBS=""
+[ -f "$X11_LIBDIR/libxcb.so" ] && X11_LIBS="$X11_LIBS, '-lxcb'"
+[ -f "$X11_LIBDIR/libxshmfence.so" ] && X11_LIBS="$X11_LIBS, '-lxshmfence'"
+
 if [ -d "$SPIRV_PREFIX/lib" ]; then
-  printf "c_link_args = ['-L%s', '-L%s/lib']\ncpp_link_args = ['-L%s', '-L%s/lib', '-static-libstdc++']\n" \
-    "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LIBDIR" "$SPIRV_PREFIX" >> "$BDIR.cross.ini"
+  printf "c_link_args = ['-L%s', '-L%s/lib'%s]\ncpp_link_args = ['-L%s', '-L%s/lib', '-static-libstdc++'%s]\n" \
+    "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LIBS" "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LIBS" >> "$BDIR.cross.ini"
 else
-  printf "c_link_args = ['-L%s']\ncpp_link_args = ['-L%s', '-static-libstdc++']\n" \
-    "$X11_LIBDIR" "$X11_LIBDIR" >> "$BDIR.cross.ini"
+  printf "c_link_args = ['-L%s'%s]\ncpp_link_args = ['-L%s', '-static-libstdc++'%s]\n" \
+    "$X11_LIBDIR" "$X11_LIBS" "$X11_LIBDIR" "$X11_LIBS" >> "$BDIR.cross.ini"
 fi
 # Host codegen tools (mesa_clc, vtn_bindgen2, panfrost_compile) must come from a native build:
 # default is derived from MESA (see bootstrap-host-tools.sh) and HOST_TOOLS overrides it.
