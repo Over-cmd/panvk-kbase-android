@@ -1,8 +1,4 @@
 #!/bin/sh
-# prepare-x11-headers.sh — header-only X11/XCB pkg-config prefix for the Android X11 WSI.
-# The Android ICD dlopens libxcb & co. at runtime (patch csf-v11/083), so the build
-# needs headers and pkg-config versions only, never target libraries.
-# Usage: ./scripts/prepare-x11-headers.sh [OUT]   (default work/android-deps-x11)
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/work/android-deps-x11}"
@@ -36,27 +32,16 @@ fi
 rm -rf "$OUT"
 mkdir -p "$OUT/include/xcb" "$OUT/include/X11" "$OUT/lib/pkgconfig"
 
-copy_dir_safe() {
-  src="$1"
-  dst="$2"
-  [ -d "$src" ] || return 0
-  if cp -rn "$src/." "$dst/" 2>/dev/null; then
-    return 0
-  fi
-  cp -r "$src/." "$dst/"
-}
-
-copy_dir_safe "$INC/xcb" "$OUT/include/xcb"
-if [ -n "$ALT_INC" ]; then
-  copy_dir_safe "$ALT_INC/xcb" "$OUT/include/xcb"
+if [ -d "$INC/xcb" ]; then
+  cp -r "$INC/xcb/." "$OUT/include/xcb/"
+elif [ -d "$ALT_INC/xcb" ]; then
+  cp -r "$ALT_INC/xcb/." "$OUT/include/xcb/"
 fi
 
-copy_dir_safe "$INC/X11" "$OUT/include/X11"
-if [ -n "$ALT_INC" ]; then
-  copy_dir_safe "$ALT_INC/X11" "$OUT/include/X11"
+if [ -d "$INC/X11" ]; then
+  cp -r "$INC/X11/." "$OUT/include/X11/"
 fi
 
-cp -f "$XCB_H" "$OUT/include/xcb/xcb.h"
 cp -f "$XLIB_XCB_H" "$OUT/include/X11/Xlib-xcb.h"
 cp -f "$SHMFENCE_H" "$OUT/include/X11/xshmfence.h"
 
