@@ -61,11 +61,13 @@ mkdir -p "$DDIR"
 if [ -n "${PANVK_KBASE_RELEASE:-}" ]; then
   printf "\n[built-in options]\nc_args = ['-DPANVK_KBASE_RELEASE=\"%s\"']\ncpp_args = ['-DPANVK_KBASE_RELEASE=\"%s\"']\n" "$PANVK_KBASE_RELEASE" "$PANVK_KBASE_RELEASE" >> "$BDIR.cross.ini"
 fi
+X11_LIBDIR="$ROOT/work/android-deps-x11/lib"
 if [ -d "$SPIRV_PREFIX/lib" ]; then
   if ! grep -q '^\[built-in options\]' "$BDIR.cross.ini"; then
     printf "\n[built-in options]\n" >> "$BDIR.cross.ini"
   fi
-  printf "c_link_args = ['-L%s/lib']\ncpp_link_args = ['-L%s/lib', '-static-libstdc++']\n" "$SPIRV_PREFIX" "$SPIRV_PREFIX" >> "$BDIR.cross.ini"
+  printf "c_link_args = ['-L%s', '-L%s/lib']\ncpp_link_args = ['-L%s', '-L%s/lib', '-static-libstdc++']\n" \
+    "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LIBDIR" "$SPIRV_PREFIX" >> "$BDIR.cross.ini"
 fi
 # Host codegen tools (mesa_clc, vtn_bindgen2, panfrost_compile) must come from a native build:
 # default is derived from MESA (see bootstrap-host-tools.sh) and HOST_TOOLS overrides it.
