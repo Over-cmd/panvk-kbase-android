@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "=== Running build.sh (X11 headers enabled) ==="
+
 PROFILE="${PROFILE:-g52-v7-jm}"
 LLVM_VER="${LLVM_VER:-21}"
 ANDROID_API="${ANDROID_API:-30}"
@@ -36,6 +38,7 @@ if command -v apt-get >/dev/null 2>&1; then
     "libllvmspirvlib-${LLVM_VER}-dev" \
     "libclang-${LLVM_VER}-dev" \
     "libclang-cpp${LLVM_VER}-dev"
+  ls -d /usr/include/X11 /usr/include/xcb /usr/include/xshmfence.h
 fi
 
 if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
