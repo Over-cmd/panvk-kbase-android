@@ -1,18 +1,17 @@
 diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
-@@ -112,6 +112,8 @@ struct kbase_kmod_dev {
-    struct pan_kmod_dev base;
-    int fd;
-    int dma_heap_fd;
-+   unsigned atom_stride;
+@@ -75,6 +75,8 @@ struct kbase_kmod_dev {
+    struct kbase_atom_slot atoms[KBASE_MAX_ATOMS];
+    uint64_t next_atom_number;
+    unsigned atom_stride;
 +   /* Stock base_jd_atom (stride 64): a u64 seq_nr precedes our atom. */
 +   bool atom_seq_nr;
-    bool is_csf;
-    struct kbase_csif_info csif_info;
-    struct {
-@@ -1123,6 +1125,59 @@ kbase_unmap_range(struct kbase_kmod_vm *vm, uint64_t va, size_t size,
-    munmap((void *)(uintptr_t)va, size * nents);
+    uint32_t last_event_code[KBASE_MAX_ATOMS];
+    bool atom_failed[KBASE_MAX_ATOMS];
+    uint64_t last_done_atom_ctx[KBASE_MAX_ATOMS];
+@@ -564,6 +566,59 @@ kbase_probe_atom_stride(int fd)
+    return 64;
  }
  
 +/* Submit one dependency-only atom (number 255) at the given stride and
@@ -46,8 +45,10 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
 +   return true;
 +}
 +
-+/* Bifrost (arch < 9) only: check stride 56 (base_jd_atom_v2), else try
-+ * stride 64 (seq_nr + v2), else keep 56. */
++/* Bifrost (arch < 9) only: the 72-byte probe only tells stock from
++ * MediaTek kbase.  On stock kbase, check that stride 56 (base_jd_atom_v2)
++ * is really accepted, else try 64 (seq_nr + v2, the layout JimVulkan's
++ * mali-panvk uses), so v9 behaviour is unchanged. */
 +static unsigned
 +kbase_check_bifrost_atom_stride(int fd, bool *seq_nr)
 +{
@@ -69,27 +70,51 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
  static struct pan_kmod_dev *
  kbase_kmod_dev_create(int fd, uint32_t flags,
                        UNUSED const struct pan_kmod_driver *drv_info,
-@@ -1215,6 +1270,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+@@ -644,6 +699,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
                  "(tiler heap creation will not work)", strerror(errno));
     }
  
-+   unsigned atom_stride = 56;
 +   bool atom_seq_nr = false;
-+   if (!is_csf && raw_id && pan_arch(raw_id & 0xffffffffu) < 9)
++   if (!is_csf && atom_stride == 56 && raw_id &&
++       pan_arch(raw_id & 0xffffffffu) < 9)
 +      atom_stride = kbase_check_bifrost_atom_stride(fd, &atom_seq_nr);
 +
-    /* Initialise the EXEC_VA zone so that GPU-executable allocations
-     * (shader BOs) are possible. 4G of executable VA (0x100000 pages)
-     * matches what panfork uses. On CSF uAPI >= 1.9 the zone is set up
-@@ -1339,6 +1399,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
-       }
+    struct kbase_kmod_dev *kbase_dev =
+       pan_kmod_alloc(allocator, sizeof(*kbase_dev));
+    if (!kbase_dev) {
+@@ -684,6 +744,7 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+    list_inithead(&kbase_dev->nc_bos);
+    if (!is_csf) {
+       kbase_dev->atom_stride = atom_stride;
++      kbase_dev->atom_seq_nr = atom_seq_nr;
+       simple_mtx_init(&kbase_dev->atoms_lock, mtx_plain);
+       simple_mtx_init(&kbase_dev->atoms_read_lock, mtx_plain);
+    }
+@@ -1220,8 +1281,12 @@ kbase_kmod_job_submit(struct pan_kmod_dev *dev, uint64_t jc,
+       atom.core_req |= BASE_JD_REQ_EXTERNAL_RESOURCES;
     }
  
-+   if (!is_csf) {
-+      kbase_dev->atom_stride = atom_stride;
-+      kbase_dev->atom_seq_nr = atom_seq_nr;
-+   }
-+
-    return &kbase_dev->base;
++   struct {
++      __u64 seq_nr;
++      struct base_jd_atom atom;
++   } w = { .atom = atom };
+    struct kbase_ioctl_job_submit sub = {
+-      .addr = (uintptr_t)&atom,
++      .addr = kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom,
+       .nr_atoms = 1,
+       .stride = kd->atom_stride,
+    };
+@@ -1267,8 +1332,12 @@ kbase_kmod_job_submit_dep(struct pan_kmod_dev *dev, uint64_t jc,
+       atom.pre_dep[i].dependency_type = use ? types[i] : 0;
+    }
  
- err_unmap_tracking:
++   struct {
++      __u64 seq_nr;
++      struct base_jd_atom atom;
++   } w = { .atom = atom };
+    struct kbase_ioctl_job_submit sub = {
+-      .addr = (uintptr_t)&atom,
++      .addr = kd->atom_seq_nr ? (uintptr_t)&w : (uintptr_t)&atom,
+       .nr_atoms = 1,
+       .stride = kd->atom_stride,
+    };
