@@ -37,8 +37,11 @@ if command -v apt-get >/dev/null 2>&1; then
     "libclang-${LLVM_VER}-dev" \
     "libclang-cpp${LLVM_VER}-dev"
 
-  if [ ! -f /usr/include/X11/xshmfence.h ] && [ -f /usr/include/x86_64-linux-gnu/xshmfence.h ]; then
-    sudo ln -sf /usr/include/x86_64-linux-gnu/xshmfence.h /usr/include/X11/xshmfence.h
+  if [ ! -f /usr/include/X11/xshmfence.h ]; then
+    SHMFENCE_HDR="$(find /usr/include -name 'xshmfence.h' -print -quit 2>/dev/null || true)"
+    if [ -n "${SHMFENCE_HDR}" ] && [ -d /usr/include/X11 ]; then
+      sudo ln -sf "${SHMFENCE_HDR}" /usr/include/X11/xshmfence.h
+    fi
   fi
 fi
 
