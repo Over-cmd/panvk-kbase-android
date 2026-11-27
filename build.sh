@@ -24,6 +24,8 @@ ANDROID_SPIRV_PREFIX="${ANDROID_SPIRV_PREFIX:-/usr/local/android-aarch64}"
 export ANDROID_SPIRV_TOOLS_PREFIX="${ANDROID_SPIRV_PREFIX}"
 export ANDROID_PKG_CONFIG_PATH="${ANDROID_SPIRV_PREFIX}/lib/pkgconfig${ANDROID_PKG_CONFIG_PATH:+:${ANDROID_PKG_CONFIG_PATH}}"
 
+ANDROID_X11_PREFIX="${ROOT_DIR}/work/android-deps-x11"
+
 if [ -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
   export PATH="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin:${PATH}"
 fi
@@ -40,12 +42,57 @@ if command -v apt-get >/dev/null 2>&1; then
     python3-packaging \
     glslang-tools \
     git \
+    autoconf \
+    automake \
+    libtool \
+    xutils-dev \
+    xcb-proto \
     libxcb1-dev \
     libx11-dev \
     libxshmfence-dev \
     "libllvmspirvlib-${LLVM_VER}-dev" \
     "libclang-${LLVM_VER}-dev" \
     "libclang-cpp${LLVM_VER}-dev"
+fi
+
+# Compilar libxshmfence y libxcb reales para Android aarch64 en work/android-deps-x11
+if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFIX}/lib/libxshmfence.so" ]; then
+  NDK_BIN_DIR="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+  TARGET_TRIPLE="aarch64-linux-android${ANDROID_API}"
+  NDK_CC="${NDK_BIN_DIR}/${TARGET_TRIPLE}-clang"
+  NDK_CXX="${NDK_BIN_DIR}/${TARGET_TRIPLE}-clang++"
+  NDK_AR="${NDK_BIN_DIR}/llvm-ar"
+  NDK_RANLIB="${NDK_BIN_DIR}/llvm-ranlib"
+  NDK_LD="${NDK_BIN_DIR}/ld.lld"
+
+  X11_SRC_DIR="${RUNNER_TEMP:-/tmp}/android-x11-src"
+  rm -rf "$X11_SRC_DIR"
+  mkdir -p "$X11_SRC_DIR" "${ANDROID_X11_PREFIX}/lib/pkgconfig"
+
+  git clone --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxshmfence.git "$X11_SRC_DIR/libxshmfence"
+  (
+    cd "$X11_SRC_DIR/libxshmfence"
+    autoreconf -fiv
+    CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
+      ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" --enable-shared --disable-static
+    make -j"${PANVK_JOBS:-$(nproc)}"
+    make install
+  )
+
+  git clone --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxcb.git "$X11_SRC_DIR/libxcb"
+  (
+    cd "$X11_SRC_DIR/libxcb"
+    autoreconf -fiv
+    CC="$NDK_CC" CXX="$NDK_CXX" AR="$NDK_AR" RANLIB="$NDK_RANLIB" LD="$NDK_LD" \
+      PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
+      ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" \
+      --enable-shared --disable-static --disable-devel-docs --without-doxygen
+    make -j"${PANVK_JOBS:-$(nproc)}"
+    make install
+  )
+
+  # Asegurar que las cabeceras de X11/XCB queden disponibles en ${ANDROID_X11_PREFIX}/include
+  "${ROOT_DIR}/scripts/prepare-x11-headers.sh" "$ANDROID_X11_PREFIX" || true
 fi
 
 SRC_DIR="${RUNNER_TEMP:-/tmp}/spirv-tools-src"
