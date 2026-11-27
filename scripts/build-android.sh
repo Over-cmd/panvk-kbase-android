@@ -25,19 +25,25 @@ if [ -z "${HOST_TOOLS:-}" ]; then
 fi
 export PATH="$HOST_TOOLS:$NDK_BIN:$PATH"
 CC_TRIPLE="aarch64-linux-android$API-clang"
+
+# Limpiar BDIR y cross.ini previos para que cambios en link_args no queden cacheados
+rm -rf "$BDIR" "$BDIR.cross.ini"
 mkdir -p "$BDIR"
 sed "s/aarch64-linux-android[0-9]*-clang/$CC_TRIPLE/g" "$ROOT/meson/android-aarch64.ini" > "$BDIR.cross.ini"
+
 # Pin target pkg-config to our NDK-built deps prefix so host /usr/lib .pc
 # files (zlib, libudev, ...) can never leak host paths into the link.
 DEPS_PCDIR="$ROOT/work/android-deps/lib/pkgconfig"
 [ -f "$DEPS_PCDIR/libdrm.pc" ] || "$ROOT/scripts/build-android-deps.sh" --api "$API" --ndk "$NDK" >&2
-# X11 WSI: headers + pkg-config + link against aarch64 libxcb / libxshmfence when built.
+
+# X11 WSI: cabeceras + pkg-config + enlace contra libxcb / libxshmfence de aarch64 si existen.
 X11_DIR="$ROOT/work/android-deps-x11"
 X11_PCDIR="$X11_DIR/lib/pkgconfig"
 X11_LIBDIR="$X11_DIR/lib"
 if [ ! -f "$X11_PCDIR/xcb.pc" ] || [ ! -f "$X11_LIBDIR/libxcb.so" ] || [ ! -f "$X11_LIBDIR/libxshmfence.so" ]; then
   "$ROOT/scripts/prepare-x11-headers.sh" "$X11_DIR" >&2
 fi
+
 SPIRV_PREFIX="${ANDROID_SPIRV_TOOLS_PREFIX:-/usr/local/android-aarch64}"
 SPIRV_PCDIR="$SPIRV_PREFIX/lib/pkgconfig"
 if [ -d "$DEPS_PCDIR" ]; then
@@ -59,6 +65,7 @@ else
   export PKG_CONFIG_PATH="$DEPS_PCDIR:${PKG_CONFIG_PATH:-}"
 fi
 mkdir -p "$DDIR"
+
 # Legacy opt-in: PANVK_KBASE_RELEASE=<name> sets the release string reported in driverInfo on trees up to
 # rc5g-114 (patch csf-v11/099: "PanVK-kbase <name> (Mesa ...)"). Trees with jm-v7-wip 0120 report
 # driverInfo like upstream Mesa ("Mesa <VERSION> (git-<sha>)") and ignore the define.
@@ -69,17 +76,24 @@ if ! grep -q '^\[built-in options\]' "$BDIR.cross.ini"; then
   printf "\n[built-in options]\n" >> "$BDIR.cross.ini"
 fi
 
-X11_LIBS=""
-[ -f "$X11_LIBDIR/libxcb.so" ] && X11_LIBS="$X11_LIBS, '-lxcb'"
-[ -f "$X11_LIBDIR/libxshmfence.so" ] && X11_LIBS="$X11_LIBS, '-lxshmfence'"
+X11_LINK_FLAGS=""
+if [ -f "$X11_LIBDIR/libxcb.so" ] || [ -f "$X11_LIBDIR/libxshmfence.so" ] || [ -f "$X11_LIBDIR/libXau.so" ] || [ -f "$X11_LIBDIR/libXdmcp.so" ]; then
+  X11_LINK_FLAGS="', '-Wl,--no-as-needed"
+  [ -f "$X11_LIBDIR/libxcb.so" ] && X11_LINK_FLAGS="$X11_LINK_FLAGS', '-lxcb"
+  [ -f "$X11_LIBDIR/libxshmfence.so" ] && X11_LINK_FLAGS="$X11_LINK_FLAGS', '-lxshmfence"
+  [ -f "$X11_LIBDIR/libXau.so" ] && X11_LINK_FLAGS="$X11_LINK_FLAGS', '-lXau"
+  [ -f "$X11_LIBDIR/libXdmcp.so" ] && X11_LINK_FLAGS="$X11_LINK_FLAGS', '-lXdmcp"
+  X11_LINK_FLAGS="$X11_LINK_FLAGS', '-Wl,--as-needed"
+fi
 
 if [ -d "$SPIRV_PREFIX/lib" ]; then
   printf "c_link_args = ['-L%s', '-L%s/lib'%s]\ncpp_link_args = ['-L%s', '-L%s/lib', '-static-libstdc++'%s]\n" \
-    "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LIBS" "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LIBS" >> "$BDIR.cross.ini"
+    "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LINK_FLAGS" "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LINK_FLAGS" >> "$BDIR.cross.ini"
 else
   printf "c_link_args = ['-L%s'%s]\ncpp_link_args = ['-L%s', '-static-libstdc++'%s]\n" \
-    "$X11_LIBDIR" "$X11_LIBS" "$X11_LIBDIR" "$X11_LIBS" >> "$BDIR.cross.ini"
+    "$X11_LIBDIR" "$X11_LINK_FLAGS" "$X11_LIBDIR" "$X11_LINK_FLAGS" >> "$BDIR.cross.ini"
 fi
+
 # Host codegen tools (mesa_clc, vtn_bindgen2, panfrost_compile) must come from a native build:
 # default is derived from MESA (see bootstrap-host-tools.sh) and HOST_TOOLS overrides it.
 # A reconfigure does not re-read the cross file, so a changed release string would be
