@@ -26,6 +26,7 @@ if command -v apt-get >/dev/null 2>&1; then
     python3-yaml \
     python3-packaging \
     glslang-tools \
+    libspirv-tools-dev \
     "libllvmspirvlib-${LLVM_VER}-dev" || \
   sudo apt-get install -y -qq libllvmspirvlib-dev || true
 fi
