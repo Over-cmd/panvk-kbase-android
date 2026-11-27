@@ -4,13 +4,13 @@ set -euo pipefail
 PROFILE="${PROFILE:-g52-v7-jm}"
 LLVM_VER="${LLVM_VER:-21}"
 ANDROID_API="${ANDROID_API:-30}"
-INSPECT_ONLY="${INSPECT_ONLY:-0}"
 
 export CC="clang-${LLVM_VER}"
 export CXX="clang++-${LLVM_VER}"
 export LD="ld.lld-${LLVM_VER}"
 export LLVM_CONFIG="llvm-config-${LLVM_VER}"
-export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+export CMAKE_PREFIX_PATH="/usr/local${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-/usr/local/lib/android/sdk/ndk/27.3.13750724}}"
 export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
 
@@ -28,7 +28,24 @@ if command -v apt-get >/dev/null 2>&1; then
     python3-yaml \
     python3-packaging \
     glslang-tools \
+    git \
     "libllvmspirvlib-${LLVM_VER}-dev"
+fi
+
+if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
+  SRC_DIR="${RUNNER_TEMP:-/tmp}/spirv-tools-src"
+  BUILD_DIR="${RUNNER_TEMP:-/tmp}/spirv-tools-build"
+  rm -rf "$SRC_DIR" "$BUILD_DIR"
+  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git "$SRC_DIR"
+  git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git "$SRC_DIR/external/spirv-headers"
+  cmake -G Ninja -S "$SRC_DIR" -B "$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DSPIRV_WERROR=OFF \
+    -DSPIRV-Headers_SOURCE_DIR="$SRC_DIR/external/spirv-headers"
+  ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BUILD_DIR"
+  sudo ninja -C "$BUILD_DIR" install
+  sudo ldconfig
 fi
 
 if ! command -v meson >/dev/null 2>&1; then
@@ -42,19 +59,6 @@ fi
 
 ./scripts/fetch-mesa.sh
 ./scripts/apply-patches.sh --profile "${PROFILE}"
-
-if [ -f "work/mesa/meson.build" ]; then
-  echo "=== MESON.BUILD LINES (818-838, 2098-2122) ==="
-  nl -ba work/mesa/meson.build | sed -n '818,838p;2098,2122p' || true
-  echo "=== MESON SPIRV / DRM MATCHES ==="
-  grep -n -C 5 -E "SPIRV-Tools|LLVMSPIRVLib|llvmspirvlib|spirv_tools|dep_libdrm" work/mesa/meson.build work/mesa/meson_options.txt 2>/dev/null || true
-fi
-
-if [ "${INSPECT_ONLY}" = "1" ]; then
-  echo "INSPECT_ONLY=1: stopping before build-android.sh"
-  exit 0
-fi
-
 ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
 ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
