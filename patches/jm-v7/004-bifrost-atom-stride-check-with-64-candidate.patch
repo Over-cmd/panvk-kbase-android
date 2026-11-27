@@ -11,10 +11,30 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
     /* CSF interface information (CSF only), queried from
      * KBASE_IOCTL_CS_GET_GLB_IFACE and stored in the panthor uAPI layout
      * so CSF-generic code can consume either backend. */
-@@ -564,6 +566,59 @@ kbase_kmod_alias_destroy(struct pan_kmod_dev *dev, uint64_t va, uint64_t size,
+@@ -564,6 +566,73 @@ kbase_kmod_alias_destroy(struct pan_kmod_dev *dev, uint64_t va, uint64_t size,
     munmap((void *)(uintptr_t)va, size * nents);
  }
  
++#ifndef PANVK_KBASE_JD_FALLBACK_DEFINED
++#define PANVK_KBASE_JD_FALLBACK_DEFINED
++
++struct base_jd_atom {
++   __u64 pad0[2];
++   __u64 pad1[2];
++   __u64 pad2[2];
++   __u8 pad3[7];
++   __u8 atom_number;
++};
++
++struct base_jd_event_v2 {
++   __u32 event_code;
++   __u32 pad0;
++   __u64 atom_number;
++   __u64 pad1[2];
++};
++
++#endif /* PANVK_KBASE_JD_FALLBACK_DEFINED */
++
 +/* Submit one dependency-only atom (number 255) at the given stride and
 + * drain its event.  Returns false only if the kernel refuses the stride. */
 +static bool
@@ -71,7 +91,7 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
  static struct pan_kmod_dev *
  kbase_kmod_dev_create(int fd, uint32_t flags,
                        UNUSED const struct pan_kmod_driver *drv_info,
-@@ -645,6 +700,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+@@ -645,6 +714,11 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
                  pan_arch(raw_id & 0xffffffffu));
     } else if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
        mesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
@@ -87,7 +107,7 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
     /* Initialise the EXEC_VA zone so that GPU-executable allocations
      * (shader BOs) are possible.  4G of executable VA (0x100000 pages)
      * matches what panfork uses.  On CSF uAPI >= 1.9 the zone is set up
-@@ -658,12 +718,16 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+@@ -658,12 +732,16 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
     struct kbase_kmod_dev *kbase_dev =
        pan_kmod_alloc(allocator, sizeof(*kbase_dev));
     if (!kbase_dev) {
