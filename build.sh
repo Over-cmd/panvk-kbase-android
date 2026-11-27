@@ -9,6 +9,7 @@ export CC="clang-${LLVM_VER}"
 export CXX="clang++-${LLVM_VER}"
 export LD="ld.lld-${LLVM_VER}"
 export LLVM_CONFIG="llvm-config-${LLVM_VER}"
+export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-/usr/local/lib/android/sdk/ndk/27.3.13750724}}"
 export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
 
@@ -27,8 +28,7 @@ if command -v apt-get >/dev/null 2>&1; then
     python3-packaging \
     glslang-tools \
     libspirv-tools-dev \
-    "libllvmspirvlib-${LLVM_VER}-dev" || \
-  sudo apt-get install -y -qq libllvmspirvlib-dev || true
+    "libllvmspirvlib-${LLVM_VER}-dev"
 fi
 
 if ! command -v meson >/dev/null 2>&1; then
