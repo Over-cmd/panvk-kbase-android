@@ -24,12 +24,15 @@ if command -v apt-get >/dev/null 2>&1; then
     libdrm-dev \
     pkg-config \
     ninja-build \
+    cmake \
     python3-mako \
     python3-yaml \
     python3-packaging \
     glslang-tools \
     git \
-    "libllvmspirvlib-${LLVM_VER}-dev"
+    "libllvmspirvlib-${LLVM_VER}-dev" \
+    "libclang-${LLVM_VER}-dev" \
+    "libclang-cpp${LLVM_VER}-dev"
 fi
 
 if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
