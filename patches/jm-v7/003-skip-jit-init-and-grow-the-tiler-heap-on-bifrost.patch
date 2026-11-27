@@ -1,9 +1,9 @@
 diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
-@@ -1198,7 +1198,19 @@
+@@ -630,7 +630,19 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
        .max_allocations = 255,
-       .phys_pages = 1ull << 25,
+       .phys_pages = (128ull << 30) / kbase_kmod_page_size(),
     };
 -   if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
 +   /* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA
@@ -22,20 +22,18 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
        mesa_logw("kbase: KBASE_IOCTL_MEM_JIT_INIT failed: %s "
                  "(tiler heap creation will not work)", strerror(errno));
     }
-@@ -1427,6 +1439,16 @@
-    if (kmod_flags & PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT)
-       flags |= BASE_MEM_GROW_ON_GPF;
- 
-+   /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let
-+    * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */
-+   if (!kbase_dev->is_csf && pan_arch(dev->props.gpu_id) < 9 &&
-+       (kmod_flags & PAN_KMOD_BO_FLAG_NO_MMAP)) {
-+      commit_pages = MIN2((1024 * 1024) / page_size, va_pages);
-+      mesa_logi("kbase: v%u growable BO, GROW_ON_GPF, %" PRIu64
-+                " of %" PRIu64 " pages committed",
-+                pan_arch(dev->props.gpu_id), commit_pages, va_pages);
-+   }
+@@ -807,6 +819,16 @@ kbase_kmod_bo_alloc(struct pan_kmod_dev *dev,
+          alloc_flags |= KBASE_JM_MEM_TILER_ALIGN_TOP;
+          commit_pages = MIN2(extension, va_pages);
+       }
 +
-    if (kmod_flags & PAN_KMOD_BO_FLAG_CSF_EVENT) {
-       flags |= BASE_MEM_CSF_EVENT;
-       flags &= ~BASE_MEM_COHERENT_LOCAL;
++      /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let
++       * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */
++      if (!kbase_dev->is_csf && pan_arch(dev->props.gpu_id) < 9 &&
++          (kmod_flags & PAN_KMOD_BO_FLAG_NO_MMAP)) {
++         commit_pages = MIN2((1024 * 1024) / page_size, va_pages);
++         mesa_logi("kbase: v%u growable BO, GROW_ON_GPF, %" PRIu64
++                   " of %" PRIu64 " pages committed",
++                   pan_arch(dev->props.gpu_id), commit_pages, va_pages);
++      }
+    }
