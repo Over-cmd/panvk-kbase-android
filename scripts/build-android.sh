@@ -79,10 +79,12 @@ fi
 X11_LINK_FLAGS=""
 if [ -f "$X11_LIBDIR/libxcb.so" ] || [ -f "$X11_LIBDIR/libxshmfence.so" ] || [ -f "$X11_LIBDIR/libXau.so" ] || [ -f "$X11_LIBDIR/libXdmcp.so" ]; then
   X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-Wl,--no-as-needed'"
+  X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-Wl,--start-group'"
   [ -f "$X11_LIBDIR/libxcb.so" ] && X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-lxcb'"
   [ -f "$X11_LIBDIR/libxshmfence.so" ] && X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-lxshmfence'"
   [ -f "$X11_LIBDIR/libXau.so" ] && X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-lXau'"
   [ -f "$X11_LIBDIR/libXdmcp.so" ] && X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-lXdmcp'"
+  X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-Wl,--end-group'"
   X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-Wl,--as-needed'"
 fi
 
