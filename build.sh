@@ -38,7 +38,8 @@ if command -v apt-get >/dev/null 2>&1; then
     "libllvmspirvlib-${LLVM_VER}-dev" \
     "libclang-${LLVM_VER}-dev" \
     "libclang-cpp${LLVM_VER}-dev"
-  ls -d /usr/include/X11 /usr/include/xcb /usr/include/xshmfence.h
+  dpkg -L libxshmfence-dev | grep -E '\.h$' || true
+  ls -d /usr/include/X11 /usr/include/xcb
 fi
 
 if ! pkg-config --exists SPIRV-Tools 2>/dev/null; then
