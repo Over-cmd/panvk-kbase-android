@@ -182,6 +182,7 @@ EOF
   "${ROOT_DIR}/scripts/prepare-x11-headers.sh" "$ANDROID_X11_PREFIX" || true
 fi
 
+unset PYTHONPATH || true
 export ANDROID_PKG_CONFIG_PATH="${ANDROID_X11_PREFIX}/lib/pkgconfig:${ANDROID_PKG_CONFIG_PATH}"
 
 SRC_DIR="${RUNNER_TEMP:-/tmp}/spirv-tools-src"
@@ -222,10 +223,11 @@ if [ ! -f "${ANDROID_SPIRV_PREFIX}/lib/pkgconfig/SPIRV-Tools.pc" ]; then
 fi
 
 if ! command -v meson >/dev/null 2>&1; then
-  if command -v pip3 >/dev/null 2>&1; then
-    pip3 install --break-system-packages -q meson || pip3 install -q meson
-  elif command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get install -y -qq meson
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y -qq meson || true
+  fi
+  if ! command -v meson >/dev/null 2>&1; then
+    /usr/bin/python3 -m pip install --break-system-packages -q meson || true
   fi
   export PATH="${HOME}/.local/bin:${PATH}"
 fi
