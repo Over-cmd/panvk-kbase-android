@@ -79,7 +79,7 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
     [ -d "$base/xcb" ] && cp -rn "$base/xcb/." "$X11_CLEAN_INC/xcb/" 2>/dev/null || true
   done
 
-  # Shim values.h para Bionic (no existe values.h en Android NDK)
+  # Shim values.h para Bionic (no existe values.h ni MAXINT en Android NDK)
   cat > "$X11_CLEAN_INC/values.h" <<'EOF'
 #ifndef _PANVK_BIONIC_VALUES_H_
 #define _PANVK_BIONIC_VALUES_H_
@@ -87,10 +87,13 @@ if [ ! -f "${ANDROID_X11_PREFIX}/lib/libxcb.so" ] || [ ! -f "${ANDROID_X11_PREFI
 #ifndef BITSPERBYTE
 #define BITSPERBYTE CHAR_BIT
 #endif
+#ifndef MAXINT
+#define MAXINT INT_MAX
+#endif
 #endif
 EOF
 
-  X11_INC_FLAGS="-I${X11_CLEAN_INC}"
+  X11_INC_FLAGS="-I${X11_CLEAN_INC} -DMAXINT=INT_MAX"
   X11_CFLAGS="-fPIC"
 
   git clone --depth 1 https://gitlab.freedesktop.org/xorg/lib/libxshmfence.git "$X11_SRC_DIR/libxshmfence"
