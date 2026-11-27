@@ -1,9 +1,11 @@
 diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
 --- a/src/panfrost/lib/kmod/kbase_kmod.c
 +++ b/src/panfrost/lib/kmod/kbase_kmod.c
-@@ -630,7 +630,19 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+@@ -628,9 +628,21 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+    struct kbase_ioctl_mem_jit_init jit_init = {
+       .va_pages = 1ull << 25,
        .max_allocations = 255,
-       .phys_pages = (128ull << 30) / kbase_kmod_page_size(),
+       .phys_pages = 1ull << 25,
     };
 -   if (ioctl(fd, KBASE_IOCTL_MEM_JIT_INIT, &jit_init)) {
 +   /* Bifrost (arch < 9) JM: nothing we allocate needs JIT or CUSTOM_VA
@@ -23,9 +25,11 @@ diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_km
                  "(tiler heap creation will not work)", strerror(errno));
     }
 @@ -807,6 +819,16 @@ kbase_kmod_bo_alloc(struct pan_kmod_dev *dev,
-          alloc_flags |= KBASE_JM_MEM_TILER_ALIGN_TOP;
-          commit_pages = MIN2(extension, va_pages);
-       }
+    if (kmod_flags & PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT) {
+       /* Growable region: nothing committed up-front, grown in 2 MB
+        * increments on GPU page fault (matches panfork's heap setup). */
+       commit_pages = 0;
+       extension = (2 * 1024 * 1024) / page_size;
 +
 +      /* Bifrost JM (no JIT, see dev_create): commit 1 MiB up front and let
 +       * GPU faults grow the rest in 2 MiB steps (JimVulkan/mali-panvk). */
