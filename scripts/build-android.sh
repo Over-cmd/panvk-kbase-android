@@ -32,8 +32,12 @@ sed "s/aarch64-linux-android[0-9]*-clang/$CC_TRIPLE/g" "$ROOT/meson/android-aarc
 DEPS_PCDIR="$ROOT/work/android-deps/lib/pkgconfig"
 [ -f "$DEPS_PCDIR/libdrm.pc" ] || "$ROOT/scripts/build-android-deps.sh" --api "$API" --ndk "$NDK" >&2
 # X11 WSI: headers + pkg-config only, libxcb & co. are dlopened at runtime (csf-v11/083).
-X11_PCDIR="$ROOT/work/android-deps-x11/lib/pkgconfig"
-[ -f "$X11_PCDIR/xcb.pc" ] || "$ROOT/scripts/prepare-x11-headers.sh" "$ROOT/work/android-deps-x11" >&2
+X11_DIR="$ROOT/work/android-deps-x11"
+X11_PCDIR="$X11_DIR/lib/pkgconfig"
+X11_LIBDIR="$X11_DIR/lib"
+if [ ! -f "$X11_PCDIR/xcb.pc" ] || [ ! -f "$X11_LIBDIR/libxcb.a" ] || [ ! -f "$X11_LIBDIR/libxshmfence.a" ]; then
+  "$ROOT/scripts/prepare-x11-headers.sh" "$X11_DIR" >&2
+fi
 SPIRV_PREFIX="${ANDROID_SPIRV_TOOLS_PREFIX:-/usr/local/android-aarch64}"
 SPIRV_PCDIR="$SPIRV_PREFIX/lib/pkgconfig"
 if [ -d "$DEPS_PCDIR" ]; then
@@ -61,13 +65,15 @@ mkdir -p "$DDIR"
 if [ -n "${PANVK_KBASE_RELEASE:-}" ]; then
   printf "\n[built-in options]\nc_args = ['-DPANVK_KBASE_RELEASE=\"%s\"']\ncpp_args = ['-DPANVK_KBASE_RELEASE=\"%s\"']\n" "$PANVK_KBASE_RELEASE" "$PANVK_KBASE_RELEASE" >> "$BDIR.cross.ini"
 fi
-X11_LIBDIR="$ROOT/work/android-deps-x11/lib"
+if ! grep -q '^\[built-in options\]' "$BDIR.cross.ini"; then
+  printf "\n[built-in options]\n" >> "$BDIR.cross.ini"
+fi
 if [ -d "$SPIRV_PREFIX/lib" ]; then
-  if ! grep -q '^\[built-in options\]' "$BDIR.cross.ini"; then
-    printf "\n[built-in options]\n" >> "$BDIR.cross.ini"
-  fi
   printf "c_link_args = ['-L%s', '-L%s/lib']\ncpp_link_args = ['-L%s', '-L%s/lib', '-static-libstdc++']\n" \
     "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LIBDIR" "$SPIRV_PREFIX" >> "$BDIR.cross.ini"
+else
+  printf "c_link_args = ['-L%s']\ncpp_link_args = ['-L%s', '-static-libstdc++']\n" \
+    "$X11_LIBDIR" "$X11_LIBDIR" >> "$BDIR.cross.ini"
 fi
 # Host codegen tools (mesa_clc, vtn_bindgen2, panfrost_compile) must come from a native build:
 # default is derived from MESA (see bootstrap-host-tools.sh) and HOST_TOOLS overrides it.
@@ -90,13 +96,8 @@ MESON_ARGS="
   -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false
   -Dglx=disabled -Dgbm=disabled -Dlibunwind=disabled -Dzstd=disabled
 "
-if [ -d "$SPIRV_PREFIX/lib" ]; then
-  meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
-    $MESON_ARGS >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
-else
-  meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
-    $MESON_ARGS -Dcpp_link_args=-static-libstdc++ >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
-fi
+meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
+  $MESON_ARGS >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
 ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: ninja (log $LOG)" >&2; exit 1; }
 SO="$(find "$BDIR" -name libvulkan_panfrost.so | head -n1)"
 [ -n "$SO" ] || { echo "BUILD-FAIL: libvulkan_panfrost.so not produced" >&2; exit 1; }
