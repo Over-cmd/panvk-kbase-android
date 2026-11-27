@@ -36,7 +36,7 @@ sed "s/aarch64-linux-android[0-9]*-clang/$CC_TRIPLE/g" "$ROOT/meson/android-aarc
 DEPS_PCDIR="$ROOT/work/android-deps/lib/pkgconfig"
 [ -f "$DEPS_PCDIR/libdrm.pc" ] || "$ROOT/scripts/build-android-deps.sh" --api "$API" --ndk "$NDK" >&2
 
-# X11 WSI: cabeceras + pkg-config + enlace contra libxcb / libxshmfence de aarch64 si existen.
+# X11 WSI: cabeceras + pkg-config + enlace contra librerías X11/XCB de aarch64 si existen.
 X11_DIR="$ROOT/work/android-deps-x11"
 X11_PCDIR="$X11_DIR/lib/pkgconfig"
 X11_LIBDIR="$X11_DIR/lib"
@@ -69,31 +69,58 @@ mkdir -p "$DDIR"
 # Legacy opt-in: PANVK_KBASE_RELEASE=<name> sets the release string reported in driverInfo on trees up to
 # rc5g-114 (patch csf-v11/099: "PanVK-kbase <name> (Mesa ...)"). Trees with jm-v7-wip 0120 report
 # driverInfo like upstream Mesa ("Mesa <VERSION> (git-<sha>)") and ignore the define.
-if [ -n "${PANVK_KBASE_RELEASE:-}" ]; then
-  printf "\n[built-in options]\nc_args = ['-DPANVK_KBASE_RELEASE=\"%s\"']\ncpp_args = ['-DPANVK_KBASE_RELEASE=\"%s\"']\n" "$PANVK_KBASE_RELEASE" "$PANVK_KBASE_RELEASE" >> "$BDIR.cross.ini"
-fi
-if ! grep -q '^\[built-in options\]' "$BDIR.cross.ini"; then
-  printf "\n[built-in options]\n" >> "$BDIR.cross.ini"
-fi
+python3 - "$BDIR.cross.ini" "$X11_LIBDIR" "$SPIRV_PREFIX" "${PANVK_KBASE_RELEASE:-}" <<'EOF'
+import os, re, sys
 
-# Sin --start-group/--end-group extra para no anidar con los grupos ya definidos en android-aarch64.ini
-X11_LINK_FLAGS=""
-if [ -f "$X11_LIBDIR/libxcb.so" ] || [ -f "$X11_LIBDIR/libxshmfence.so" ] || [ -f "$X11_LIBDIR/libXau.so" ] || [ -f "$X11_LIBDIR/libXdmcp.so" ]; then
-  X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-Wl,--no-as-needed'"
-  [ -f "$X11_LIBDIR/libxcb.so" ] && X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-lxcb'"
-  [ -f "$X11_LIBDIR/libxshmfence.so" ] && X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-lxshmfence'"
-  [ -f "$X11_LIBDIR/libXau.so" ] && X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-lXau'"
-  [ -f "$X11_LIBDIR/libXdmcp.so" ] && X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-lXdmcp'"
-  X11_LINK_FLAGS="${X11_LINK_FLAGS}, '-Wl,--as-needed'"
-fi
+ini_path, x11_libdir, spirv_prefix, rel = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+text = open(ini_path, "r", encoding="utf-8").read()
 
-if [ -d "$SPIRV_PREFIX/lib" ]; then
-  printf "c_link_args = ['-L%s', '-L%s/lib'%s]\ncpp_link_args = ['-L%s', '-L%s/lib', '-static-libstdc++'%s]\n" \
-    "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LINK_FLAGS" "$X11_LIBDIR" "$SPIRV_PREFIX" "$X11_LINK_FLAGS" >> "$BDIR.cross.ini"
-else
-  printf "c_link_args = ['-L%s'%s]\ncpp_link_args = ['-L%s', '-static-libstdc++'%s]\n" \
-    "$X11_LIBDIR" "$X11_LINK_FLAGS" "$X11_LIBDIR" "$X11_LINK_FLAGS" >> "$BDIR.cross.ini"
-fi
+# Eliminar definiciones previas de c_link_args / cpp_link_args / c_args / cpp_args para evitar duplicados
+for key in ("c_link_args", "cpp_link_args", "c_args", "cpp_args"):
+    text = re.sub(rf"(?m)^[ \t]*{key}[ \t]*=.*(?:\n[ \t]+.*)*\n?", "", text)
+
+x11_libs = []
+if os.path.isdir(x11_libdir):
+    for libname, flag in [
+        ("libxcb.so", "-lxcb"),
+        ("libxcb-randr.so", "-lxcb-randr"),
+        ("libxcb-shm.so", "-lxcb-shm"),
+        ("libxshmfence.so", "-lxshmfence"),
+        ("libXau.so", "-lXau"),
+        ("libXdmcp.so", "-lXdmcp"),
+    ]:
+        if os.path.exists(os.path.join(x11_libdir, libname)):
+            x11_libs.append(flag)
+
+base_c_links = [f"-L{x11_libdir}"]
+if os.path.isdir(os.path.join(spirv_prefix, "lib")):
+    base_c_links.append(f"-L{spirv_prefix}/lib")
+if x11_libs:
+    base_c_links.extend(["-Wl,--no-as-needed", *x11_libs, "-Wl,--as-needed"])
+
+base_cpp_links = list(base_c_links) + ["-static-libstdc++"]
+
+def fmt_list(items):
+    return "[" + ", ".join(f"'{x}'" for x in items) + "]"
+
+if "[built-in options]" not in text:
+    text = text.rstrip() + "\n\n[built-in options]\n"
+
+lines = []
+if rel:
+    lines.append(f"c_args = ['-DPANVK_KBASE_RELEASE=\"{rel}\"']")
+    lines.append(f"cpp_args = ['-DPANVK_KBASE_RELEASE=\"{rel}\"']")
+lines.append(f"c_link_args = {fmt_list(base_c_links)}")
+lines.append(f"cpp_link_args = {fmt_list(base_cpp_links)}")
+
+text = re.sub(
+    r"(?m)^\[built-in options\]\s*\n",
+    "[built-in options]\n" + "\n".join(lines) + "\n",
+    text,
+    count=1,
+)
+open(ini_path, "w", encoding="utf-8").write(text)
+EOF
 
 # Host codegen tools (mesa_clc, vtn_bindgen2, panfrost_compile) must come from a native build:
 # default is derived from MESA (see bootstrap-host-tools.sh) and HOST_TOOLS overrides it.
