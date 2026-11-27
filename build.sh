@@ -46,7 +46,6 @@ if command -v apt-get >/dev/null 2>&1; then
     automake \
     libtool \
     xutils-dev \
-    xorgproto \
     xcb-proto \
     libpthread-stubs0-dev \
     libbsd-dev \
