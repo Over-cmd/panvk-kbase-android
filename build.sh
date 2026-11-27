@@ -4,6 +4,7 @@ set -euo pipefail
 PROFILE="${PROFILE:-g52-v7-jm}"
 LLVM_VER="${LLVM_VER:-21}"
 ANDROID_API="${ANDROID_API:-30}"
+INSPECT_ONLY="${INSPECT_ONLY:-0}"
 
 export CC="clang-${LLVM_VER}"
 export CXX="clang++-${LLVM_VER}"
@@ -41,6 +42,19 @@ fi
 
 ./scripts/fetch-mesa.sh
 ./scripts/apply-patches.sh --profile "${PROFILE}"
+
+if [ -f "work/mesa/meson.build" ]; then
+  echo "=== MESON.BUILD LINES (818-838, 2098-2122) ==="
+  nl -ba work/mesa/meson.build | sed -n '818,838p;2098,2122p' || true
+  echo "=== MESON SPIRV / DRM MATCHES ==="
+  grep -n -C 5 -E "SPIRV-Tools|LLVMSPIRVLib|llvmspirvlib|spirv_tools|dep_libdrm" work/mesa/meson.build work/mesa/meson_options.txt 2>/dev/null || true
+fi
+
+if [ "${INSPECT_ONLY}" = "1" ]; then
+  echo "INSPECT_ONLY=1: stopping before build-android.sh"
+  exit 0
+fi
+
 ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"
 ./scripts/validate-binary.sh --abi android "dist/android-${PROFILE}/libvulkan_panfrost.so"
 ./scripts/package-android-adpkg.sh --profile "${PROFILE}"
