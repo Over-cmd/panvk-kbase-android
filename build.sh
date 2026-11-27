@@ -36,18 +36,24 @@ fi
 rm -rf "$OUT"
 mkdir -p "$OUT/include/xcb" "$OUT/include/X11" "$OUT/lib/pkgconfig"
 
-if [ -d "$INC/xcb" ]; then
-  cp -rn "$INC/xcb/." "$OUT/include/xcb/" 2>/dev/null || cp -r "$INC/xcb/." "$OUT/include/xcb/"
-fi
-if [ -n "$ALT_INC" ] && [ -d "$ALT_INC/xcb" ]; then
-  cp -rn "$ALT_INC/xcb/." "$OUT/include/xcb/" 2>/dev/null || cp -r "$ALT_INC/xcb/." "$OUT/include/xcb/"
+copy_dir_safe() {
+  src="$1"
+  dst="$2"
+  [ -d "$src" ] || return 0
+  if cp -rn "$src/." "$dst/" 2>/dev/null; then
+    return 0
+  fi
+  cp -r "$src/." "$dst/"
+}
+
+copy_dir_safe "$INC/xcb" "$OUT/include/xcb"
+if [ -n "$ALT_INC" ]; then
+  copy_dir_safe "$ALT_INC/xcb" "$OUT/include/xcb"
 fi
 
-if [ -d "$INC/X11" ]; then
-  cp -rn "$INC/X11/." "$OUT/include/X11/" 2>/dev/null || cp -r "$INC/X11/." "$OUT/include/X11/"
-fi
-if [ -n "$ALT_INC" ] && [ -d "$ALT_INC/X11" ]; then
-  cp -rn "$ALT_INC/X11/." "$OUT/include/X11/" 2>/dev/null || cp -r "$ALT_INC/X11/." "$OUT/include/X11/"
+copy_dir_safe "$INC/X11" "$OUT/include/X11"
+if [ -n "$ALT_INC" ]; then
+  copy_dir_safe "$ALT_INC/X11" "$OUT/include/X11"
 fi
 
 cp -f "$XCB_H" "$OUT/include/xcb/xcb.h"
