@@ -170,7 +170,7 @@ EOF
       ac_cv_c_undeclared_builtin_options="none needed" \
       PKG_CONFIG_PATH="${ANDROID_X11_PREFIX}/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
       ./configure --host=aarch64-linux-android --prefix="$ANDROID_X11_PREFIX" \
-      --enable-shared --disable-static --disable-devel-docs --without-doxygen || {
+      --enable-shared --disable-static --enable-xproto --disable-devel-docs --without-doxygen || {
       grep -n -C 25 "cannot detect" config.log >&2 || true
       exit 1
     }
@@ -182,8 +182,13 @@ EOF
   "${ROOT_DIR}/scripts/prepare-x11-headers.sh" "$ANDROID_X11_PREFIX" || true
 fi
 
+echo "=== Verificando símbolos XCB en ${ANDROID_X11_PREFIX}/lib/libxcb.so ==="
+llvm-nm -D "${ANDROID_X11_PREFIX}/lib/libxcb.so" 2>/dev/null | grep -E "xcb_depth_visuals_iterator|xcb_visualtype_next" || true
+
 unset PYTHONPATH || true
 export ANDROID_PKG_CONFIG_PATH="${ANDROID_X11_PREFIX}/lib/pkgconfig:${ANDROID_PKG_CONFIG_PATH}"
+export LIBRARY_PATH="${ANDROID_X11_PREFIX}/lib:${ANDROID_SPIRV_PREFIX}/lib${LIBRARY_PATH:+:${LIBRARY_PATH}}"
+export LDFLAGS="-L${ANDROID_X11_PREFIX}/lib -L${ANDROID_SPIRV_PREFIX}/lib ${LDFLAGS:-}"
 
 SRC_DIR="${RUNNER_TEMP:-/tmp}/spirv-tools-src"
 if [ ! -d "$SRC_DIR/.git" ]; then
