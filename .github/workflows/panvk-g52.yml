@@ -1,222 +1,141 @@
-name: PanVK Driver Mali-G52
+#!/bin/sh
+set -eu
 
-on:
-  push:
-    branches: [ "**" ]
-  pull_request:
-    branches: [ "**" ]
+# package-release-zip.sh — Package PanVK Mali-G52 driver for AdrenoTools / Winlator or Termux X11
+# Usage: ./scripts/package-release-zip.sh --flavor [adrenotools|x11] [--so <path>] [--version <ver>] [--out-dir <dir>]
 
-env:
-  # Versión del paquete; también se muestra como el nombre del controlador en DXVK HUD / MangoHud.
-  PANVK_RELEASE: "1.1.5-FC"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FLAVOR=""
+SO_PATH=""
+VERSION="1.1.5-FC"
+OUT_DIR="$ROOT"
 
-jobs:
-  build-panvk-android:
-    name: Build PanVK G52 (${{ matrix.flavor }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        flavor: [adrenotools, x11]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --flavor)
+      FLAVOR="${2:-}"
+      shift 2
+      ;;
+    --so)
+      SO_PATH="${2:-}"
+      shift 2
+      ;;
+    --version)
+      VERSION="${2:-}"
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR="${2:-}"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+if [ "$FLAVOR" != "adrenotools" ] && [ "$FLAVOR" != "x11" ]; then
+  echo "Error: --flavor must be 'adrenotools' or 'x11'" >&2
+  exit 1
+fi
 
-      - name: Install build dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
-        run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update
-          LLVM_VER="$(llvm-config --version 2>/dev/null | cut -d. -f1 || true)"
-          if [ -z "$LLVM_VER" ] && command -v llvm-config-22 >/dev/null 2>&1; then
-            LLVM_VER="22"
-          fi
-          LLVM_VER="${LLVM_VER:-22}"
-          echo "Usando paquetes LLVM versión: ${LLVM_VER}"
+if [ -z "$SO_PATH" ]; then
+  SO_PATH="$ROOT/build/src/panfrost/vulkan/libvulkan_panfrost.so"
+fi
 
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            -o Dpkg::Options::="--force-confdef" \
-            -o Dpkg::Options::="--force-confold" \
-            build-essential \
-            git \
-            zip \
-            unzip \
-            "llvm-${LLVM_VER}-dev" \
-            "libclang-${LLVM_VER}-dev" \
-            "libclc-${LLVM_VER}-dev" \
-            "libllvmspirvlib-${LLVM_VER}-dev" \
-            libelf-dev \
-            bison \
-            flex \
-            libdrm-dev \
-            pkg-config \
-            gettext
-          python -m pip install --upgrade pip
-          pip install mako PyYAML meson ninja packaging
+if [ ! -f "$SO_PATH" ]; then
+  echo "Error: Driver binary not found at $SO_PATH" >&2
+  exit 1
+fi
 
-          if ! pkg-config --exists SPIRV-Tools 2>/dev/null && ! pkg-config --exists SPIRV-Tools-shared 2>/dev/null; then
-            echo "Compilando SPIRV-Tools + SPIRV-Headers desde fuente para /usr/local..."
-            git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git /tmp/spirv-headers
-            git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git /tmp/spirv-tools
-            cmake -S /tmp/spirv-headers -B /tmp/spirv-headers/build -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX=/usr/local
-            cmake --build /tmp/spirv-headers/build
-            sudo cmake --build /tmp/spirv-headers/build --target install
-            cmake -S /tmp/spirv-tools -B /tmp/spirv-tools/build -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX=/usr/local \
-              -DSPIRV-Headers_SOURCE_DIR=/tmp/spirv-headers \
-              -DSPIRV_WERROR=OFF \
-              -DBUILD_SHARED_LIBS=ON \
-              -DSPIRV_SKIP_TESTS=ON
-            cmake --build /tmp/spirv-tools/build
-            sudo cmake --build /tmp/spirv-tools/build --target install
-            sudo ldconfig
-            rm -rf /tmp/spirv-headers /tmp/spirv-tools
-          fi
+if ! command -v zip >/dev/null 2>&1; then
+  echo "Error: 'zip' command not found in PATH" >&2
+  exit 1
+fi
 
-      - name: Verify sources.lock
-        run: |
-          python3 -c "import json; d=json.load(open('sources.lock')); assert len(d['mesaCommit'])==40, d"
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
 
-      - name: Fetch pinned Mesa
-        run: ./scripts/fetch-mesa.sh
+echo "==> Packaging PanVK Mali-G52 [$FLAVOR] version $VERSION"
+echo "==> Driver source: $SO_PATH"
 
-      - name: Apply PanVK G52 patches
-        # Ajusta el perfil según los nombres soportados por ./scripts/apply-patches.sh en tu repo (ej. g52-v7-jm o bifrost)
-        run: ./scripts/apply-patches.sh --profile g52-v7-jm
+cp "$SO_PATH" "$STAGE/libvulkan_panfrost.so"
+SHA256=$(sha256sum "$STAGE/libvulkan_panfrost.so" | awk '{print $1}')
+echo "==> Driver SHA256: $SHA256"
 
-      - name: Stamp driver version
-        # driverInfo (DXVK HUD, MangoHud, vulkaninfo) muestra esta versión.
-        run: |
-          set -euo pipefail
-          vulkan_dir="work/mesa/src/panfrost/vulkan"
-          if [ ! -d "$vulkan_dir" ]; then
-            echo "ERROR: No existe el directorio $vulkan_dir"
-            exit 1
-          fi
+# AdrenoTools / Winlator / Termux X11 meta.json
+FLAVOR="$FLAVOR" SHA256="$SHA256" VERSION="$VERSION" STAGE="$STAGE" python3 - <<'EOF'
+import json
+import os
 
-          f="$vulkan_dir/panvk_vX_physical_device.c"
-          if [ ! -f "$f" ]; then
-            echo "Aviso: no existe $f; buscando archivos physical_device en $vulkan_dir..."
-            ls -la "$vulkan_dir"
-            f="$(find "$vulkan_dir" -maxdepth 1 -name '*physical_device*.c' | head -n1)"
-          fi
+flavor = os.environ["FLAVOR"]
+sha = os.environ["SHA256"]
+ver = os.environ["VERSION"]
+stage = os.environ["STAGE"]
 
-          if [ -z "${f:-}" ] || [ ! -f "$f" ]; then
-            echo "ERROR: No se encontró un archivo physical_device en $vulkan_dir"
-            exit 1
-          fi
+if flavor == "adrenotools":
+    name = "PanVK G52"
+    target = "Winlator and AdrenoTools"
+else:
+    name = "PanVK G52 (X11)"
+    target = "Termux X11"
 
-          echo "Usando archivo: $f"
-          grep -nE "PANVK_KBASE_RELEASE|PanVK-kbase|driverInfo|panvk" "$f" | head -n 30 || true
+desc = (
+    f"PanVK Mali-G52 (Bifrost / JM) driver {ver} for {target}."
+)
 
-          if grep -qE "^#define PANVK_KBASE_RELEASE " "$f"; then
-            sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$f"
-            grep -q "^#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"" "$f"
-          else
-            echo "Aviso: no se encontró '#define PANVK_KBASE_RELEASE' en $f"
-          fi
+meta = {
+    "schemaVersion": 1,
+    "name": name,
+    "description": desc,
+    "author": "GunaCharanTeja",
+    "packageVersion": ver,
+    "vendor": "Mesa",
+    "driverVersion": f"Mesa PanVK G52 {ver}",
+    "minApi": 30,
+    "libraryName": "libvulkan_panfrost.so",
+    "sanitizedArtifactSha256": sha,
+}
 
-          if grep -q '"PanVK-kbase " PANVK_KBASE_RELEASE' "$f"; then
-            sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$f"
-            grep -q '"PanVK G52 " PANVK_KBASE_RELEASE' "$f"
-          else
-            echo "Aviso: no se encontró '\"PanVK-kbase \" PANVK_KBASE_RELEASE' en $f"
-          fi
+with open(os.path.join(stage, "meta.json"), "w", encoding="utf-8") as f:
+    json.dump(meta, f, indent=2)
+EOF
 
-      - name: Build host tools
-        run: |
-          meson setup build-host work/mesa \
-            -Dbuildtype=release \
-            -Db_ndebug=true \
-            -Dplatforms=[] \
-            -Dgallium-drivers=[] \
-            -Dvulkan-drivers=[] \
-            -Dtools=panfrost \
-            -Dprecomp-compiler=enabled \
-            -Dinstall-precomp-compiler=true \
-            -Dllvm=enabled \
-            -Dmesa-clc=enabled \
-            -Dinstall-mesa-clc=true
-          ninja -C build-host src/compiler/clc/mesa_clc src/compiler/spirv/vtn_bindgen2 src/panfrost/clc/panfrost_compile
-          ln -sf "$GITHUB_WORKSPACE/build-host/src/compiler/clc/mesa_clc" "$GITHUB_WORKSPACE/build-host/src/compiler/clc/mesa-clc"
-          ln -sf "$GITHUB_WORKSPACE/build-host/src/compiler/spirv/vtn_bindgen2" "$GITHUB_WORKSPACE/build-host/src/compiler/spirv/vtn-bindgen2"
-          echo "$GITHUB_WORKSPACE/build-host/src/compiler/clc" >> $GITHUB_PATH
-          echo "$GITHUB_WORKSPACE/build-host/src/compiler/spirv" >> $GITHUB_PATH
-          echo "$GITHUB_WORKSPACE/build-host/src/panfrost/clc" >> $GITHUB_PATH
+ZIP_NAME="PanVK-G52-${VERSION}-${FLAVOR}.zip"
+MANIFEST_NAME="PanVK-G52-${VERSION}-${FLAVOR}-MANIFEST.txt"
+mkdir -p "$OUT_DIR"
+rm -f "$OUT_DIR/$ZIP_NAME" "$OUT_DIR/$MANIFEST_NAME"
 
-      - name: Configure Meson for PanVK G52
-        env:
-          PKG_CONFIG_LIBDIR: ${{ github.workspace }}/shims
-        run: |
-          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
-          export MESON_WORKING_DIR="$GITHUB_WORKSPACE"
-          CLANG_DIR="$(ls -d $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
-          if [ -z "$CLANG_DIR" ]; then
-            CLANG_DIR="$(ls -d $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/*/lib/linux/aarch64 2>/dev/null | tail -n1)"
-          fi
-          export CLANG_LIB_DIR="${CLANG_DIR:-$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/aarch64}"
-          echo "CLANG_LIB_DIR=$CLANG_LIB_DIR"
-          envsubst < android.toml > android-cross.txt
-          cat android-cross.txt
-          PLATFORMS="android"
-          if [ "${{ matrix.flavor }}" = "x11" ]; then
-            PLATFORMS="android,x11"
-          fi
-          meson setup build work/mesa \
-            --cross-file android-cross.txt \
-            -Dbuildtype=release \
-            -Dplatforms=$PLATFORMS \
-            -Dandroid-stub=true \
-            -Dandroid-strict=false \
-            -Dandroid-libbacktrace=disabled \
-            -Dplatform-sdk-version=30 \
-            -Dglx=disabled \
-            -Dgbm=disabled \
-            -Degl=disabled \
-            -Dopengl=false \
-            -Dgles1=disabled \
-            -Dgles2=disabled \
-            -Dglvnd=disabled \
-            -Dvalgrind=disabled \
-            -Dgallium-drivers= \
-            -Dshared-glapi=disabled \
-            -Dzstd=disabled \
-            -Dmesa-clc=system \
-            -Dprecomp-compiler=system \
-            -Dvulkan-drivers=panfrost \
-            -Dllvm=disabled \
-            -Dpanfrost-kmds=kbase
+if [ "$FLAVOR" = "adrenotools" ]; then
+  (cd "$STAGE" && zip -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+else
+  mkdir -p "$STAGE/shims"
+  if [ -d "$ROOT/shims" ] && ls "$ROOT"/shims/*.so* >/dev/null 2>&1; then
+    cp -P "$ROOT"/shims/*.so* "$STAGE/shims/"
+  fi
+  if [ -n "$(ls -A "$STAGE/shims" 2>/dev/null)" ]; then
+    (cd "$STAGE" && zip -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so shims meta.json)
+  else
+    rmdir "$STAGE/shims"
+    (cd "$STAGE" && zip -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+  fi
+fi
 
-      - name: Build PanVK driver
-        run: |
-          meson compile -C build
+ZIP_SHA256=$(sha256sum "$OUT_DIR/$ZIP_NAME" | awk '{print $1}')
 
-      - name: Package driver
-        run: |
-          chmod +x ./scripts/package-release-zip.sh
-          ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
+echo "$SHA256  libvulkan_panfrost.so" > "$OUT_DIR/SHA256SUMS.txt"
+echo "$ZIP_SHA256  $ZIP_NAME" >> "$OUT_DIR/SHA256SUMS.txt"
 
-      - name: Upload packaged ZIP driver
-        uses: actions/upload-artifact@v4
-        with:
-          name: PanVK-G52-${{ matrix.flavor }}-release
-          path: |
-            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}.zip
-            PanVK-G52-${{ env.PANVK_RELEASE }}-${{ matrix.flavor }}-MANIFEST.txt
-            SHA256SUMS.txt
-          if-no-files-found: error
+cat <<EOF > "$OUT_DIR/$MANIFEST_NAME"
+# PanVK Mali-G52 Driver Manifest
+Flavor: $FLAVOR
+Package Version: $VERSION
+Library: libvulkan_panfrost.so
+Driver SHA256: $SHA256
+Archive SHA256: $ZIP_SHA256
+EOF
 
-      - name: Upload raw driver binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: libvulkan_panfrost-g52-aarch64-${{ matrix.flavor }}
-          path: build/src/panfrost/vulkan/libvulkan_panfrost.so
-          if-no-files-found: error
+echo "==> Successfully created $OUT_DIR/$ZIP_NAME"
+echo "==> Package contents:"
+unzip -l "$OUT_DIR/$ZIP_NAME"
