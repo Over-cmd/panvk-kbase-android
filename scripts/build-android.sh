@@ -74,7 +74,7 @@ text = open(ini_path, "r", encoding="utf-8").read()
 for key in ("c_link_args", "cpp_link_args", "c_args", "cpp_args"):
     text = re.sub(rf"(?m)^[ \t]*{key}[ \t]*=.*(?:\n[ \t]+.*)*\n?", "", text)
 
-base_c_args = []
+base_c_args = ["-DHAVE_FFS", "-DHAVE_FFSLL"]
 shims_inc = os.path.join(shims_dir, "include")
 if os.path.isdir(shims_inc):
     base_c_args.append(f"-I{shims_inc}")
@@ -156,7 +156,7 @@ MESON_ARGS="
   -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false
   -Dglx=disabled -Dgbm=disabled -Dlibunwind=disabled -Dzstd=disabled
 "
-meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
+meson setup $RECONF "$BDIR" "$MESON" --cross-file "$BDIR.cross.ini" \
   $MESON_ARGS >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
 if [ -d "$BDIR" ] && [ -d "$X11_LIBDIR" ]; then
   python3 - "$BDIR" "$X11_LIBDIR" <<'EOF'
@@ -185,7 +185,7 @@ ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || {
   grep -n -C 5 "FAILED:" "$LOG" 2>/dev/null || true
   tail -n 25 "$LOG"
   echo "BUILD-FAIL: ninja (log $LOG)" >&2
-  exit 1
+  exit 1;
 }
 SO="$(find "$BDIR" -name libvulkan_panfrost.so | head -n1)"
 [ -n "$SO" ] || { echo "BUILD-FAIL: libvulkan_panfrost.so not produced" >&2; exit 1; }
