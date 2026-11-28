@@ -64,7 +64,7 @@ cp "$SO_PATH" "$STAGE/libvulkan_panfrost.so"
 SHA256=$(sha256sum "$STAGE/libvulkan_panfrost.so" | awk '{print $1}')
 echo "==> Driver SHA256: $SHA256"
 
-# AdrenoTools / Winlator / Termux X11 meta.json
+# Generar meta.json en la raíz del directorio de empaquetado ($STAGE)
 FLAVOR="$FLAVOR" SHA256="$SHA256" VERSION="$VERSION" STAGE="$STAGE" python3 - <<'EOF'
 import json
 import os
@@ -81,14 +81,10 @@ else:
     name = "PanVK G52 (X11)"
     target = "Termux X11"
 
-desc = (
-    f"PanVK Mali-G52 (Bifrost / JM) driver {ver} for {target}."
-)
-
 meta = {
     "schemaVersion": 1,
     "name": name,
-    "description": desc,
+    "description": f"PanVK Mali-G52 (Bifrost / JM) driver {ver} for {target}.",
     "author": "GunaCharanTeja",
     "packageVersion": ver,
     "vendor": "Mesa",
@@ -98,9 +94,18 @@ meta = {
     "sanitizedArtifactSha256": sha,
 }
 
-with open(os.path.join(stage, "meta.json"), "w", encoding="utf-8") as f:
+meta_path = os.path.join(stage, "meta.json")
+with open(meta_path, "w", encoding="utf-8") as f:
     json.dump(meta, f, indent=2)
 EOF
+
+if [ ! -f "$STAGE/meta.json" ]; then
+  echo "Error: Failed to generate $STAGE/meta.json" >&2
+  exit 1
+fi
+
+echo "==> Generated meta.json:"
+cat "$STAGE/meta.json"
 
 ZIP_NAME="PanVK-G52-${VERSION}-${FLAVOR}.zip"
 MANIFEST_NAME="PanVK-G52-${VERSION}-${FLAVOR}-MANIFEST.txt"
@@ -108,17 +113,17 @@ mkdir -p "$OUT_DIR"
 rm -f "$OUT_DIR/$ZIP_NAME" "$OUT_DIR/$MANIFEST_NAME"
 
 if [ "$FLAVOR" = "adrenotools" ]; then
-  (cd "$STAGE" && zip -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+  (cd "$STAGE" && zip -q -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
 else
   mkdir -p "$STAGE/shims"
   if [ -d "$ROOT/shims" ] && ls "$ROOT"/shims/*.so* >/dev/null 2>&1; then
     cp -P "$ROOT"/shims/*.so* "$STAGE/shims/"
   fi
   if [ -n "$(ls -A "$STAGE/shims" 2>/dev/null)" ]; then
-    (cd "$STAGE" && zip -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so shims meta.json)
+    (cd "$STAGE" && zip -q -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so shims meta.json)
   else
     rmdir "$STAGE/shims"
-    (cd "$STAGE" && zip -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+    (cd "$STAGE" && zip -q -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
   fi
 fi
 
