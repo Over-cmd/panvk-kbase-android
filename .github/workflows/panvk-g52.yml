@@ -38,6 +38,15 @@ jobs:
           fi
           LLVM_VER="${LLVM_VER:-22}"
           echo "Usando paquetes LLVM versión: ${LLVM_VER}"
+
+          SPIRV_PKGS="spirv-tools"
+          for pkg in spirv-headers libspirv-tools-dev; do
+            if apt-cache show "$pkg" >/dev/null 2>&1; then
+              SPIRV_PKGS="$SPIRV_PKGS $pkg"
+            fi
+          done
+          echo "Paquetes SPIRV seleccionados: ${SPIRV_PKGS}"
+
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
@@ -47,8 +56,7 @@ jobs:
             "libclc-${LLVM_VER}-dev" \
             "libllvmspirvlib-${LLVM_VER}-dev" \
             libelf-dev \
-            spirv-tools \
-            libspirv-tools-dev \
+            ${SPIRV_PKGS} \
             bison \
             flex \
             libdrm-dev \
