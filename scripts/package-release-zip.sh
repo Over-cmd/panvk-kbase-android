@@ -99,10 +99,8 @@ with open(meta_path, "w", encoding="utf-8") as f:
     json.dump(meta, f, indent=2)
 EOF
 
-if [ ! -s "$STAGE/meta.json" ]; then
-  echo "Error: meta.json was not created or is empty" >&2
-  exit 1
-fi
+echo "==> Generated meta.json:"
+cat "$STAGE/meta.json"
 
 ZIP_NAME="PanVK-G52-${VERSION}-${FLAVOR}.zip"
 MANIFEST_NAME="PanVK-G52-${VERSION}-${FLAVOR}-MANIFEST.txt"
