@@ -46,6 +46,7 @@ jobs:
             git \
             zip \
             unzip \
+            patchelf \
             "llvm-${LLVM_VER}-dev" \
             "libclang-${LLVM_VER}-dev" \
             "libclc-${LLVM_VER}-dev" \
@@ -199,13 +200,14 @@ jobs:
         run: |
           meson compile -C build
 
-      - name: Inspect Vulkan ICD symbols and dependencies
+      - name: Clean RUNPATH and inspect Vulkan ICD
         run: |
           set -euo pipefail
           so_path="build/src/panfrost/vulkan/libvulkan_panfrost.so"
           if [ ! -f "$so_path" ]; then
             so_path="$(find build -name 'libvulkan_panfrost.so' | head -n1)"
           fi
+          patchelf --remove-rpath "$so_path" || true
           echo "==> Binary: $so_path"
           readelf -d "$so_path" | grep -E "SONAME|NEEDED|RPATH|RUNPATH" || true
           echo "==> ICD symbols:"
