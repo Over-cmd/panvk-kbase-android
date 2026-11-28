@@ -64,7 +64,8 @@ jobs:
             cmake -S /tmp/spirv-headers -B /tmp/spirv-headers/build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX=/usr/local
-            cmake --build /tmp/spirv-headers/build --target install
+            cmake --build /tmp/spirv-headers/build
+            sudo cmake --build /tmp/spirv-headers/build --target install
             cmake -S /tmp/spirv-tools -B /tmp/spirv-tools/build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX=/usr/local \
@@ -72,7 +73,8 @@ jobs:
               -DSPIRV_WERROR=OFF \
               -DBUILD_SHARED_LIBS=ON \
               -DSPIRV_SKIP_TESTS=ON
-            cmake --build /tmp/spirv-tools/build --target install
+            cmake --build /tmp/spirv-tools/build
+            sudo cmake --build /tmp/spirv-tools/build --target install
             sudo ldconfig
             rm -rf /tmp/spirv-headers /tmp/spirv-tools
           fi
