@@ -32,14 +32,20 @@ jobs:
           NEEDRESTART_MODE: a
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          LLVM_VER="$(llvm-config --version 2>/dev/null | cut -d. -f1 || true)"
+          if [ -z "$LLVM_VER" ] && command -v llvm-config-22 >/dev/null 2>&1; then
+            LLVM_VER="22"
+          fi
+          LLVM_VER="${LLVM_VER:-22}"
+          echo "Usando paquetes LLVM versión: ${LLVM_VER}"
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
             build-essential \
-            llvm-20-dev \
-            libclang-20-dev \
-            libclc-20-dev \
-            libllvmspirvlib-20-dev \
+            "llvm-${LLVM_VER}-dev" \
+            "libclang-${LLVM_VER}-dev" \
+            "libclc-${LLVM_VER}-dev" \
+            "libllvmspirvlib-${LLVM_VER}-dev" \
             libelf-dev \
             spirv-tools \
             bison \
