@@ -6,7 +6,7 @@ ROOT_DIR="${SCRIPT_DIR}"
 
 PROFILE="${PROFILE:-g52-v7-jm}"
 LLVM_VER="${LLVM_VER:-21}"
-ANDROID_API="${ANDROID_API:-30}"
+ANDROID_API="${ANDROID_API:-28}"
 
 export CC="clang-${LLVM_VER}"
 export CXX="clang++-${LLVM_VER}"
