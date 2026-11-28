@@ -89,6 +89,8 @@ candidate_libs = [
     "libxcb-shm.so",
     "libxcb-dri3.so",
     "libxcb-present.so",
+    "libxcb-xfixes.so",
+    "libxcb-sync.so",
     "libX11-xcb.so",
     "libx11-xcb.so",
     "libXrandr.so",
