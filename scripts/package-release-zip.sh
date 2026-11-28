@@ -101,41 +101,45 @@ EOF
 
 echo "==> Generated meta.json:"
 cat "$STAGE/meta.json"
+echo ""
 
 ZIP_NAME="PanVK-G52-${VERSION}-${FLAVOR}.zip"
 MANIFEST_NAME="PanVK-G52-${VERSION}-${FLAVOR}-MANIFEST.txt"
+ZIP_FILE="$OUT_DIR/$ZIP_NAME"
+MANIFEST_FILE="$OUT_DIR/$MANIFEST_NAME"
+SHA_FILE="$OUT_DIR/SHA256SUMS.txt"
+
 mkdir -p "$OUT_DIR"
-rm -f "$OUT_DIR/$ZIP_NAME" "$OUT_DIR/$MANIFEST_NAME"
+rm -f "$ZIP_FILE" "$MANIFEST_FILE"
 
 if [ "$FLAVOR" = "adrenotools" ]; then
-  (cd "$STAGE" && zip -q -j "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+  (cd "$STAGE" && zip -q -j "$ZIP_FILE" libvulkan_panfrost.so meta.json)
 else
   mkdir -p "$STAGE/shims"
   if [ -d "$ROOT/shims" ] && ls "$ROOT"/shims/*.so* >/dev/null 2>&1; then
     cp -P "$ROOT"/shims/*.so* "$STAGE/shims/"
   fi
   if [ -n "$(ls -A "$STAGE/shims" 2>/dev/null)" ]; then
-    (cd "$STAGE" && zip -q -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so shims meta.json)
+    (cd "$STAGE" && zip -q -r "$ZIP_FILE" libvulkan_panfrost.so shims meta.json)
   else
     rmdir "$STAGE/shims"
-    (cd "$STAGE" && zip -q -j "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+    (cd "$STAGE" && zip -q -j "$ZIP_FILE" libvulkan_panfrost.so meta.json)
   fi
 fi
 
 echo "==> Package contents:"
-unzip -l "$OUT_DIR/$ZIP_NAME"
+unzip -l "$ZIP_FILE"
 
-if ! unzip -l "$OUT_DIR/$ZIP_NAME" | awk '{print $NF}' | grep -qx "meta.json"; then
-  echo "Error: meta.json is missing from the root of $OUT_DIR/$ZIP_NAME" >&2
+if ! unzip -l "$ZIP_FILE" | awk '{print $NF}' | grep -qx "meta.json"; then
+  echo "Error: meta.json is missing from the root of $ZIP_FILE" >&2
   exit 1
 fi
 
-ZIP_SHA256=$(sha256sum "$OUT_DIR/$ZIP_NAME" | awk '{print $1}')
+ZIP_SHA256=$(sha256sum "$ZIP_FILE" | awk '{print $1}')
 
-echo "$SHA256  libvulkan_panfrost.so" > "$OUT_DIR/SHA256SUMS.txt"
-echo "$ZIP_SHA256  $ZIP_NAME" >> "$OUT_DIR/SHA256SUMS.txt"
+printf '%s  libvulkan_panfrost.so\n%s  %s\n' "$SHA256" "$ZIP_SHA256" "$ZIP_NAME" > "$SHA_FILE"
 
-cat <<EOF > "$OUT_DIR/$MANIFEST_NAME"
+cat <<EOF > "$MANIFEST_FILE"
 # PanVK Mali-G52 Driver Manifest
 Flavor: $FLAVOR
 Package Version: $VERSION
@@ -144,4 +148,4 @@ Driver SHA256: $SHA256
 Archive SHA256: $ZIP_SHA256
 EOF
 
-echo "==> Successfully created $OUT_DIR/$ZIP_NAME"
+echo "==> Successfully created $ZIP_FILE"
