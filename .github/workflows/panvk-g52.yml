@@ -202,83 +202,21 @@ jobs:
       - name: Package driver
         run: |
           set -euo pipefail
-          if [ -f "./scripts/package-release-zip.sh" ]; then
-            chmod +x ./scripts/package-release-zip.sh
-            ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
-          fi
+          chmod +x ./scripts/package-release-zip.sh
+          ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
 
           zip_path="PanVK-G52-${PANVK_RELEASE}-${{ matrix.flavor }}.zip"
-          so_path="build/src/panfrost/vulkan/libvulkan_panfrost.so"
-          if [ ! -f "$so_path" ]; then
-            so_path="$(find build -name 'libvulkan_panfrost.so' | head -n1)"
-          fi
-          if [ -z "$so_path" ] || [ ! -f "$so_path" ]; then
-            echo "ERROR: No se encontró libvulkan_panfrost.so" >&2
-            exit 1
-          fi
-
-          sha256_so="$(sha256sum "$so_path" | awk '{print $1}')"
-          tmp_dir="$(mktemp -d)"
-          trap 'rm -rf "$tmp_dir"' EXIT
-
-          FLAVOR="${{ matrix.flavor }}" VERSION="${PANVK_RELEASE}" SHA256="$sha256_so" OUT_DIR="$tmp_dir" python3 - <<'EOF'
-          import json
-          import os
-
-          flavor = os.environ["FLAVOR"]
-          ver = os.environ["VERSION"]
-          sha = os.environ["SHA256"]
-          out_dir = os.environ["OUT_DIR"]
-
-          meta = {
-              "schemaVersion": 1,
-              "name": "PanVK G52" if flavor == "adrenotools" else "PanVK G52 (X11)",
-              "description": f"PanVK Mali-G52 (Bifrost / JM) driver {ver} ({flavor}).",
-              "author": "PanVK Build",
-              "packageVersion": ver,
-              "vendor": "Mesa",
-              "driverVersion": f"Mesa PanVK G52 {ver}",
-              "minApi": 30,
-              "libraryName": "libvulkan_panfrost.so",
-              "driverAbi": "arm64-v8a",
-              "sanitizedArtifactSha256": sha,
-          }
-
-          with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
-              json.dump(meta, f, indent=2)
-          EOF
-
-          cp "$so_path" "$tmp_dir/libvulkan_panfrost.so"
-
-          if [ -f "$zip_path" ]; then
-            (cd "$tmp_dir" && zip -q -u "$OLDPWD/$zip_path" meta.json)
-          else
-            (cd "$tmp_dir" && zip -q "$OLDPWD/$zip_path" meta.json libvulkan_panfrost.so)
-          fi
-
           ZIP_PATH="$zip_path" python3 - <<'EOF'
           import os
           import zipfile
 
           zp = os.environ["ZIP_PATH"]
+          assert os.path.isfile(zp), f"No existe {zp}"
           with zipfile.ZipFile(zp, "r") as zf:
               names = zf.namelist()
               print("==> Contenido del ZIP:", names)
               assert "meta.json" in names, "Falta meta.json en la raíz del ZIP"
               assert "libvulkan_panfrost.so" in names, "Falta libvulkan_panfrost.so en la raíz del ZIP"
-          EOF
-
-          manifest_path="PanVK-G52-${PANVK_RELEASE}-${{ matrix.flavor }}-MANIFEST.txt"
-          zip_sha256="$(sha256sum "$zip_path" | awk '{print $1}')"
-          echo "$sha256_so  libvulkan_panfrost.so" > SHA256SUMS.txt
-          echo "$zip_sha256  $zip_path" >> SHA256SUMS.txt
-          cat <<EOF > "$manifest_path"
-          # PanVK Mali-G52 Driver Manifest
-          Flavor: ${{ matrix.flavor }}
-          Package Version: ${PANVK_RELEASE}
-          Library: libvulkan_panfrost.so
-          Driver SHA256: $sha256_so
-          Archive SHA256: $zip_sha256
           EOF
 
       - name: Upload packaged ZIP driver
