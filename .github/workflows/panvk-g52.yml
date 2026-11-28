@@ -64,11 +64,41 @@ jobs:
       - name: Stamp driver version
         # driverInfo (DXVK HUD, MangoHud, vulkaninfo) muestra esta versión.
         run: |
-          f=work/mesa/src/panfrost/vulkan/panvk_vX_physical_device.c
-          sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$f"
-          grep -q "^#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"" "$f"
-          sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$f"
-          grep -q '"PanVK G52 " PANVK_KBASE_RELEASE' "$f"
+          set -euo pipefail
+          vulkan_dir="work/mesa/src/panfrost/vulkan"
+          if [ ! -d "$vulkan_dir" ]; then
+            echo "ERROR: No existe el directorio $vulkan_dir"
+            exit 1
+          fi
+
+          f="$vulkan_dir/panvk_vX_physical_device.c"
+          if [ ! -f "$f" ]; then
+            echo "Aviso: no existe $f; buscando archivos physical_device en $vulkan_dir..."
+            ls -la "$vulkan_dir"
+            f="$(find "$vulkan_dir" -maxdepth 1 -name '*physical_device*.c' | head -n1)"
+          fi
+
+          if [ -z "${f:-}" ] || [ ! -f "$f" ]; then
+            echo "ERROR: No se encontró un archivo physical_device en $vulkan_dir"
+            exit 1
+          fi
+
+          echo "Usando archivo: $f"
+          grep -nE "PANVK_KBASE_RELEASE|PanVK-kbase|driverInfo|panvk" "$f" | head -n 30 || true
+
+          if grep -qE "^#define PANVK_KBASE_RELEASE " "$f"; then
+            sed -i "s/^#define PANVK_KBASE_RELEASE \".*\"/#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"/" "$f"
+            grep -q "^#define PANVK_KBASE_RELEASE \"${PANVK_RELEASE}\"" "$f"
+          else
+            echo "Aviso: no se encontró '#define PANVK_KBASE_RELEASE' en $f"
+          fi
+
+          if grep -q '"PanVK-kbase " PANVK_KBASE_RELEASE' "$f"; then
+            sed -i 's/"PanVK-kbase " PANVK_KBASE_RELEASE/"PanVK G52 " PANVK_KBASE_RELEASE/' "$f"
+            grep -q '"PanVK G52 " PANVK_KBASE_RELEASE' "$f"
+          else
+            echo "Aviso: no se encontró '\"PanVK-kbase \" PANVK_KBASE_RELEASE' en $f"
+          fi
 
       - name: Build host tools
         run: |
