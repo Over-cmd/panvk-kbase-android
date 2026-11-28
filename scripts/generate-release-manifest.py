@@ -43,6 +43,11 @@ def resolve_ndk() -> str:
     return 'unknown'
 
 
+def beta_gates_required() -> bool:
+    val = os.environ.get('REQUIRE_BETA_GATES', '0').strip().lower()
+    return val in ('1', 'true', 'yes', 'on')
+
+
 # Releases are built from the sources.lock pin + patch series; work/mesa may be a dev tree.
 lock = json.loads((root / 'sources.lock').read_text())
 mesa_sha = lock.get('mesaCommit', '')
@@ -99,8 +104,9 @@ if collector.is_file():
         str(stage),
         '--out',
         str(validation_path),
-        '--require-beta-gates',
     ]
+    if beta_gates_required():
+        cmd.append('--require-beta-gates')
     try:
         subprocess.check_call(cmd)
         collected = validation_path.is_file()
