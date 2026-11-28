@@ -27,7 +27,9 @@ jobs:
 
       - name: Build and package PanVK Mali-G52
         env:
+          PROFILE: ${{ env.PROFILE }}
           PANVK_RELEASE: ${{ env.PANVK_RELEASE }}
+          LLVM_VER: ${{ env.LLVM_VER }}
         run: bash ./build.sh
 
       - name: Upload .adpkg and driver artifacts
@@ -35,6 +37,7 @@ jobs:
         with:
           name: panvk-g52-v7-jm-aarch64-adpkg
           path: |
+            dist/**/*.adpkg.zip
             dist/**/*.adpkg
             dist/android-${{ env.PROFILE }}/libvulkan_panfrost.so
           if-no-files-found: error
