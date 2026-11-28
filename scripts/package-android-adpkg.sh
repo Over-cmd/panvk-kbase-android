@@ -46,6 +46,31 @@ meta = {"schemaVersion":1,"name":name,"author":"panvk-kbase-android",
 json.dump(meta, open(out,'w'), indent=2)
 open(out,'a').write('\n')
 EOF
+
+# Generar manifiestos ICD de Vulkan para Android aarch64 / Bannerlator
+PKG_DIR_NAME="$(basename "$OUT" .adpkg.zip)"
+python3 - "$STAGE/panvk_icd.aarch64.json" "$STAGE/panvk_icd_abs.aarch64.json" "$PKG_DIR_NAME" <<'EOF'
+import json, pathlib, sys
+rel_icd_path, abs_icd_path, pkg_dir = sys.argv[1:]
+api_ver = "1.4.363"
+rel_icd = {
+    "file_format_version": "1.0.0",
+    "ICD": {
+        "library_path": "./libvulkan_panfrost.so",
+        "api_version": api_ver,
+    },
+}
+abs_icd = {
+    "file_format_version": "1.0.0",
+    "ICD": {
+        "library_path": f"/data/data/com.winlator.banner/files/contents/adrenotools/{pkg_dir}/libvulkan_panfrost.so",
+        "api_version": api_ver,
+    },
+}
+pathlib.Path(rel_icd_path).write_text(json.dumps(rel_icd, indent=2) + "\n")
+pathlib.Path(abs_icd_path).write_text(json.dumps(abs_icd, indent=2) + "\n")
+EOF
+
 MATRIX=""
 for c in \
   "$ROOT/dist/android-$PROFILE/runtime-feature-matrix.json" \
@@ -104,6 +129,6 @@ cp "$ROOT/dist/extension-gap.json" "$STAGE/extension-gap.json"
 set -- --profile "$PROFILE" --abi android-aarch64-bionic --stage "$STAGE"
 [ "$PUBLISHED" = false ] || set -- "$@" --published
 python3 "$ROOT/scripts/generate-release-manifest.py" "$@"
-(cd "$STAGE" && zip -q "$OUT" libvulkan_panfrost.so meta.json MANIFEST.json SHA256SUMS.txt SOURCE.json VALIDATION.json runtime-feature-matrix.json extension-gap.json)
+(cd "$STAGE" && zip -q "$OUT" libvulkan_panfrost.so meta.json MANIFEST.json SHA256SUMS.txt SOURCE.json VALIDATION.json runtime-feature-matrix.json extension-gap.json panvk_icd.aarch64.json panvk_icd_abs.aarch64.json)
 "$ROOT/scripts/validate-package.sh" "$OUT"
 echo "OK $OUT"
