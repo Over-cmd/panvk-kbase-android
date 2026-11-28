@@ -199,6 +199,18 @@ jobs:
         run: |
           meson compile -C build
 
+      - name: Inspect Vulkan ICD symbols and dependencies
+        run: |
+          set -euo pipefail
+          so_path="build/src/panfrost/vulkan/libvulkan_panfrost.so"
+          if [ ! -f "$so_path" ]; then
+            so_path="$(find build -name 'libvulkan_panfrost.so' | head -n1)"
+          fi
+          echo "==> Binary: $so_path"
+          readelf -d "$so_path" | grep -E "SONAME|NEEDED|RPATH|RUNPATH" || true
+          echo "==> ICD symbols:"
+          readelf --dyn-syms -W "$so_path" | grep -E "vk_icdGetInstanceProcAddr|vk_icdNegotiateLoaderICDInterfaceVersion" || echo "AVISO: No se encontraron símbolos vk_icd*"
+
       - name: Package driver
         run: |
           set -euo pipefail
