@@ -20,7 +20,7 @@ Validation test: vkCreateDevice on a G52 MC2 / G76 (pending)
 diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
 --- a/src/panfrost/vulkan/panvk_physical_device.c
 +++ b/src/panfrost/vulkan/panvk_physical_device.c
-@@ -1177,12 +1177,14 @@
+@@ -1313,12 +1313,14 @@
     switch (arch) {
     case 6:
     case 7:
