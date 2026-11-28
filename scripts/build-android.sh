@@ -69,14 +69,21 @@ mkdir -p "$DDIR"
 # Legacy opt-in: PANVK_KBASE_RELEASE=<name> sets the release string reported in driverInfo on trees up to
 # rc5g-114 (patch csf-v11/099: "PanVK-kbase <name> (Mesa ...)"). Trees with jm-v7-wip 0120 report
 # driverInfo like upstream Mesa ("Mesa <VERSION> (git-<sha>)") and ignore the define.
-python3 - "$BDIR.cross.ini" "$X11_LIBDIR" "$SPIRV_PREFIX" "${PANVK_KBASE_RELEASE:-}" <<'EOF'
+python3 - "$BDIR.cross.ini" "$ROOT" "$X11_LIBDIR" "$SPIRV_PREFIX" "${PANVK_KBASE_RELEASE:-}" <<'EOF'
 import os, re, sys
 
-ini_path, x11_libdir, spirv_prefix, rel = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+ini_path, root_dir, x11_libdir, spirv_prefix, rel = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 text = open(ini_path, "r", encoding="utf-8").read()
 
 for key in ("c_link_args", "cpp_link_args", "c_args", "cpp_args"):
     text = re.sub(rf"(?m)^[ \t]*{key}[ \t]*=.*(?:\n[ \t]+.*)*\n?", "", text)
+
+base_c_args = []
+shims_inc = os.path.join(root_dir, "shims", "include")
+if os.path.isdir(shims_inc):
+    base_c_args.append(f"-I{shims_inc}")
+if rel:
+    base_c_args.append(f'-DPANVK_KBASE_RELEASE="{rel}"')
 
 x11_libs = []
 if os.path.isdir(x11_libdir):
@@ -107,9 +114,9 @@ if "[built-in options]" not in text:
     text = text.rstrip() + "\n\n[built-in options]\n"
 
 extra = []
-if rel:
-    extra.append(f"c_args = ['-DPANVK_KBASE_RELEASE=\"{rel}\"']")
-    extra.append(f"cpp_args = ['-DPANVK_KBASE_RELEASE=\"{rel}\"']")
+if base_c_args:
+    extra.append(f"c_args = {fmt_list(base_c_args)}")
+    extra.append(f"cpp_args = {fmt_list(base_c_args)}")
 extra.append(f"c_link_args = {fmt_list(base_c_links)}")
 extra.append(f"cpp_link_args = {fmt_list(base_cpp_links)}")
 
