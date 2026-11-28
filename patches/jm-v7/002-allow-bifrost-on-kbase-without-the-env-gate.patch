@@ -14,23 +14,23 @@ Dependencies: jm-v7 001
 Validation test: vkCreateDevice on a G52 MC2 / G76 (pending)
 
 ---
- src/panfrost/vulkan/panvk_physical_device.c | 11 ++++++++---
- 1 file changed, 8 insertions(+), 3 deletions(-)
+ src/panfrost/vulkan/panvk_physical_device.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
 
 diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
 --- a/src/panfrost/vulkan/panvk_physical_device.c
 +++ b/src/panfrost/vulkan/panvk_physical_device.c
-@@ -1177,11 +1177,16 @@
+@@ -1177,12 +1177,14 @@
     switch (arch) {
     case 6:
     case 7:
+-      if (!os_get_option("PAN_I_WANT_A_BROKEN_VULKAN_DRIVER")) {
+-         result = panvk_errorf(instance, VK_ERROR_INCOMPATIBLE_DRIVER,
+-                               "WARNING: panvk is not well-tested on v%d, "
+-                               "pass PAN_I_WANT_A_BROKEN_VULKAN_DRIVER=1 "
+-                               "if you know what you're doing.", arch);
+-         goto fail_kbase;
+-      }
 +      /* Bifrost over kbase JM (jm-v7 series): experimental, no gate. */
 +      mesa_logw("panvk: v%u (Bifrost) support is experimental", arch);
-+      break;
-+
-    case 10:
-    case 11:
-    case 12:
-    case 13:
-    case 14:
        break;
