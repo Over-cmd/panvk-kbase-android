@@ -56,4 +56,34 @@ for fam in $SERIES; do
     (cd "$ROOT/patches/$fam/files" && find . -type f ! -name README -print0 | tar --null -cf - -T -) | (cd "$MESA" && tar -xf -)
   fi
 done
+
+# Evitar redefinición de ffs y ffsll en Bionic (strings.h) al compilar src/util/bitscan.c
+BITSCAN="$MESA/src/util/bitscan.c"
+if [ -f "$BITSCAN" ]; then
+  python3 - "$BITSCAN" <<'EOF'
+import pathlib, re, sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+if "#if !defined(__BIONIC__)" not in text:
+    # Envuelve la función ffs(...) { ... }
+    text, n_ffs = re.subn(
+        r"(?ms)^([ \t]*(?:[a-zA-Z_][\w\s\*]*\s+)?ffs\s*\([^)]*\)\s*\n\{.*?\n\})",
+        r"#if !defined(__BIONIC__)\n\1\n#endif",
+        text,
+        count=1,
+    )
+    # Envuelve la función ffsll(...) { ... }
+    text, n_ffsll = re.subn(
+        r"(?ms)^([ \t]*(?:[a-zA-Z_][\w\s\*]*\s+)?ffsll\s*\([^)]*\)\s*\n\{.*?\n\})",
+        r"#if !defined(__BIONIC__)\n\1\n#endif",
+        text,
+        count=1,
+    )
+    if n_ffs or n_ffsll:
+        path.write_text(text, encoding="utf-8")
+EOF
+fi
+
 echo "OK applied=$APPLIED profile=$PROFILE"
