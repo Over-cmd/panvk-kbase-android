@@ -44,6 +44,8 @@ jobs:
             -o Dpkg::Options::="--force-confold" \
             build-essential \
             git \
+            zip \
+            unzip \
             "llvm-${LLVM_VER}-dev" \
             "libclang-${LLVM_VER}-dev" \
             "libclc-${LLVM_VER}-dev" \
@@ -199,6 +201,7 @@ jobs:
 
       - name: Package driver
         run: |
+          chmod +x ./scripts/package-release-zip.sh
           ./scripts/package-release-zip.sh --flavor "${{ matrix.flavor }}" --version "${PANVK_RELEASE}"
 
       - name: Upload packaged ZIP driver
