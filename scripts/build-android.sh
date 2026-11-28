@@ -190,5 +190,15 @@ ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || {
 SO="$(find "$BDIR" -name libvulkan_panfrost.so | head -n1)"
 [ -n "$SO" ] || { echo "BUILD-FAIL: libvulkan_panfrost.so not produced" >&2; exit 1; }
 cp "$SO" "$DDIR/"
+if command -v patchelf >/dev/null 2>&1; then
+  for need in $(readelf -d "$DDIR/libvulkan_panfrost.so" 2>/dev/null | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p'); do
+    case "$need" in
+      */*)
+        base="$(basename "$need")"
+        patchelf --replace-needed "$need" "$base" "$DDIR/libvulkan_panfrost.so" || true
+        ;;
+    esac
+  done
+fi
 "$NDK_BIN/llvm-strip" "$DDIR/libvulkan_panfrost.so" || { echo "BUILD-FAIL: llvm-strip" >&2; exit 1; }
 echo "OK profile=$PROFILE so=$DDIR/libvulkan_panfrost.so"
