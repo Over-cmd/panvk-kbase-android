@@ -75,7 +75,6 @@ import os, re, sys
 ini_path, x11_libdir, spirv_prefix, rel = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 text = open(ini_path, "r", encoding="utf-8").read()
 
-# Eliminar definiciones previas de c_link_args / cpp_link_args / c_args / cpp_args para evitar duplicados
 for key in ("c_link_args", "cpp_link_args", "c_args", "cpp_args"):
     text = re.sub(rf"(?m)^[ \t]*{key}[ \t]*=.*(?:\n[ \t]+.*)*\n?", "", text)
 
@@ -107,19 +106,14 @@ def fmt_list(items):
 if "[built-in options]" not in text:
     text = text.rstrip() + "\n\n[built-in options]\n"
 
-lines = []
+extra = []
 if rel:
-    lines.append(f"c_args = ['-DPANVK_KBASE_RELEASE=\"{rel}\"']")
-    lines.append(f"cpp_args = ['-DPANVK_KBASE_RELEASE=\"{rel}\"']")
-lines.append(f"c_link_args = {fmt_list(base_c_links)}")
-lines.append(f"cpp_link_args = {fmt_list(base_cpp_links)}")
+    extra.append(f"c_args = ['-DPANVK_KBASE_RELEASE=\"{rel}\"']")
+    extra.append(f"cpp_args = ['-DPANVK_KBASE_RELEASE=\"{rel}\"']")
+extra.append(f"c_link_args = {fmt_list(base_c_links)}")
+extra.append(f"cpp_link_args = {fmt_list(base_cpp_links)}")
 
-text = re.sub(
-    r"(?m)^\[built-in options\]\s*\n",
-    "[built-in options]\n" + "\n".join(lines) + "\n",
-    text,
-    count=1,
-)
+text = text.rstrip() + "\n" + "\n".join(extra) + "\n"
 open(ini_path, "w", encoding="utf-8").write(text)
 EOF
 
@@ -168,6 +162,9 @@ if replacements:
 EOF
 fi
 ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || {
+  echo "=== Comando de enlace y librerías en $X11_LIBDIR ===" >&2
+  ls -la "$X11_LIBDIR" >&2 || true
+  llvm-nm -D "$X11_LIBDIR/libxcb.so" 2>/dev/null | grep -E "xcb_get_setup|xcb_depth_visuals_iterator" >&2 || true
   grep -n -C 5 "FAILED:" "$LOG" 2>/dev/null || true
   tail -n 25 "$LOG"
   echo "BUILD-FAIL: ninja (log $LOG)" >&2
