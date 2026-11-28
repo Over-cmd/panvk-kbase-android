@@ -156,7 +156,7 @@ MESON_ARGS="
   -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false
   -Dglx=disabled -Dgbm=disabled -Dlibunwind=disabled -Dzstd=disabled
 "
-meson setup $RECONF "$BDIR" "$MESON" --cross-file "$BDIR.cross.ini" \
+meson setup $RECONF "$BDIR" "$MESA" --cross-file "$BDIR.cross.ini" \
   $MESON_ARGS >"$LOG" 2>&1 || { tail -n 20 "$LOG"; echo "BUILD-FAIL: meson setup (log $LOG)" >&2; exit 1; }
 if [ -d "$BDIR" ] && [ -d "$X11_LIBDIR" ]; then
   python3 - "$BDIR" "$X11_LIBDIR" <<'EOF'
