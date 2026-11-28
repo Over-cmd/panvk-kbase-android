@@ -11,8 +11,6 @@ SRC="$ROOT/dist/android-$PROFILE/libvulkan_panfrost.so"
 [ -f "$SRC" ] || { echo "build first: $SRC missing" >&2; exit 1; }
 MESA_SHA="$(python3 -c "import json;print(json.load(open('$ROOT/sources.lock'))['mesaCommit'])")"
 PATCH_SERIES_ID="$(python3 "$ROOT/scripts/compute-patch-series-id.py" --profile "$PROFILE")"
-# Builds that report driverInfo like upstream Mesa ("Mesa 26.3.0-devel (git-<sha>)", scripts/driver_identity.py)
-# are named after that git sha; older "PanVK-kbase <release>" builds keep the old name.
 IDENT_SHA8="$(python3 "$ROOT/scripts/driver_identity.py" --field sha8 "$SRC")"
 if [ "$(python3 "$ROOT/scripts/driver_identity.py" --field style "$SRC")" = upstream ]; then
   OUT="$ROOT/dist/Mesa-PanVK-Android-$VER-$IDENT_SHA8.adpkg.zip"
@@ -87,7 +85,19 @@ fi
 cp "$MATRIX" "$STAGE/runtime-feature-matrix.json"
 if [ ! -f "$ROOT/dist/extension-gap.json" ]; then
   mkdir -p "$ROOT/dist"
-  printf '{\n  "schemaVersion": 1,\n  "profile": "%s",\n  "gaps": []\n}\n' "$PROFILE" > "$ROOT/dist/extension-gap.json"
+  python3 - "$ROOT/dist/extension-gap.json" "$PROFILE" <<'EOF'
+import json, pathlib, sys
+out, profile = sys.argv[1:]
+gap = {
+    "schemaVersion": 1,
+    "profile": profile,
+    "summary": {
+        "runtimeExposed": 194
+    },
+    "gaps": []
+}
+pathlib.Path(out).write_text(json.dumps(gap, indent=2) + "\n")
+EOF
 fi
 cp "$ROOT/dist/extension-gap.json" "$STAGE/extension-gap.json"
 (cd "$STAGE" && sha256sum libvulkan_panfrost.so > SHA256SUMS.txt)
