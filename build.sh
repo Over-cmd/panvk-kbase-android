@@ -254,6 +254,10 @@ fi
 ./scripts/fetch-mesa.sh
 ./scripts/apply-patches.sh --profile "${PROFILE}"
 if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
+  echo "=== Diagnóstico os_misc / os_sysinfo / src/util ==="
+  sed -n '390,415p' "${ROOT_DIR}/work/mesa/src/util/os_misc.c" || true
+  sed -n '490,515p' "${ROOT_DIR}/work/mesa/src/util/os_sysinfo.c" || true
+  git -C "${ROOT_DIR}/work/mesa" diff src/util/ || true
   echo "=== Últimas 60 líneas de build/android-bionic.log ==="
   tail -n 60 "${ROOT_DIR}/build/android-bionic.log" 2>/dev/null || true
   echo "=== Errores filtrados en build/android-bionic.log ==="
