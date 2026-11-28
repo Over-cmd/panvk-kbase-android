@@ -254,9 +254,10 @@ fi
 ./scripts/fetch-mesa.sh
 ./scripts/apply-patches.sh --profile "${PROFILE}"
 if ! ./scripts/build-android.sh --profile "${PROFILE}" --api "${ANDROID_API}"; then
-  echo "=== Diagnóstico os_misc / os_sysinfo / src/util ==="
-  sed -n '390,415p' "${ROOT_DIR}/work/mesa/src/util/os_misc.c" || true
-  sed -n '490,515p' "${ROOT_DIR}/work/mesa/src/util/os_sysinfo.c" || true
+  echo "=== Diagnóstico os_misc / os_sysinfo / u_detect_os / src/util ==="
+  sed -n '375,415p' "${ROOT_DIR}/work/mesa/src/util/os_misc.c" || true
+  sed -n '475,515p' "${ROOT_DIR}/work/mesa/src/util/os_sysinfo.c" || true
+  sed -n '1,120p' "${ROOT_DIR}/work/mesa/src/util/u_detect_os.h" || true
   git -C "${ROOT_DIR}/work/mesa" diff src/util/ || true
   echo "=== Contenido de build/android-bionic.cross.ini ==="
   cat "${ROOT_DIR}/build/android-bionic.cross.ini" 2>/dev/null || true
