@@ -49,8 +49,8 @@ if [ ! -f "$SO_PATH" ]; then
   exit 1
 fi
 
-if ! command -v zip >/dev/null 2>&1; then
-  echo "Error: 'zip' command not found in PATH" >&2
+if ! command -v zip >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
+  echo "Error: 'zip' and 'unzip' commands are required" >&2
   exit 1
 fi
 
@@ -64,7 +64,6 @@ cp "$SO_PATH" "$STAGE/libvulkan_panfrost.so"
 SHA256=$(sha256sum "$STAGE/libvulkan_panfrost.so" | awk '{print $1}')
 echo "==> Driver SHA256: $SHA256"
 
-# Generar meta.json en la raíz del directorio de empaquetado ($STAGE)
 FLAVOR="$FLAVOR" SHA256="$SHA256" VERSION="$VERSION" STAGE="$STAGE" python3 - <<'EOF'
 import json
 import os
@@ -91,6 +90,7 @@ meta = {
     "driverVersion": f"Mesa PanVK G52 {ver}",
     "minApi": 30,
     "libraryName": "libvulkan_panfrost.so",
+    "driverAbi": "arm64-v8a",
     "sanitizedArtifactSha256": sha,
 }
 
@@ -99,13 +99,10 @@ with open(meta_path, "w", encoding="utf-8") as f:
     json.dump(meta, f, indent=2)
 EOF
 
-if [ ! -f "$STAGE/meta.json" ]; then
-  echo "Error: Failed to generate $STAGE/meta.json" >&2
+if [ ! -s "$STAGE/meta.json" ]; then
+  echo "Error: meta.json was not created or is empty" >&2
   exit 1
 fi
-
-echo "==> Generated meta.json:"
-cat "$STAGE/meta.json"
 
 ZIP_NAME="PanVK-G52-${VERSION}-${FLAVOR}.zip"
 MANIFEST_NAME="PanVK-G52-${VERSION}-${FLAVOR}-MANIFEST.txt"
@@ -113,7 +110,7 @@ mkdir -p "$OUT_DIR"
 rm -f "$OUT_DIR/$ZIP_NAME" "$OUT_DIR/$MANIFEST_NAME"
 
 if [ "$FLAVOR" = "adrenotools" ]; then
-  (cd "$STAGE" && zip -q -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+  (cd "$STAGE" && zip -q -j "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
 else
   mkdir -p "$STAGE/shims"
   if [ -d "$ROOT/shims" ] && ls "$ROOT"/shims/*.so* >/dev/null 2>&1; then
@@ -123,8 +120,16 @@ else
     (cd "$STAGE" && zip -q -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so shims meta.json)
   else
     rmdir "$STAGE/shims"
-    (cd "$STAGE" && zip -q -r "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
+    (cd "$STAGE" && zip -q -j "$OUT_DIR/$ZIP_NAME" libvulkan_panfrost.so meta.json)
   fi
+fi
+
+echo "==> Package contents:"
+unzip -l "$OUT_DIR/$ZIP_NAME"
+
+if ! unzip -l "$OUT_DIR/$ZIP_NAME" | awk '{print $NF}' | grep -qx "meta.json"; then
+  echo "Error: meta.json is missing from the root of $OUT_DIR/$ZIP_NAME" >&2
+  exit 1
 fi
 
 ZIP_SHA256=$(sha256sum "$OUT_DIR/$ZIP_NAME" | awk '{print $1}')
@@ -142,5 +147,3 @@ Archive SHA256: $ZIP_SHA256
 EOF
 
 echo "==> Successfully created $OUT_DIR/$ZIP_NAME"
-echo "==> Package contents:"
-unzip -l "$OUT_DIR/$ZIP_NAME"
