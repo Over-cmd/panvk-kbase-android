@@ -4,7 +4,14 @@
 Usage: generate-release-manifest.py --profile g615-v11-csf --abi android-aarch64-bionic --stage <dir>
 VALIDATION.json comes from scripts/collect-validation.py (real logs). No skeleton.
 """
-import argparse, json, hashlib, pathlib, subprocess, datetime, sys
+import argparse
+import datetime
+import hashlib
+import json
+import os
+import pathlib
+import subprocess
+import sys
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--profile', required=True)
@@ -15,11 +22,26 @@ a = ap.parse_args()
 stage = pathlib.Path(a.stage)
 root = pathlib.Path(__file__).resolve().parent.parent
 
+
 def sh(*cmd):
     try:
-        return subprocess.check_output(cmd, text=True).strip()
+        return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
     except Exception:
         return 'unknown'
+
+
+def resolve_ndk() -> str:
+    ndk_dir = (
+        os.environ.get('ANDROID_NDK_HOME')
+        or os.environ.get('ANDROID_NDK_LATEST_HOME')
+        or '/usr/local/lib/android/sdk/ndk/27.3.13750724'
+    )
+    p = pathlib.Path(ndk_dir)
+    if p.is_dir():
+        listing = sh('ls', str(p))
+        return listing if listing != 'unknown' else str(p)
+    return 'unknown'
+
 
 # Releases are built from the sources.lock pin + patch series; work/mesa may be a dev tree.
 lock = json.loads((root / 'sources.lock').read_text())
@@ -35,11 +57,14 @@ if (stage / 'runtime-feature-matrix.json').exists():
     matrix_name = 'runtime-feature-matrix.json'
 
 manifest = {
-    'profile': a.profile, 'abi': a.abi,
-    'mesaCommit': mesa_sha, 'mesaVersion': lock.get('mesaVersion'),
+    'profile': a.profile,
+    'abi': a.abi,
+    'mesaCommit': mesa_sha,
+    'mesaVersion': lock.get('mesaVersion'),
     'patchSeriesId': patch_series_id,
-    'buildHost': sh('uname', '-a'), 'date': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    'ndk': sh('ls', '/opt/android-sdk/ndk'),
+    'buildHost': sh('uname', '-a'),
+    'date': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    'ndk': resolve_ndk(),
     'binarySha256': sha,
 }
 if matrix_name:
@@ -64,11 +89,16 @@ validation_path = stage / 'VALIDATION.json'
 collected = False
 if collector.is_file():
     cmd = [
-        sys.executable, str(collector),
-        '--profile', a.profile,
-        '--abi', a.abi,
-        '--stage', str(stage),
-        '--out', str(validation_path),
+        sys.executable,
+        str(collector),
+        '--profile',
+        a.profile,
+        '--abi',
+        a.abi,
+        '--stage',
+        str(stage),
+        '--out',
+        str(validation_path),
         '--require-beta-gates',
     ]
     try:
