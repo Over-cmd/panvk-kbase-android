@@ -1,10 +1,9 @@
 #!/bin/sh
 # package-android-adpkg.sh — Android flat ZIP + provenance
-# Usage: ./scripts/package-android-adpkg.sh --profile g615-v11-csf --version v0.1.0-beta.2
-# minApi=35 until an API 29 rebuild is proven (P16).
+# Usage: ./scripts/package-android-adpkg.sh --profile g615-v11-csf --version 26.3.0-devel
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PROFILE=""; VER="v0.0.0-dev"; PUBLISHED=false
+PROFILE=""; VER="26.3.0-devel"; PUBLISHED=false
 while [ $# -gt 0 ]; do case "$1" in --profile) PROFILE="$2"; shift 2;; --version) VER="$2"; shift 2;; --published) PUBLISHED=true; shift;; *) echo "unknown $1" >&2; exit 2;; esac; done
 [ -n "$PROFILE" ] || { echo "--profile required" >&2; exit 2; }
 SRC="$ROOT/dist/android-$PROFILE/libvulkan_panfrost.so"
@@ -26,25 +25,45 @@ sys.path.insert(0, str(pathlib.Path(root) / "scripts"))
 from driver_identity import identity_of
 ident = identity_of(so)
 upstream = bool(ident and ident["style"] == "upstream")
-name = ident["packageName"] if upstream else "PanVK-kbase-" + version.removeprefix("v")
-drvver = ident["driverInfo"] if upstream else "Mesa 26.3.0-devel"
-desc = (f"{ident['displayName']} (git-{ident['gitSha']}): experimental Vulkan driver for Mali GPUs on the mali_kbase kernel driver. minApi=35 until API 29 rebuild is proven." if upstream else
-        "Experimental PanVK Kbase driver for supported Mali devices. minApi=35 until API 29 rebuild is proven.")
+name = ident["packageName"] if upstream else f"PanVK-kbase-{version.removeprefix('v')}"
+drvver = ident["driverInfo"] if upstream else f"Mesa {version.removeprefix('v')}"
+desc = (
+    f"{ident['displayName']} (git-{ident['gitSha']}): Vulkan driver for Mali GPUs on the mali_kbase kernel driver for Bannerlator (com.winlator.banner); direct-ICD (no wrapper), minApi=28."
+    if upstream
+    else f"Mesa {version.removeprefix('v')} PanVK Kbase driver for supported Mali devices on Bannerlator (com.winlator.banner); direct-ICD (no wrapper), minApi=28."
+)
 prof = {}
 pp = pathlib.Path(root) / "profiles" / f"{profile}.json"
 if pp.is_file():
     prof = json.loads(pp.read_text())
-meta = {"schemaVersion":1,"name":name,"author":"panvk-kbase-android",
- "packageVersion":version.removeprefix("v"),"vendor":"Mesa","driverVersion":drvver,"minApi":35,
- "description":desc,
- "libraryName":"libvulkan_panfrost.so","abi":"android-aarch64-bionic","backend":"panvk-kbase",
- "kernelInterface":"mali_kbase","profile":profile.replace("g615-",""),
- "panArch":prof.get("panArch",11),
- "frontend":prof.get("frontend","CSF"),"kbaseUapi":prof.get("kbaseUapi","1.21"),
- "sourceCommit":sha,"patchSeriesId":psid,"prerelease":True,"published":published == "true",
- "bcCompatibility":{"included":False,"reason":"Phase 6 direct-PanVK composition and correctness workloads blocked"}}
-json.dump(meta, open(out,'w'), indent=2)
-open(out,'a').write('\n')
+meta = {
+    "schemaVersion": 1,
+    "name": name,
+    "author": "panvk-kbase-android",
+    "packageVersion": version.removeprefix("v"),
+    "vendor": "Mesa",
+    "driverVersion": drvver,
+    "minApi": 28,
+    "description": desc,
+    "libraryName": "libvulkan_panfrost.so",
+    "abi": "android-aarch64-bionic",
+    "backend": "panvk-kbase",
+    "kernelInterface": "mali_kbase",
+    "profile": profile.replace("g615-", ""),
+    "panArch": prof.get("panArch", 11),
+    "frontend": prof.get("frontend", "CSF"),
+    "kbaseUapi": prof.get("kbaseUapi", "1.21"),
+    "sourceCommit": sha,
+    "patchSeriesId": psid,
+    "prerelease": True,
+    "published": published == "true",
+    "bcCompatibility": {
+        "included": False,
+        "reason": "Phase 6 direct-PanVK composition and correctness workloads blocked"
+    }
+}
+json.dump(meta, open(out, 'w'), indent=2)
+open(out, 'a').write('\n')
 EOF
 
 # Generar manifiestos ICD de Vulkan para Android aarch64 / Bannerlator
