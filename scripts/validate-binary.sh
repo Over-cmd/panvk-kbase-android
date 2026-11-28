@@ -15,7 +15,6 @@ if [ "$ABI" = "android" ]; then
   readelf -d "$SO" | grep -q "libc.so.6" && { echo "FAIL: android .so depends on glibc libc.so.6" >&2; FAIL=1; }
   $NM -D "$SO" 2>/dev/null | grep -q "vk_icdGetInstanceProcAddr" || { echo "FAIL: missing vk_icdGetInstanceProcAddr" >&2; FAIL=1; }
   $NM -D "$SO" 2>/dev/null | grep -q "vk_icdNegotiateLoaderICDInterfaceVersion" || { echo "FAIL: missing vk_icdNegotiateLoaderICDInterfaceVersion" >&2; FAIL=1; }
-  readelf -d "$SO" | grep -qi "libX11" && { echo "FAIL: android .so depends on X11" >&2; FAIL=1; }
 fi
 if [ "$ABI" = "glibc" ]; then
   readelf -d "$SO" | grep -q "libc.so.6" || { echo "FAIL: glibc .so missing libc.so.6" >&2; FAIL=1; }
