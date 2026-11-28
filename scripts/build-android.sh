@@ -26,17 +26,13 @@ fi
 export PATH="$HOST_TOOLS:$NDK_BIN:$PATH"
 CC_TRIPLE="aarch64-linux-android$API-clang"
 
-# Limpiar BDIR y cross.ini previos para que cambios en link_args no queden cacheados
 rm -rf "$BDIR" "$BDIR.cross.ini"
 mkdir -p "$BDIR"
 sed "s/aarch64-linux-android[0-9]*-clang/$CC_TRIPLE/g" "$ROOT/meson/android-aarch64.ini" > "$BDIR.cross.ini"
 
-# Pin target pkg-config to our NDK-built deps prefix so host /usr/lib .pc
-# files (zlib, libudev, ...) can never leak host paths into the link.
 DEPS_PCDIR="$ROOT/work/android-deps/lib/pkgconfig"
 [ -f "$DEPS_PCDIR/libdrm.pc" ] || "$ROOT/scripts/build-android-deps.sh" --api "$API" --ndk "$NDK" >&2
 
-# X11 WSI: cabeceras + pkg-config + enlace contra librerías X11/XCB de aarch64 si existen.
 X11_DIR="$ROOT/work/android-deps-x11"
 X11_PCDIR="$X11_DIR/lib/pkgconfig"
 X11_LIBDIR="$X11_DIR/lib"
@@ -44,14 +40,15 @@ if [ ! -f "$X11_PCDIR/xcb.pc" ] || [ ! -f "$X11_LIBDIR/libxcb.so" ] || [ ! -f "$
   "$ROOT/scripts/prepare-x11-headers.sh" "$X11_DIR" >&2
 fi
 
+SHIMS_DIR="$ROOT/shims"
 SPIRV_PREFIX="${ANDROID_SPIRV_TOOLS_PREFIX:-/usr/local/android-aarch64}"
 SPIRV_PCDIR="$SPIRV_PREFIX/lib/pkgconfig"
 if [ -d "$DEPS_PCDIR" ]; then
-  python3 - "$BDIR.cross.ini" "$DEPS_PCDIR" "$X11_PCDIR" "$SPIRV_PCDIR" <<'EOF'
+  python3 - "$BDIR.cross.ini" "$DEPS_PCDIR" "$X11_PCDIR" "$SHIMS_DIR" "$SPIRV_PCDIR" <<'EOF'
 import os, sys
-p, d, x, s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+p, d, x, sh, s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 t = open(p).read()
-dirs = [d, x] + ([s] if os.path.isdir(s) else [])
+dirs = [d, x] + ([sh] if os.path.isdir(sh) else []) + ([s] if os.path.isdir(s) else [])
 quoted = ", ".join(f"'{item}'" for item in dirs)
 line = f"pkg_config_libdir = [{quoted}]\n"
 assert '[properties]' in t
@@ -66,44 +63,60 @@ else
 fi
 mkdir -p "$DDIR"
 
-# Legacy opt-in: PANVK_KBASE_RELEASE=<name> sets the release string reported in driverInfo on trees up to
-# rc5g-114 (patch csf-v11/099: "PanVK-kbase <name> (Mesa ...)"). Trees with jm-v7-wip 0120 report
-# driverInfo like upstream Mesa ("Mesa <VERSION> (git-<sha>)") and ignore the define.
-python3 - "$BDIR.cross.ini" "$ROOT" "$X11_LIBDIR" "$SPIRV_PREFIX" "${PANVK_KBASE_RELEASE:-}" <<'EOF'
+python3 - "$BDIR.cross.ini" "$ROOT" "$X11_LIBDIR" "$SHIMS_DIR" "$SPIRV_PREFIX" "${PANVK_KBASE_RELEASE:-}" <<'EOF'
 import os, re, sys
 
-ini_path, root_dir, x11_libdir, spirv_prefix, rel = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+ini_path, root_dir, x11_libdir, shims_dir, spirv_prefix, rel = (
+    sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
+)
 text = open(ini_path, "r", encoding="utf-8").read()
 
 for key in ("c_link_args", "cpp_link_args", "c_args", "cpp_args"):
     text = re.sub(rf"(?m)^[ \t]*{key}[ \t]*=.*(?:\n[ \t]+.*)*\n?", "", text)
 
 base_c_args = []
-shims_inc = os.path.join(root_dir, "shims", "include")
+shims_inc = os.path.join(shims_dir, "include")
 if os.path.isdir(shims_inc):
     base_c_args.append(f"-I{shims_inc}")
 if rel:
     base_c_args.append(f'-DPANVK_KBASE_RELEASE="{rel}"')
 
-x11_libs = []
-if os.path.isdir(x11_libdir):
-    for libname in [
-        "libxcb.so",
-        "libxcb-randr.so",
-        "libxcb-shm.so",
-        "libxshmfence.so",
-        "libXau.so",
-        "libXdmcp.so",
-    ]:
-        full = os.path.join(x11_libdir, libname)
-        if os.path.exists(full):
-            x11_libs.append(full)
+link_files = []
+search_dirs = [shims_dir, x11_libdir]
+candidate_libs = [
+    "libxcb.so",
+    "libxcb-randr.so",
+    "libxcb-shm.so",
+    "libxcb-dri3.so",
+    "libxcb-present.so",
+    "libX11-xcb.so",
+    "libx11-xcb.so",
+    "libXrandr.so",
+    "libxshmfence.so",
+    "libXau.so",
+    "libXdmcp.so",
+    "libandroid-shmem.so",
+    "librt.a",
+]
+seen = set()
+for sdir in search_dirs:
+    if not os.path.isdir(sdir):
+        continue
+    for libname in candidate_libs:
+        full = os.path.join(sdir, libname)
+        if os.path.exists(full) and libname not in seen:
+            seen.add(libname)
+            link_files.append(full)
 
-base_c_links = [f"-L{x11_libdir}"]
+base_c_links = []
+if os.path.isdir(shims_dir):
+    base_c_links.append(f"-L{shims_dir}")
+if os.path.isdir(x11_libdir):
+    base_c_links.append(f"-L{x11_libdir}")
 if os.path.isdir(os.path.join(spirv_prefix, "lib")):
     base_c_links.append(f"-L{spirv_prefix}/lib")
-if x11_libs:
-    base_c_links.extend(["-Wl,--no-as-needed", *x11_libs, "-Wl,--as-needed"])
+if link_files:
+    base_c_links.extend(["-Wl,--no-as-needed", *link_files, "-Wl,--as-needed"])
 
 base_cpp_links = list(base_c_links) + ["-static-libstdc++"]
 
@@ -124,10 +137,6 @@ text = text.rstrip() + "\n" + "\n".join(extra) + "\n"
 open(ini_path, "w", encoding="utf-8").write(text)
 EOF
 
-# Host codegen tools (mesa_clc, vtn_bindgen2, panfrost_compile) must come from a native build:
-# default is derived from MESA (see bootstrap-host-tools.sh) and HOST_TOOLS overrides it.
-# A reconfigure does not re-read the cross file, so a changed release string would be
-# silently ignored: record it in the BDIR and wipe the BDIR when it differs.
 REL_NOW="${PANVK_KBASE_RELEASE:-}"
 if [ -f "$BDIR/build.ninja" ]; then
   REL_OLD="$(cat "$BDIR/.panvk_release" 2>/dev/null || true)"
@@ -169,9 +178,8 @@ if replacements:
 EOF
 fi
 ninja -j"${PANVK_JOBS:-$(nproc)}" -C "$BDIR" >>"$LOG" 2>&1 || {
-  echo "=== Comando de enlace y librerías en $X11_LIBDIR ===" >&2
-  ls -la "$X11_LIBDIR" >&2 || true
-  llvm-nm -D "$X11_LIBDIR/libxcb.so" 2>/dev/null | grep -E "xcb_get_setup|xcb_depth_visuals_iterator" >&2 || true
+  echo "=== Archivos en shims y $X11_LIBDIR ===" >&2
+  ls -la "$SHIMS_DIR" "$X11_LIBDIR" >&2 || true
   grep -n -C 5 "FAILED:" "$LOG" 2>/dev/null || true
   tail -n 25 "$LOG"
   echo "BUILD-FAIL: ninja (log $LOG)" >&2
