@@ -48,6 +48,7 @@ jobs:
             "libllvmspirvlib-${LLVM_VER}-dev" \
             libelf-dev \
             spirv-tools \
+            libspirv-tools-dev \
             bison \
             flex \
             libdrm-dev \
