@@ -93,6 +93,16 @@ jobs:
         # Ajusta el perfil según los nombres soportados por ./scripts/apply-patches.sh en tu repo (ej. g52-v7-jm o bifrost)
         run: ./scripts/apply-patches.sh --profile g52-v7-jm
 
+      - name: Upload patched PanVK source files for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: panvk-source-files-${{ matrix.flavor }}
+          path: |
+            work/mesa/src/panfrost/vulkan/panvk_physical_device.c
+            work/mesa/src/panfrost/lib/kmod/kbase_kmod.c
+          if-no-files-found: ignore
+
       - name: Stamp driver version
         # driverInfo (DXVK HUD, MangoHud, vulkaninfo) muestra esta versión.
         run: |
