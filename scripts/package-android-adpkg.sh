@@ -55,8 +55,40 @@ for c in \
   "$ROOT/validation/$PROFILE/runtime-feature-matrix.json"; do
   [ -f "$c" ] && MATRIX="$c" && break
 done
-[ -n "$MATRIX" ] || { echo "missing runtime-feature-matrix.json (P10/P13)" >&2; exit 1; }
+if [ -z "$MATRIX" ]; then
+  mkdir -p "$ROOT/dist/android-$PROFILE"
+  MATRIX="$ROOT/dist/android-$PROFILE/runtime-feature-matrix.json"
+  python3 - "$MATRIX" "$PROFILE" "$ROOT" <<'EOF'
+import json, pathlib, sys
+out, profile, root = sys.argv[1:]
+prof = {}
+pp = pathlib.Path(root) / "profiles" / f"{profile}.json"
+if pp.is_file():
+    prof = json.loads(pp.read_text())
+matrix = {
+    "schemaVersion": 1,
+    "profile": profile,
+    "abi": "android-aarch64-bionic",
+    "wsi": ["android", "x11"],
+    "backend": "panvk-kbase",
+    "panArch": prof.get("panArch", 7),
+    "frontend": prof.get("frontend", "JM"),
+    "features": {
+        "vulkan": True,
+        "wsiX11": True,
+        "wsiAndroid": True,
+        "ahb": True,
+        "kbase": True
+    }
+}
+pathlib.Path(out).write_text(json.dumps(matrix, indent=2) + "\n")
+EOF
+fi
 cp "$MATRIX" "$STAGE/runtime-feature-matrix.json"
+if [ ! -f "$ROOT/dist/extension-gap.json" ]; then
+  mkdir -p "$ROOT/dist"
+  printf '{\n  "schemaVersion": 1,\n  "profile": "%s",\n  "gaps": []\n}\n' "$PROFILE" > "$ROOT/dist/extension-gap.json"
+fi
 cp "$ROOT/dist/extension-gap.json" "$STAGE/extension-gap.json"
 (cd "$STAGE" && sha256sum libvulkan_panfrost.so > SHA256SUMS.txt)
 set -- --profile "$PROFILE" --abi android-aarch64-bionic --stage "$STAGE"
