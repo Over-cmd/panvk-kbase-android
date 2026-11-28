@@ -65,13 +65,14 @@ SHA256=$(sha256sum "$STAGE/libvulkan_panfrost.so" | awk '{print $1}')
 echo "==> Driver SHA256: $SHA256"
 
 # AdrenoTools / Winlator / Termux X11 meta.json
-FLAVOR="$FLAVOR" SHA256="$SHA256" VERSION="$VERSION" python3 - <<'EOF'
+FLAVOR="$FLAVOR" SHA256="$SHA256" VERSION="$VERSION" STAGE="$STAGE" python3 - <<'EOF'
 import json
 import os
 
 flavor = os.environ["FLAVOR"]
 sha = os.environ["SHA256"]
 ver = os.environ["VERSION"]
+stage = os.environ["STAGE"]
 
 if flavor == "adrenotools":
     name = "PanVK G52"
@@ -97,7 +98,6 @@ meta = {
     "sanitizedArtifactSha256": sha,
 }
 
-stage = os.environ["STAGE"]
 with open(os.path.join(stage, "meta.json"), "w", encoding="utf-8") as f:
     json.dump(meta, f, indent=2)
 EOF
